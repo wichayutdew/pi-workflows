@@ -1,8 +1,8 @@
-import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
 import {
   encodeChildPolicy,
   extractChildPolicy,
@@ -10,34 +10,34 @@ import {
   isSafeStepResultPath,
   parseDelegatedStepResult,
   type ChildStepPolicy,
-} from "../src/integrations/subagents/protocol.ts";
+} from '../src/integrations/subagents/protocol.ts';
 
 async function withPolicy(
   run: (policy: ChildStepPolicy) => Promise<void> | void,
 ): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "pi-workflows-step-"));
+  const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
   const policy: ChildStepPolicy = {
     version: 1,
-    requestId: "request-1",
-    agent: "pi-workflows.step",
-    workflowId: "example",
-    runId: "run-1",
-    stepId: "inspect",
-    stepTitle: "Inspect",
-    policyDigest: "a".repeat(64),
-    capabilityPath: join(directory, "capability"),
-    capabilityToken: "c".repeat(64),
-    resultPath: join(directory, "result.json"),
+    requestId: 'request-1',
+    agent: 'worker',
+    workflowId: 'example',
+    runId: 'run-1',
+    stepId: 'inspect',
+    stepTitle: 'Inspect',
+    policyDigest: 'a'.repeat(64),
+    capabilityPath: join(directory, 'capability'),
+    capabilityToken: 'c'.repeat(64),
+    resultPath: join(directory, 'result.json'),
     permissions: {
-      tools: ["read", "bash"],
-      mcp: ["gitlab/get_merge_request"],
+      tools: ['read', 'bash'],
+      mcp: ['gitlab/get_merge_request'],
       extensions: [],
-      skills: ["planning"],
-      bash: { mode: "read-only", allow: [] },
+      skills: ['planning'],
+      bash: { mode: 'read-only', allow: [] },
     },
-    outcomes: ["ready", "blocked", "submit"],
+    outcomes: ['ready', 'blocked', 'submit'],
     summaryMaxChars: 500,
-    gateSubmitOutcome: "submit",
+    gateSubmitOutcome: 'submit',
   };
   try {
     await run(policy);
@@ -46,35 +46,47 @@ async function withPolicy(
   }
 }
 
-test("child policy envelope is removed before the subagent sees the task", async () => {
+test('child policy envelope is removed before the subagent sees the task', async () => {
   await withPolicy((policy) => {
     const envelope = encodeChildPolicy(policy);
-    const extracted = extractChildPolicy(`${envelope}\n\nInspect the merge request.`);
+    const extracted = extractChildPolicy(
+      `${envelope}\n\nInspect the merge request.`,
+    );
     assert.deepEqual(extracted?.policy, policy);
-    assert.equal(extracted?.task, "Inspect the merge request.");
+    assert.equal(extracted?.task, 'Inspect the merge request.');
+    assert.equal(
+      extractChildPolicy(`Explain this literal: ${envelope}`),
+      undefined,
+    );
+    assert.equal(
+      extractChildPolicy(
+        `Fork context\n\nTask:\n${envelope}\n\nInspect the merge request.`,
+      )?.task,
+      'Fork context\n\nTask:\n\n\nInspect the merge request.',
+    );
     assert.equal(isSafeStepCapabilityPath(policy.capabilityPath), true);
     assert.equal(isSafeStepResultPath(policy.resultPath), true);
-    assert.equal(isSafeStepResultPath(join(tmpdir(), "result.json")), false);
+    assert.equal(isSafeStepResultPath(join(tmpdir(), 'result.json')), false);
   });
 });
 
-test("delegated results are correlated and gate artifacts are required", async () => {
+test('delegated results are correlated and gate artifacts are required', async () => {
   await withPolicy((policy) => {
     assert.deepEqual(
       parseDelegatedStepResult(
         {
           version: 1,
           policyDigest: policy.policyDigest,
-          outcome: "ready",
-          summary: "  inspected  ",
+          outcome: 'ready',
+          summary: '  inspected  ',
         },
         policy,
       ),
       {
         version: 1,
         policyDigest: policy.policyDigest,
-        outcome: "ready",
-        summary: "inspected",
+        outcome: 'ready',
+        summary: 'inspected',
       },
     );
     assert.throws(
@@ -83,8 +95,8 @@ test("delegated results are correlated and gate artifacts are required", async (
           {
             version: 1,
             policyDigest: policy.policyDigest,
-            outcome: "submit",
-            summary: "plan",
+            outcome: 'submit',
+            summary: 'plan',
           },
           policy,
         ),
@@ -95,13 +107,26 @@ test("delegated results are correlated and gate artifacts are required", async (
         parseDelegatedStepResult(
           {
             version: 1,
-            policyDigest: "b".repeat(64),
-            outcome: "ready",
-            summary: "forged",
+            policyDigest: 'b'.repeat(64),
+            outcome: 'ready',
+            summary: 'forged',
           },
           policy,
         ),
       /does not match the active policy/,
+    );
+    assert.throws(
+      () =>
+        parseDelegatedStepResult(
+          {
+            version: 1,
+            policyDigest: policy.policyDigest,
+            outcome: 'ready',
+            summary: '   ',
+          },
+          policy,
+        ),
+      /must not be empty/,
     );
   });
 });

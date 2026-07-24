@@ -1,13 +1,19 @@
-import { tmpdir } from "node:os";
-import { basename, dirname, relative, resolve } from "node:path";
+import { tmpdir } from 'node:os';
+import { basename, dirname, relative, resolve } from 'node:path';
 import type {
   SubagentDelegationRequest as UpstreamDelegationRequest,
   SubagentDelegationResponse as UpstreamDelegationResponse,
   SubagentDelegationStatus as UpstreamDelegationStatus,
   SubagentDelegationUpdate as UpstreamDelegationUpdate,
-} from "pi-subagents/delegation";
-import type { StepPermissions } from "../../config/types.ts";
-import { WORKFLOW_SUBAGENT_NAMESPACE } from "../../config/types.ts";
+} from 'pi-subagents/delegation';
+import {
+  SUBAGENT_RUNTIME_NAME_PATTERN,
+  type StepPermissions,
+} from '../../config/types.ts';
+import {
+  parseWorkflowStepResult,
+  type WorkflowStepResult,
+} from '../../runtime/step-result.ts';
 
 // These released v1 transport values are duplicated as literals because
 // pi-subagents 0.35.1 exports TypeScript source. Node's native type stripping
@@ -15,23 +21,24 @@ import { WORKFLOW_SUBAGENT_NAMESPACE } from "../../config/types.ts";
 // the compile-time compatibility check.
 export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
 export const SUBAGENT_DELEGATION_REQUEST_EVENT =
-  "prompt-template:subagent:request";
+  'prompt-template:subagent:request';
 export const SUBAGENT_DELEGATION_STARTED_EVENT =
-  "prompt-template:subagent:started";
+  'prompt-template:subagent:started';
 export const SUBAGENT_DELEGATION_UPDATE_EVENT =
-  "prompt-template:subagent:update";
+  'prompt-template:subagent:update';
 export const SUBAGENT_DELEGATION_RESPONSE_EVENT =
-  "prompt-template:subagent:response";
+  'prompt-template:subagent:response';
 export const SUBAGENT_DELEGATION_CANCEL_EVENT =
-  "prompt-template:subagent:cancel";
+  'prompt-template:subagent:cancel';
 
-const CHILD_POLICY_OPEN = "<pi-workflows-policy-v1>";
-const CHILD_POLICY_CLOSE = "</pi-workflows-policy-v1>";
+const CHILD_POLICY_OPEN = '<pi-workflows-policy-v1>';
+const CHILD_POLICY_CLOSE = '</pi-workflows-policy-v1>';
+const FORK_TASK_BOUNDARY = '\n\nTask:\n';
 const POLICY_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const CAPABILITY_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
-const RESULT_FILE_NAME = "result.json";
-const CAPABILITY_FILE_NAME = "capability";
-const RESULT_DIRECTORY_PREFIX = "pi-workflows-step-";
+const RESULT_FILE_NAME = 'result.json';
+const CAPABILITY_FILE_NAME = 'capability';
+const RESULT_DIRECTORY_PREFIX = 'pi-workflows-step-';
 
 export type SubagentDelegationRequest = UpstreamDelegationRequest;
 export type SubagentDelegationUpdate = UpstreamDelegationUpdate;
@@ -51,18 +58,14 @@ export interface ChildStepPolicy {
   capabilityToken: string;
   resultPath: string;
   permissions: StepPermissions;
+  /** Exact Bash command strings extracted from a reviewed gate artifact. */
+  approvedBashCommands?: string[];
   outcomes: string[];
   summaryMaxChars: number;
   gateSubmitOutcome?: string;
 }
 
-export interface DelegatedStepResult {
-  version: 1;
-  policyDigest: string;
-  outcome: string;
-  summary: string;
-  artifact?: string;
-}
+export type DelegatedStepResult = WorkflowStepResult;
 
 export interface ExtractedChildPolicy {
   policy: ChildStepPolicy;
@@ -70,36 +73,55 @@ export interface ExtractedChildPolicy {
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
 }
 
 function isStepPermissions(value: unknown): value is StepPermissions {
   if (!isObject(value) || !isObject(value.bash)) return false;
   const bash = value.bash;
   const modeIsValid =
-    bash.mode === "deny" ||
-    bash.mode === "read-only" ||
-    bash.mode === "allow-list" ||
-    bash.mode === "unrestricted";
+    bash.mode === 'deny' ||
+    bash.mode === 'read-only' ||
+    bash.mode === 'allow-list' ||
+    bash.mode === 'unrestricted';
   const rulesAreValid =
     Array.isArray(bash.allow) &&
     bash.allow.every(
       (rule) =>
         isObject(rule) &&
-        typeof rule.executable === "string" &&
+        typeof rule.executable === 'string' &&
         isStringArray(rule.argsPrefix),
     );
+  const approvedSourcesAreValid =
+    bash.approvedSources === undefined ||
+    (isStringArray(bash.approvedSources) &&
+      new Set(bash.approvedSources).size === bash.approvedSources.length &&
+      bash.approvedSources.every(
+        (source) =>
+          source === 'verification-worker' ||
+          source === 'verification-reviewer' ||
+          source === 'remote-actions',
+      ));
+  const approvalShapeIsValid =
+    bash.mode === 'allow-list'
+      ? (bash.allow as unknown[]).length > 0 ||
+        (Array.isArray(bash.approvedSources) && bash.approvedSources.length > 0)
+      : bash.approvedSources === undefined;
   return (
     isStringArray(value.tools) &&
     isStringArray(value.mcp) &&
     isStringArray(value.extensions) &&
     isStringArray(value.skills) &&
     modeIsValid &&
-    rulesAreValid
+    rulesAreValid &&
+    approvedSourcesAreValid &&
+    approvalShapeIsValid
   );
 }
 
@@ -108,9 +130,9 @@ function isSafeStepFilePath(path: string, expectedName: string): boolean {
   const candidate = resolve(path);
   const fromBase = relative(base, candidate);
   return (
-    fromBase !== "" &&
-    !fromBase.startsWith("..") &&
-    !fromBase.includes("\0") &&
+    fromBase !== '' &&
+    !fromBase.startsWith('..') &&
+    !fromBase.includes('\0') &&
     basename(candidate) === expectedName &&
     basename(dirname(candidate)).startsWith(RESULT_DIRECTORY_PREFIX)
   );
@@ -124,123 +146,146 @@ export function isSafeStepCapabilityPath(path: string): boolean {
   return isSafeStepFilePath(path, CAPABILITY_FILE_NAME);
 }
 
-export function isWorkflowSubagentName(name: string | undefined): boolean {
-  return Boolean(name?.startsWith(WORKFLOW_SUBAGENT_NAMESPACE));
+export function isSubagentRuntimeName(
+  name: string | undefined,
+): name is string {
+  return Boolean(name && SUBAGENT_RUNTIME_NAME_PATTERN.test(name));
 }
 
 function parseChildPolicy(value: unknown): ChildStepPolicy {
-  if (!isObject(value)) throw new Error("child policy must be an object");
+  if (!isObject(value)) throw new Error('child policy must be an object');
   const allowedKeys = new Set([
-    "version",
-    "requestId",
-    "agent",
-    "workflowId",
-    "runId",
-    "stepId",
-    "stepTitle",
-    "policyDigest",
-    "capabilityPath",
-    "capabilityToken",
-    "resultPath",
-    "permissions",
-    "outcomes",
-    "summaryMaxChars",
-    "gateSubmitOutcome",
+    'version',
+    'requestId',
+    'agent',
+    'workflowId',
+    'runId',
+    'stepId',
+    'stepTitle',
+    'policyDigest',
+    'capabilityPath',
+    'capabilityToken',
+    'resultPath',
+    'permissions',
+    'approvedBashCommands',
+    'outcomes',
+    'summaryMaxChars',
+    'gateSubmitOutcome',
   ]);
   const unknownKey = Object.keys(value).find((key) => !allowedKeys.has(key));
   if (unknownKey) {
     throw new Error(`child policy has unknown property "${unknownKey}"`);
   }
   const stringFields = [
-    "requestId",
-    "agent",
-    "workflowId",
-    "runId",
-    "stepId",
-    "stepTitle",
-    "policyDigest",
-    "capabilityPath",
-    "capabilityToken",
-    "resultPath",
+    'requestId',
+    'agent',
+    'workflowId',
+    'runId',
+    'stepId',
+    'stepTitle',
+    'policyDigest',
+    'capabilityPath',
+    'capabilityToken',
+    'resultPath',
   ] as const;
   for (const field of stringFields) {
-    if (typeof value[field] !== "string" || !value[field]) {
+    if (typeof value[field] !== 'string' || !value[field]) {
       throw new Error(`child policy ${field} must be a non-empty string`);
     }
   }
-  if (value.version !== 1) throw new Error("unsupported child policy version");
+  if (value.version !== 1) throw new Error('unsupported child policy version');
   if (!POLICY_DIGEST_PATTERN.test(value.policyDigest as string)) {
-    throw new Error("child policy digest is invalid");
+    throw new Error('child policy digest is invalid');
   }
-  if (!isWorkflowSubagentName(value.agent as string)) {
-    throw new Error("child policy agent is outside the workflow namespace");
+  if (!isSubagentRuntimeName(value.agent as string)) {
+    throw new Error('child policy agent is not a valid subagent runtime name');
   }
   if (!CAPABILITY_TOKEN_PATTERN.test(value.capabilityToken as string)) {
-    throw new Error("child policy capability token is invalid");
+    throw new Error('child policy capability token is invalid');
   }
   if (!isSafeStepCapabilityPath(value.capabilityPath as string)) {
-    throw new Error("child policy capability path is outside its temporary directory");
+    throw new Error(
+      'child policy capability path is outside its temporary directory',
+    );
   }
   if (!isSafeStepResultPath(value.resultPath as string)) {
-    throw new Error("child policy result path is outside its temporary directory");
+    throw new Error(
+      'child policy result path is outside its temporary directory',
+    );
   }
   if (
     dirname(resolve(value.capabilityPath as string)) !==
     dirname(resolve(value.resultPath as string))
   ) {
-    throw new Error("child policy files must share one temporary directory");
+    throw new Error('child policy files must share one temporary directory');
   }
   if (!isStepPermissions(value.permissions)) {
-    throw new Error("child policy permissions are invalid");
+    throw new Error('child policy permissions are invalid');
+  }
+  if (
+    value.approvedBashCommands !== undefined &&
+    (!isStringArray(value.approvedBashCommands) ||
+      new Set(value.approvedBashCommands).size !==
+        value.approvedBashCommands.length)
+  ) {
+    throw new Error('child policy approved Bash commands are invalid');
   }
   if (
     !isStringArray(value.outcomes) ||
     value.outcomes.length === 0 ||
     new Set(value.outcomes).size !== value.outcomes.length
   ) {
-    throw new Error("child policy outcomes are invalid");
+    throw new Error('child policy outcomes are invalid');
   }
   if (
     !Number.isInteger(value.summaryMaxChars) ||
     (value.summaryMaxChars as number) < 100 ||
     (value.summaryMaxChars as number) > 50_000
   ) {
-    throw new Error("child policy summaryMaxChars is invalid");
+    throw new Error('child policy summaryMaxChars is invalid');
   }
   if (
     value.gateSubmitOutcome !== undefined &&
-    (typeof value.gateSubmitOutcome !== "string" ||
+    (typeof value.gateSubmitOutcome !== 'string' ||
       !value.outcomes.includes(value.gateSubmitOutcome))
   ) {
-    throw new Error("child policy gate outcome is invalid");
+    throw new Error('child policy gate outcome is invalid');
   }
 
   return value as unknown as ChildStepPolicy;
 }
 
 export function encodeChildPolicy(policy: ChildStepPolicy): string {
-  const encoded = Buffer.from(JSON.stringify(policy), "utf8").toString("base64url");
+  const encoded = Buffer.from(JSON.stringify(policy), 'utf8').toString(
+    'base64url',
+  );
   return `${CHILD_POLICY_OPEN}${encoded}${CHILD_POLICY_CLOSE}`;
 }
 
-export function extractChildPolicy(text: string): ExtractedChildPolicy | undefined {
-  const start = text.indexOf(CHILD_POLICY_OPEN);
-  if (start === -1) return undefined;
+export function extractChildPolicy(
+  text: string,
+): ExtractedChildPolicy | undefined {
+  let start = 0;
+  if (!text.startsWith(CHILD_POLICY_OPEN)) {
+    const forkStart = text.indexOf(`${FORK_TASK_BOUNDARY}${CHILD_POLICY_OPEN}`);
+    if (forkStart === -1) return undefined;
+    start = forkStart + FORK_TASK_BOUNDARY.length;
+  }
   const payloadStart = start + CHILD_POLICY_OPEN.length;
   const end = text.indexOf(CHILD_POLICY_CLOSE, payloadStart);
   if (end === -1 || text.indexOf(CHILD_POLICY_OPEN, payloadStart) !== -1) {
-    throw new Error("delegated task contains an invalid child policy envelope");
+    throw new Error('delegated task contains an invalid child policy envelope');
   }
   const encoded = text.slice(payloadStart, end);
   let decoded: unknown;
   try {
-    decoded = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
   } catch {
-    throw new Error("delegated task child policy cannot be decoded");
+    throw new Error('delegated task child policy cannot be decoded');
   }
-  const task = `${text.slice(0, start)}${text.slice(end + CHILD_POLICY_CLOSE.length)}`
-    .trim();
-  if (!task) throw new Error("delegated task is empty after policy extraction");
+  const task =
+    `${text.slice(0, start)}${text.slice(end + CHILD_POLICY_CLOSE.length)}`.trim();
+  if (!task) throw new Error('delegated task is empty after policy extraction');
   return { policy: parseChildPolicy(decoded), task };
 }
 
@@ -248,56 +293,12 @@ export function parseDelegatedStepResult(
   value: unknown,
   policy: ChildStepPolicy,
 ): DelegatedStepResult {
-  if (!isObject(value)) throw new Error("delegated step result must be an object");
-  const allowedKeys = new Set([
-    "version",
-    "policyDigest",
-    "outcome",
-    "summary",
-    "artifact",
-  ]);
-  const unknownKey = Object.keys(value).find((key) => !allowedKeys.has(key));
-  if (unknownKey) {
-    throw new Error(`delegated step result has unknown property "${unknownKey}"`);
+  try {
+    return parseWorkflowStepResult(value, policy);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message.replaceAll('workflow step', 'delegated step'), {
+      cause: error,
+    });
   }
-  if (value.version !== 1) throw new Error("unsupported delegated step result version");
-  if (value.policyDigest !== policy.policyDigest) {
-    throw new Error("delegated step result does not match the active policy");
-  }
-  if (
-    typeof value.outcome !== "string" ||
-    !policy.outcomes.includes(value.outcome)
-  ) {
-    throw new Error(`delegated step returned invalid outcome "${String(value.outcome)}"`);
-  }
-  if (typeof value.summary !== "string") {
-    throw new Error("delegated step summary must be a string");
-  }
-  const summary = value.summary.trim();
-  if (summary.length > policy.summaryMaxChars) {
-    throw new Error(
-      `delegated step summary exceeds ${policy.summaryMaxChars} characters`,
-    );
-  }
-  if (value.artifact !== undefined && typeof value.artifact !== "string") {
-    throw new Error("delegated step artifact must be a string");
-  }
-  const artifact =
-    typeof value.artifact === "string" ? value.artifact : undefined;
-  if (artifact !== undefined && artifact.length > 200_000) {
-    throw new Error("delegated step artifact exceeds 200000 characters");
-  }
-  if (
-    value.outcome === policy.gateSubmitOutcome &&
-    (!artifact || !artifact.trim())
-  ) {
-    throw new Error("delegated gate outcome requires a non-empty artifact");
-  }
-  return {
-    version: 1,
-    policyDigest: policy.policyDigest,
-    outcome: value.outcome,
-    summary,
-    ...(artifact !== undefined ? { artifact } : {}),
-  };
 }

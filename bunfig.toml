@@ -1,0 +1,7 @@
+[serve.static]
+env = "BUN_PUBLIC_*"
+
+[test]
+coverage = true
+coverageReporter = [ "lcov" ]
+coverageDir = "coverage"

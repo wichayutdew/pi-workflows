@@ -1,5 +1,12 @@
 # Subagent Integration
 
+This integration is optional. A step runs in the main Pi agent when
+`subagent` is omitted; `subagent: {}` opts into the delegated runtime below.
+`subagent: worker` selects the Pi Subagents `worker` runtime while retaining
+the workflow defaults. The object form accepts the same name under `agent`
+when the step also needs execution overrides. Pi Subagents owns discovery and
+applies matching `subagents.agentOverrides` from Pi settings.
+
 ## Event Protocol
 
 ```mermaid
@@ -27,7 +34,7 @@ sequenceDiagram
 flowchart TD
   Request[SubagentDelegationRequest] --> Version[version 1]
   Request --> Id[requestId]
-  Request --> Agent[agent pi-workflows.*]
+  Request --> Agent[discovered agent runtime name]
   Request --> Task[rendered task plus policy envelope]
   Request --> Context[fresh or fork]
   Request --> Cwd[cwd]
@@ -41,18 +48,36 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  PiChild[Pi child process] --> Env{PI_SUBAGENT_CHILD=1 and agent pi-workflows.*?}
+  PiChild[Pi child process] --> Env{PI_SUBAGENT_CHILD=1 and valid runtime name?}
   Env -- no --> Stop[do not register child runtime]
-  Env -- yes --> Runtime[registerSubagentChildRuntime]
-  Runtime --> SessionStart[session_start]
-  SessionStart --> NoTools[setActiveTools empty]
-  NoTools --> Input[input event]
-  Input --> Extract[extract policy envelope]
-  Extract --> Verify[verify child agent and capability]
-  Verify --> Narrow[resolveActiveTools]
+  Env -- yes --> Runtime[register inert policy listeners]
+  Runtime --> Input[input event]
+  Input --> Envelope{workflow policy envelope?}
+  Envelope -- no --> Ordinary[leave ordinary child untouched]
+  Envelope -- yes --> Verify[verify exact child agent and capability]
+  Verify --> Baseline[capture resolved profile active tools]
+  Baseline --> Complete[lazily register workflow_complete_step]
+  Complete --> Narrow[intersect profile tools with step permissions]
   Narrow --> Prompt[append child system prompt]
   Prompt --> Work[child performs step]
 ```
+
+## Agent Resolution
+
+Pi Workflows passes the configured `agent` unchanged through the public
+delegation API. Pi Subagents resolves that name across its builtin, package,
+user, and project agents, then applies `settings.json` precedence and disabled
+state. Pi Workflows deliberately does not read or mirror that settings schema.
+
+An `agentOverrides.worker` entry customizes the discovered builtin `worker`; it
+does not create a new runtime named `worker`. Packaged agents may use qualified
+names such as the bundled `pi-workflows.step`.
+
+The workflow request deliberately owns context, timeout, skills, artifacts, and
+its optional model override. Its skill selection replaces the agent profile's
+normal skills for that step. Pi Subagents' separate acceptance report is
+disabled because `workflow_complete_step` and workflow gates are the
+authoritative completion contract.
 
 ## Result Path
 
@@ -85,16 +110,20 @@ stateDiagram-v2
 
 While blocked, the harness keeps main tools isolated and refuses resume because a child may still be alive.
 
-## Bundled Agent Boundary
+## Agent And Policy Boundary
 
 ```mermaid
 flowchart TD
-  StepMD[agents/step.md] --> Name[name step]
-  StepMD --> Package[package pi-workflows]
-  Package --> RuntimeName[pi-workflows.step]
-  StepMD --> InheritProject[inherits project context]
-  StepMD --> NoSkills[does not inherit parent skills]
-  StepMD --> Fresh[default fresh context]
-  RuntimeName --> Policy[child runtime policy enforcement]
+  Settings[Pi Subagents settings and profile] --> Profile[resolved active tools]
+  Workflow[workflow step permissions] --> Intersection[tool intersection]
+  Profile --> Intersection
+  Capability[single-use workflow capability] --> Completion[workflow_complete_step]
+  Intersection --> Effective[effective child tools]
+  Completion --> Effective
 ```
 
+The selected profile is an outer visibility boundary. Pi Workflows may narrow
+it but cannot activate a normal tool or extension that Pi Subagents excluded.
+The completion tool is the sole addition and appears only after capability
+verification. A custom profile that restricts extension loading must still
+load Pi Workflows for delegated workflow steps.

@@ -1,4 +1,4 @@
-import type { WorkflowStep } from "./config/types.ts";
+import type { WorkflowStep } from './config/types.ts';
 
 interface SourceInfoLike {
   source?: string;
@@ -17,7 +17,7 @@ export interface PreflightInventory {
 }
 
 function sourceMatches(resource: NamedResource, selector: string): boolean {
-  const source = `${resource.sourceInfo?.source ?? ""}\n${resource.sourceInfo?.path ?? ""}`;
+  const source = `${resource.sourceInfo?.source ?? ''}\n${resource.sourceInfo?.path ?? ''}`;
   return source.toLowerCase().includes(selector.toLowerCase());
 }
 
@@ -28,10 +28,10 @@ export function preflightStep(
   const errors: string[] = [];
   const toolNames = new Set(inventory.tools.map((tool) => tool.name));
   const subagentTool = inventory.tools.find(
-    (tool) => tool.name === "subagent" && sourceMatches(tool, "pi-subagents"),
+    (tool) => tool.name === 'subagent' && sourceMatches(tool, 'pi-subagents'),
   );
 
-  if (!subagentTool) {
+  if (step.subagent && !subagentTool) {
     errors.push(
       'pi-subagents is required, but its "subagent" tool is not installed or detectable',
     );
@@ -42,13 +42,28 @@ export function preflightStep(
       errors.push(`required tool "${tool}" is not installed`);
     }
   }
-  if (step.permissions.mcp.length > 0 && !toolNames.has("mcp")) {
-    errors.push('MCP selectors are configured, but the "mcp" proxy tool is not installed');
+  if (step.permissions.mcp.length > 0 && !toolNames.has('mcp')) {
+    errors.push(
+      'MCP selectors are configured, but the "mcp" proxy tool is not installed',
+    );
   }
 
   const extensionResources = [...inventory.tools, ...inventory.commands];
+  if (
+    step.gate?.provider === 'plannotator' &&
+    !step.requires.extensions.includes('plannotator') &&
+    !extensionResources.some((resource) =>
+      sourceMatches(resource, 'plannotator'),
+    )
+  ) {
+    errors.push(
+      'Plannotator is required by this gate, but its extension is not installed or detectable',
+    );
+  }
   for (const extension of step.requires.extensions) {
-    if (!extensionResources.some((resource) => sourceMatches(resource, extension))) {
+    if (
+      !extensionResources.some((resource) => sourceMatches(resource, extension))
+    ) {
       errors.push(`required extension "${extension}" is not detectable`);
     }
   }

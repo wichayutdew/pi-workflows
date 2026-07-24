@@ -15,18 +15,23 @@ flowchart TD
   Harness --> Prompt[src/prompt.ts]
   Harness --> SubClient[src/integrations/subagents/client.ts]
   Harness --> Plannotator[src/integrations/plannotator.ts]
+  Harness --> PromptGate[src/integrations/prompt-gate.ts]
+  Harness --> MainRuntime[src/runtime/main-step-runtime.ts]
   Harness --> Queue[src/runtime/serial-task-queue.ts]
+  Harness --> Approved[src/policy/approved-commands.ts]
 
   Load --> Validate[src/config/validate.ts]
   Load --> Ceiling[src/config/ceiling.ts]
   Load --> Conflict[src/config/command-conflicts.ts]
   Load --> Digest[src/digest.ts]
 
-  ChildRuntime --> ToolPolicy[src/policy/tools.ts]
+  MainRuntime --> ToolPolicy[src/policy/tools.ts]
+  ChildRuntime --> ToolPolicy
   ChildRuntime --> BashPolicy[src/policy/bash.ts]
   ChildRuntime --> BatchPolicy[src/policy/completion-batch.ts]
   ChildRuntime --> Freeze[src/policy/immutable-input.ts]
   ChildRuntime --> Protocol[src/integrations/subagents/protocol.ts]
+  Approved --> BashPolicy
 
   SubClient --> Protocol
 ```
@@ -38,11 +43,11 @@ flowchart TD
   Start[src/index.ts loaded by Pi]
   Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
   ChildEnv -- no --> Parent[Create WorkflowHarness]
-  ChildEnv -- yes --> NameOk{PI_SUBAGENT_CHILD_AGENT starts with pi-workflows.?}
+  ChildEnv -- yes --> NameOk{PI_SUBAGENT_CHILD_AGENT is a valid runtime name?}
   NameOk -- yes --> Child[Register child runtime]
   NameOk -- no --> Noop[Return without registering workflow runtime]
 
-  Parent --> ParentWork[Commands, catalog, checkpoints, delegation]
+  Parent --> ParentWork[Commands, catalog, checkpoints, main execution or delegation]
   Child --> ChildWork[Policy extraction, tool filtering, completion tool]
 ```
 
@@ -50,7 +55,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  WorkflowFile[*.workflow.json] --> Definition[WorkflowDefinition]
+  WorkflowFile[workflow YAML] --> Definition[WorkflowDefinition]
   PromptFiles[prompt markdown] --> Loaded[LoadedWorkflow]
   Definition --> Loaded
   Loaded --> WorkflowDigest[workflow digest]
@@ -59,6 +64,8 @@ flowchart LR
   Loaded --> Run[WorkflowRun]
   Run --> History[StepHistoryEntry list]
   Run --> Gate[PendingGate optional]
+  Run --> Handoff[stepHandoff and lastSummary]
+  Run --> Reviewed[reviewedArtifact provenance]
   Run --> Baseline[baselineTools]
   Run --> Checkpoint[pi-workflows-state-v1 session entry]
 ```
@@ -70,10 +77,14 @@ flowchart TD
   Config[Config layer] -->|normalized definitions| Harness
   Engine[Engine layer] -->|pure state transitions| Harness
   Integrations[Integration layer] -->|events and review requests| Harness
-  Policy[Policy layer] -->|child-side enforcement| ChildRuntime
-  Prompting[Prompt layer] -->|rendered step task| ChildRuntime
+  Policy[Policy layer] -->|main enforcement| MainRuntime
+  Policy -->|child enforcement| ChildRuntime
+  Prompting[Prompt layer] -->|rendered step task| MainRuntime
+  Prompting -->|rendered step task| ChildRuntime
 
-  Harness -->|delegation request| ChildRuntime
+  Harness -->|main step| MainRuntime
+  Harness -->|optional delegation request| ChildRuntime
+  MainRuntime -->|validated result| Harness
   ChildRuntime -->|validated result file| Harness
 ```
 
@@ -81,7 +92,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Settings[Load settings.json] --> UserDir[Load user *.workflow.json]
+  Settings[Load settings.yaml] --> UserDir[Load user workflow YAML]
   UserDir --> AddUser[Add user workflows]
   AddUser --> ProjectEnabled{allowProjectWorkflows?}
   ProjectEnabled -- no --> RuntimeConflicts[Check runtime command conflicts]
@@ -89,7 +100,7 @@ flowchart TD
   Trusted -- no --> Warning[Warn and skip project workflows]
   Trusted -- yes --> CeilingSet{permissionCeiling configured?}
   CeilingSet -- no --> Error[Error and skip project workflows]
-  CeilingSet -- yes --> ProjectDir[Load .pi/workflows/*.workflow.json]
+  CeilingSet -- yes --> ProjectDir[Load project workflow YAML]
   ProjectDir --> CeilingCheck[Apply permission ceiling]
   CeilingCheck --> AddProject[Add nonconflicting project workflows]
   AddProject --> RuntimeConflicts
@@ -97,4 +108,3 @@ flowchart TD
   Error --> RuntimeConflicts
   RuntimeConflicts --> Catalog[WorkflowCatalog with diagnostics]
 ```
-

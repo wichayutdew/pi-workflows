@@ -27,19 +27,22 @@ flowchart TD
 ```mermaid
 flowchart LR
   Human[Human or agent invokes slash command]
-  Files[Workflow JSON and prompt files]
+  Files[Workflow YAML and prompt files]
   Harness[WorkflowHarness parent]
   State[Persisted WorkflowRun checkpoint]
+  Main[Main Pi agent]
   Child[pi-subagents child]
-  Policy[ChildStepPolicy]
+  Policy[Step policy]
   Complete[workflow_complete_step result]
-  Gate[Optional Plannotator gate]
+  Gate[Optional prompt or Plannotator gate]
 
   Files --> Harness
   Human --> Harness
   Harness --> State
   Harness --> Policy
+  Policy --> Main
   Policy --> Child
+  Main --> Complete
   Child --> Complete
   Complete --> Harness
   Complete --> Gate
@@ -59,28 +62,29 @@ flowchart TD
   Root --> Tests[test]
 
   Src --> Index[index.ts<br/>parent or child mode]
-  Src --> Harness[harness.ts<br/>commands, checkpoints, delegation]
+  Src --> Harness[harness.ts<br/>commands, checkpoints, orchestration]
   Src --> Config[config<br/>load, validate, ceiling]
   Src --> Engine[engine<br/>pure state transitions]
   Src --> Policy[policy<br/>tool, Bash, MCP enforcement]
-  Src --> Integrations[integrations<br/>subagents and Plannotator]
+  Src --> Integrations[integrations<br/>prompt, subagents, Plannotator]
   Src --> Prompt[prompt.ts<br/>template rendering]
-  Src --> Runtime[runtime<br/>serial mutation queue]
+  Src --> Runtime[runtime<br/>main steps, completion, serial queue]
 
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
   Agents --> StepAgent[step.md<br/>pi-workflows.step]
   Examples --> MR[mr-comments workflow]
-  Tests --> TestSuite[51 node tests]
+  Tests --> TestSuite[Bun test suite]
 ```
 
 ## Install And Run
 
 ```mermaid
 flowchart TD
-  NPM[npm install] --> Check[npm run check]
-  Check --> InstallSubagents[pi install npm:pi-subagents]
-  InstallSubagents --> InstallLocal[pi install /absolute/path/to/pi-workflows]
+  Bun[bun install] --> Check[bun run check]
+  Check --> InstallLocal[pi install /absolute/path/to/pi-workflows]
+  InstallLocal -. optional .-> InstallSubagents[pi install npm:pi-subagents]
+  InstallLocal -. optional .-> InstallPlan[pi install npm:@plannotator/pi-extension]
   InstallLocal --> Reload["/reload"]
   Reload --> WorkflowReload["/workflow-reload"]
   WorkflowReload --> Start["/workflow-start mr-comments input"]
@@ -88,16 +92,16 @@ flowchart TD
 
 Core commands:
 
-| Command | Purpose |
-| --- | --- |
-| `/workflow-list` | List loaded workflows. |
-| `/workflow-start <id> [input]` | Start by workflow id. |
-| `/<workflow command> [input]` | Start through configured alias. |
-| `/workflow-status` | Show checkpoint status. |
-| `/workflow-pause [reason]` | Cancel child and checkpoint. |
-| `/workflow-resume` | Reload, reconcile, and continue. |
-| `/workflow-abort [reason]` | Abort active run. |
-| `/workflow-reload` | Reload files when no run is active. |
+| Command                        | Purpose                             |
+| ------------------------------ | ----------------------------------- |
+| `/workflow-list`               | List loaded workflows.              |
+| `/workflow-start <id> [input]` | Start by workflow id.               |
+| `/<workflow command> [input]`  | Start through configured alias.     |
+| `/workflow-status`             | Open a live run-status board.       |
+| `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
+| `/workflow-resume`             | Reload, reconcile, and continue.    |
+| `/workflow-abort [reason]`     | Abort active run.                   |
+| `/workflow-reload`             | Reload files when no run is active. |
 
 ## Default Workflow Location
 
@@ -108,7 +112,7 @@ flowchart TD
   Env -- no --> AgentDir{PI_CODING_AGENT_DIR set?}
   AgentDir -- yes --> AgentWorkflows[Use PI_CODING_AGENT_DIR/workflows]
   AgentDir -- no --> Home[Use ~/.pi/agent/workflows]
-  Explicit --> Files[*.workflow.json plus optional settings.json]
+  Explicit --> Files[workflow YAML plus optional settings.yaml]
   AgentWorkflows --> Files
   Home --> Files
 ```

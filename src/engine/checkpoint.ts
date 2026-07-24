@@ -1,9 +1,9 @@
-import { isWorkflowRun, type WorkflowRun } from "./state.ts";
+import { isWorkflowRun, type WorkflowRun } from './state.ts';
 
 export type CheckpointResult =
-  | { status: "none" }
-  | { status: "invalid" }
-  | { status: "valid"; run: WorkflowRun };
+  | { status: 'none' }
+  | { status: 'invalid' }
+  | { status: 'valid'; run: WorkflowRun };
 
 interface SessionEntryLike {
   type?: unknown;
@@ -21,10 +21,10 @@ export function readLatestCheckpoint(
 ): CheckpointResult {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
-    if (entry?.type !== "custom" || entry.customType !== customType) continue;
+    if (entry?.type !== 'custom' || entry.customType !== customType) continue;
     return isWorkflowRun(entry.data)
-      ? { status: "valid", run: structuredClone(entry.data) }
-      : { status: "invalid" };
+      ? { status: 'valid', run: structuredClone(entry.data) }
+      : { status: 'invalid' };
   }
-  return { status: "none" };
+  return { status: 'none' };
 }

@@ -1,10 +1,13 @@
 # Plannotator Integration
 
+Plannotator is optional. A gate with no `provider` uses Pi's built-in prompt
+panel; `provider: plannotator` opts into this integration.
+
 ## Gate State Machine
 
 ```mermaid
 stateDiagram-v2
-  running --> awaiting_gate: child outcome = submitOutcome
+  running --> awaiting_gate: step outcome = submitOutcome
   awaiting_gate --> running: rejectedOutcome
   awaiting_gate --> running: approvedOutcome to next step
   awaiting_gate --> completed: approvedOutcome to $done
@@ -18,19 +21,19 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-  Gate[gate config] --> Provider{provider = plannotator?}
-  Provider -- no --> Reject[reject workflow]
-  Provider -- yes --> Outcomes{approved != rejected?}
+  Gate[gate config] --> Provider{provider}
+  Provider -- omitted or prompt --> Prompt[use built-in Pi review]
+  Provider -- plannotator --> Detect{extension detectable?}
+  Provider -- other --> Reject[reject workflow]
+  Detect -- no --> Preflight[block step preflight]
+  Detect -- yes --> Outcomes{approved != rejected?}
+  Prompt --> Outcomes
   Outcomes -- no --> Reject
   Outcomes -- yes --> Transitions{approved and rejected transitions exist?}
   Transitions -- no --> Reject
   Transitions -- yes --> Submit{submitOutcome absent from transitions?}
   Submit -- no --> Reject
-  Submit -- yes --> Permission{permissions.extensions includes plannotator?}
-  Permission -- no --> Reject
-  Permission -- yes --> Requires{requires.extensions includes plannotator?}
-  Requires -- no --> Reject
-  Requires -- yes --> Accept[valid gated step]
+  Submit -- yes --> Accept[valid gated step]
 ```
 
 ## Review Submission
@@ -91,8 +94,10 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  ChildSummary[child summary] --> Approved[approved gate]
-  Approved --> LastSummary[last.summary for next step]
+  ReviewedArtifact[human-reviewed artifact] --> Approved[approved gate]
+  Approved --> ReviewedState[reviewedArtifact provenance]
+  Approved --> LastSummary[stepHandoff and last.summary]
+  StepSummary[separate step summary] --> NonAuthority[required but not authoritative]
   ReviewerFeedback[review feedback] --> Rejected[rejected gate]
   Rejected --> GateFeedback[gate.feedback for replanning]
 ```

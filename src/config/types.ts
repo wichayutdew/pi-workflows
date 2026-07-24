@@ -1,11 +1,14 @@
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
-export const WORKFLOW_SUBAGENT_NAMESPACE = "pi-workflows.";
+export const SUBAGENT_RUNTIME_NAME_PATTERN =
+  /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 
-export const TERMINAL_TARGETS = ["$done", "$pause"] as const;
+export const TERMINAL_TARGETS = ['$done', '$pause'] as const;
 export type TerminalTarget = (typeof TERMINAL_TARGETS)[number];
 export type StepTarget = string | TerminalTarget;
 
-export type BashMode = "deny" | "read-only" | "allow-list" | "unrestricted";
+export type BashMode = 'deny' | 'read-only' | 'allow-list' | 'unrestricted';
+export type BashApprovalSource =
+  'verification-worker' | 'verification-reviewer' | 'remote-actions';
 
 export interface BashRule {
   executable: string;
@@ -15,6 +18,11 @@ export interface BashRule {
 export interface BashPermission {
   mode: BashMode;
   allow: BashRule[];
+  /**
+   * Exact commands extracted from the most recent human-approved artifact.
+   * They supplement `allow` only inside the correlated step execution.
+   */
+  approvedSources?: BashApprovalSource[];
 }
 
 export interface StepPermissions {
@@ -35,7 +43,7 @@ export interface StepRequirements {
   skills: string[];
 }
 
-export type SubagentContext = "fresh" | "fork";
+export type SubagentContext = 'fresh' | 'fork';
 
 export interface SubagentTurnBudget {
   maxTurns: number;
@@ -45,7 +53,7 @@ export interface SubagentTurnBudget {
 export interface SubagentToolBudget {
   hard: number;
   soft?: number;
-  block?: string[] | "*";
+  block?: string[] | '*';
 }
 
 export interface StepSubagent {
@@ -60,26 +68,34 @@ export interface StepSubagent {
   artifacts: boolean;
 }
 
-export type PromptSpec =
-  | { inline: string }
-  | { file: string };
+export type PromptSpec = { inline: string } | { file: string };
 
-export interface PlannotatorGate {
-  provider: "plannotator";
+interface GateDefinition {
   submitOutcome: string;
   approvedOutcome: string;
   rejectedOutcome: string;
+}
+
+export interface PromptGate extends GateDefinition {
+  provider: 'prompt';
+}
+
+export interface PlannotatorGate extends GateDefinition {
+  provider: 'plannotator';
   timeoutMs: number;
 }
+
+export type WorkflowGate = PromptGate | PlannotatorGate;
 
 export interface WorkflowStep {
   title: string;
   prompt: PromptSpec;
-  subagent: StepSubagent;
+  /** Omit to execute this step in the main Pi agent. */
+  subagent?: StepSubagent;
   permissions: StepPermissions;
   requires: StepRequirements;
   transitions: Record<string, StepTarget>;
-  gate?: PlannotatorGate;
+  gate?: WorkflowGate;
 }
 
 export interface WorkflowDefinition {
@@ -93,7 +109,7 @@ export interface WorkflowDefinition {
   steps: Record<string, WorkflowStep>;
 }
 
-export type WorkflowSourceKind = "user" | "project";
+export type WorkflowSourceKind = 'user' | 'project';
 
 export interface LoadedWorkflow {
   definition: WorkflowDefinition;
@@ -110,7 +126,7 @@ export interface PermissionCeiling {
   extensions: string[];
   skills: string[];
   bash: BashPermission;
-  subagent: SubagentPermissionCeiling;
+  subagent?: SubagentPermissionCeiling;
 }
 
 export interface SubagentPermissionCeiling {
@@ -131,7 +147,7 @@ export interface WorkflowSettings {
 }
 
 export interface ConfigDiagnostic {
-  level: "warning" | "error";
+  level: 'warning' | 'error';
   path: string;
   message: string;
 }
@@ -149,7 +165,7 @@ export const EMPTY_PERMISSIONS: StepPermissions = {
   mcp: [],
   extensions: [],
   skills: [],
-  bash: { mode: "deny", allow: [] },
+  bash: { mode: 'deny', allow: [] },
 };
 
 export const EMPTY_REQUIREMENTS: StepRequirements = {
@@ -159,8 +175,8 @@ export const EMPTY_REQUIREMENTS: StepRequirements = {
 };
 
 export const DEFAULT_STEP_SUBAGENT: StepSubagent = {
-  agent: "pi-workflows.step",
-  context: "fresh",
+  agent: 'pi-workflows.step',
+  context: 'fresh',
   timeoutMs: 900_000,
   artifacts: false,
 };

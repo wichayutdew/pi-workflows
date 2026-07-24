@@ -1,0 +1,5 @@
+.pi-subagents/
+.plannotator/
+coverage/
+dist/
+node_modules/

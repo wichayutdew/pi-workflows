@@ -3,13 +3,13 @@ import type {
   BashRule,
   PermissionCeiling,
   WorkflowDefinition,
-} from "./types.ts";
+} from './types.ts';
 
 function selectorAllowed(
   requested: string,
   ceiling: readonly string[],
 ): boolean {
-  const separator = requested.indexOf("/");
+  const separator = requested.indexOf('/');
   if (separator === -1) return ceiling.includes(requested);
   const server = requested.slice(0, separator);
   return ceiling.includes(server) || ceiling.includes(requested);
@@ -23,14 +23,20 @@ function bashWithinCeiling(
   requested: BashPermission,
   ceiling: BashPermission,
 ): boolean {
-  if (ceiling.mode === "unrestricted") return true;
-  if (requested.mode === "deny") return true;
-  if (ceiling.mode === "deny") return false;
-  if (ceiling.mode === "read-only") return requested.mode === "read-only";
-  if (requested.mode !== "allow-list") return false;
+  if (ceiling.mode === 'unrestricted') return true;
+  if (requested.mode === 'deny') return true;
+  if (ceiling.mode === 'deny') return false;
+  if (ceiling.mode === 'read-only') return requested.mode === 'read-only';
+  if (requested.mode !== 'allow-list') return false;
 
   const allowedRules = new Set(ceiling.allow.map(ruleKey));
-  return requested.allow.every((rule) => allowedRules.has(ruleKey(rule)));
+  const allowedSources = new Set(ceiling.approvedSources ?? []);
+  return (
+    requested.allow.every((rule) => allowedRules.has(ruleKey(rule))) &&
+    (requested.approvedSources ?? []).every((source) =>
+      allowedSources.has(source),
+    )
+  );
 }
 
 export function checkWorkflowAgainstCeiling(
@@ -43,12 +49,16 @@ export function checkWorkflowAgainstCeiling(
     const subagentPath = `workflow.steps.${stepId}.subagent`;
     for (const tool of step.permissions.tools) {
       if (!ceiling.tools.includes(tool)) {
-        errors.push(`${path}.tools: "${tool}" exceeds the user permission ceiling`);
+        errors.push(
+          `${path}.tools: "${tool}" exceeds the user permission ceiling`,
+        );
       }
     }
     for (const selector of step.permissions.mcp) {
       if (!selectorAllowed(selector, ceiling.mcp)) {
-        errors.push(`${path}.mcp: "${selector}" exceeds the user permission ceiling`);
+        errors.push(
+          `${path}.mcp: "${selector}" exceeds the user permission ceiling`,
+        );
       }
     }
     for (const extension of step.permissions.extensions) {
@@ -60,11 +70,20 @@ export function checkWorkflowAgainstCeiling(
     }
     for (const skill of step.permissions.skills) {
       if (!ceiling.skills.includes(skill)) {
-        errors.push(`${path}.skills: "${skill}" exceeds the user permission ceiling`);
+        errors.push(
+          `${path}.skills: "${skill}" exceeds the user permission ceiling`,
+        );
       }
     }
     if (!bashWithinCeiling(step.permissions.bash, ceiling.bash)) {
       errors.push(`${path}.bash: exceeds the user permission ceiling`);
+    }
+    if (!step.subagent) continue;
+    if (!ceiling.subagent) {
+      errors.push(
+        `${subagentPath}: subagent execution exceeds the user permission ceiling`,
+      );
+      continue;
     }
     if (!ceiling.subagent.agents.includes(step.subagent.agent)) {
       errors.push(
@@ -123,7 +142,7 @@ export function checkWorkflowAgainstCeiling(
           `${subagentPath}.toolBudget.hard: exceeds the user permission ceiling`,
         );
       }
-      if (step.subagent.toolBudget.block !== "*") {
+      if (step.subagent.toolBudget.block !== '*') {
         errors.push(
           `${subagentPath}.toolBudget.block: must be "*" for a project workflow`,
         );
