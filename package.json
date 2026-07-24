@@ -1,0 +1,51 @@
+{
+  "name": "pi-workflows",
+  "version": "0.1.0",
+  "description": "A declarative, pauseable workflow harness for Pi",
+  "license": "Apache-2.0",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "workflow",
+    "agent"
+  ],
+  "files": [
+    "src",
+    "agents",
+    "examples",
+    "schemas",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "subagents": {
+      "agents": [
+        "./agents"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "pi-subagents": ">=0.35.1",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.81.1",
+    "@types/node": "^24.0.0",
+    "pi-subagents": "^0.35.1",
+    "typebox": "^1.1.38",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

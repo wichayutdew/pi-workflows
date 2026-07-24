@@ -1,0 +1,513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi workflow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "command",
+    "description",
+    "start",
+    "steps"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "command": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifier"
+        },
+        {
+          "not": {
+            "enum": [
+              "arminsayshi",
+              "changelog",
+              "clone",
+              "compact",
+              "copy",
+              "debug",
+              "dementedelves",
+              "export",
+              "fork",
+              "hotkeys",
+              "import",
+              "login",
+              "logout",
+              "model",
+              "name",
+              "new",
+              "quit",
+              "reload",
+              "resume",
+              "scoped-models",
+              "session",
+              "settings",
+              "share",
+              "tree",
+              "trust",
+              "workflow-abort",
+              "workflow-list",
+              "workflow-pause",
+              "workflow-reload",
+              "workflow-resume",
+              "workflow-start",
+              "workflow-status"
+            ]
+          }
+        }
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "start": {
+      "$ref": "#/$defs/identifier"
+    },
+    "maxStepVisits": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 5
+    },
+    "summaryMaxChars": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 50000,
+      "default": 4000
+    },
+    "steps": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "resourceName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_@./:+-]+$"
+    },
+    "prompt": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "file"
+          ],
+          "properties": {
+            "file": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "bashRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executable"
+      ],
+      "properties": {
+        "executable": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./+-]+$"
+        },
+        "argsPrefix": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\S+$"
+          },
+          "default": []
+        }
+      }
+    },
+    "bash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "deny",
+            "read-only",
+            "allow-list",
+            "unrestricted"
+          ]
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bashRule"
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          }
+        },
+        "mcp": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+(?:/[A-Za-z0-9_.:-]+)?$"
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "bash": {
+          "$ref": "#/$defs/bash"
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        }
+      }
+    },
+    "subagentTurnBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxTurns"
+      ],
+      "properties": {
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "graceTurns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "subagentToolBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hard"
+      ],
+      "properties": {
+        "soft": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "hard": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "block": {
+          "oneOf": [
+            {
+              "const": "*"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]+$"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "subagent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string",
+          "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$",
+          "default": "pi-workflows.step"
+        },
+        "context": {
+          "enum": [
+            "fresh",
+            "fork"
+          ],
+          "default": "fresh"
+        },
+        "model": {
+          "$ref": "#/$defs/resourceName"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 86400000,
+          "default": 900000
+        },
+        "turnBudget": {
+          "$ref": "#/$defs/subagentTurnBudget"
+        },
+        "toolBudget": {
+          "$ref": "#/$defs/subagentToolBudget"
+        },
+        "artifacts": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "subagentCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agents",
+        "contexts",
+        "models",
+        "maxTimeoutMs",
+        "maxTurns",
+        "maxGraceTurns",
+        "maxToolCalls",
+        "artifacts"
+      ],
+      "properties": {
+        "agents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
+          }
+        },
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "fresh",
+              "fork"
+            ]
+          }
+        },
+        "models": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "maxTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 86400000
+        },
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxGraceTurns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "artifacts": {
+          "type": "boolean"
+        }
+      }
+    },
+    "permissionCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subagent"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          }
+        },
+        "mcp": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+(?:/[A-Za-z0-9_.:-]+)?$"
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceName"
+          }
+        },
+        "bash": {
+          "$ref": "#/$defs/bash"
+        },
+        "subagent": {
+          "$ref": "#/$defs/subagentCeiling"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "submitOutcome",
+        "approvedOutcome",
+        "rejectedOutcome"
+      ],
+      "properties": {
+        "provider": {
+          "const": "plannotator"
+        },
+        "submitOutcome": {
+          "$ref": "#/$defs/identifier"
+        },
+        "approvedOutcome": {
+          "$ref": "#/$defs/identifier"
+        },
+        "rejectedOutcome": {
+          "$ref": "#/$defs/identifier"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000,
+          "default": 5000
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt",
+        "transitions"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt": {
+          "$ref": "#/$defs/prompt"
+        },
+        "subagent": {
+          "$ref": "#/$defs/subagent"
+        },
+        "permissions": {
+          "$ref": "#/$defs/permissions"
+        },
+        "requires": {
+          "$ref": "#/$defs/requires"
+        },
+        "transitions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?:\\$done|\\$pause|[a-z][a-z0-9-]{0,63})$"
+          }
+        },
+        "gate": {
+          "$ref": "#/$defs/gate"
+        }
+      }
+    }
+  }
+}
