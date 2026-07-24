@@ -3,11 +3,15 @@ import test from 'node:test';
 import { createRun, isWorkflowRun } from '../src/engine/state.ts';
 import {
   advanceRun,
+  abortRun,
+  attachGateReviewId,
   beginGate,
+  failGate,
   pauseRun,
   reconcileRun,
   resolveGate,
   resumeRun,
+  storeGateResolution,
 } from '../src/engine/transitions.ts';
 import { buildDelegatedStepTask } from '../src/prompt.ts';
 import { baseWorkflow, loadedWorkflow } from './helpers.ts';
@@ -109,6 +113,10 @@ test('manual pause preserves an in-flight gate', () => {
   assert.equal(run.status, 'paused');
   assert.equal(run.pausedFrom, 'awaiting-gate');
   assert.equal(run.pendingGate?.artifact, '# Plan');
+  assert.equal(
+    resumeRun({ ...run, pausedFrom: undefined }, 4).status,
+    'awaiting-gate',
+  );
 });
 
 test('gate rejection follows its configured transition with feedback', () => {
@@ -264,6 +272,125 @@ test('configuration changes restart the earliest changed completed step', () => 
   assert.equal(result.run?.currentStepId, 'inspect');
   assert.equal(result.run?.history.length, 0);
   assert.equal(result.run?.status, 'paused');
+});
+
+test('transition helpers reject invalid state and preserve gate lifecycle details', () => {
+  const raw = baseWorkflow();
+  raw.steps = {
+    plan: {
+      prompt: 'Plan',
+      permissions: { extensions: ['plannotator'] },
+      requires: { extensions: ['plannotator'] },
+      gate: {
+        provider: 'plannotator',
+        submitOutcome: 'submit',
+        approvedOutcome: 'approved',
+        rejectedOutcome: 'rejected',
+      },
+      transitions: { approved: '$done', rejected: 'plan' },
+    },
+  };
+  raw.start = 'plan';
+  const workflow = loadedWorkflow(raw);
+  const run = createRun(workflow, '', [], 'run-errors', 1);
+
+  assert.equal(resumeRun(run, 2), run);
+  assert.equal(
+    pauseRun({ ...run, status: 'completed' }, '', 2).pauseReason,
+    undefined,
+  );
+  assert.equal(abortRun(run, '', 2).status, 'aborted');
+  assert.throws(
+    () =>
+      advanceRun(
+        workflow,
+        { ...run, status: 'paused', pausedFrom: 'running' },
+        'approved',
+        '',
+        2,
+      ),
+    /only a running workflow/,
+  );
+  assert.throws(
+    () =>
+      advanceRun(
+        workflow,
+        { ...run, currentStepId: 'missing' },
+        'approved',
+        '',
+        2,
+      ),
+    /no longer exists/,
+  );
+  assert.throws(
+    () => advanceRun(workflow, run, 'submit', '', 2),
+    /configured gate/,
+  );
+  assert.throws(() => advanceRun(workflow, run, 'unknown', '', 2), /not valid/);
+  assert.throws(
+    () => beginGate(workflow, run, 'approved', '# Plan', 'request-1', 2),
+    /expects outcome/,
+  );
+  assert.throws(
+    () => beginGate(workflow, run, 'submit', ' ', 'request-1', 2),
+    /non-empty artifact/,
+  );
+  assert.throws(
+    () => beginGate(workflow, run, 'submit', '# Plan', '', 2),
+    /request id/,
+  );
+  assert.throws(
+    () =>
+      beginGate(
+        workflow,
+        { ...run, status: 'completed' },
+        'submit',
+        '# Plan',
+        'request-1',
+        2,
+      ),
+    /requires a running workflow/,
+  );
+  assert.throws(
+    () => attachGateReviewId(run, 'review-1', 2),
+    /no pending gate/,
+  );
+  assert.throws(
+    () =>
+      resolveGate(
+        workflow,
+        run,
+        { approved: true, feedback: '', resolvedAt: 2 },
+        2,
+      ),
+    /no pending gate/,
+  );
+
+  const pending = beginGate(workflow, run, 'submit', '# Plan', 'request-1', 2);
+  assert.equal(
+    attachGateReviewId(pending, 'review-1', 3).pendingGate?.reviewId,
+    'review-1',
+  );
+  assert.equal(
+    storeGateResolution(
+      run,
+      { approved: true, feedback: '', resolvedAt: 3 },
+      3,
+    ),
+    run,
+  );
+  assert.equal(failGate(run, 'ignored', 3), run);
+  assert.equal(failGate(pending, 'offline', 3).gateFeedback, 'offline');
+  assert.throws(
+    () =>
+      resolveGate(
+        workflow,
+        { ...pending, currentStepId: 'other' },
+        { approved: true, feedback: '', resolvedAt: 3 },
+        3,
+      ),
+    /does not match/,
+  );
 });
 
 test('persisted state validator rejects malformed history and gates', () => {
