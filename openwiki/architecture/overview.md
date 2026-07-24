@@ -1,0 +1,100 @@
+# Architecture Overview
+
+## Module Topology
+
+```mermaid
+flowchart TD
+  Pi[Pi extension host] --> Entry[src/index.ts]
+
+  Entry -->|parent mode| Harness[src/harness.ts<br/>WorkflowHarness]
+  Entry -->|child mode| ChildRuntime[src/integrations/subagents/child-runtime.ts]
+
+  Harness --> Commands[src/commands.ts]
+  Harness --> Load[src/config/load.ts]
+  Harness --> Engine[src/engine/transitions.ts]
+  Harness --> Prompt[src/prompt.ts]
+  Harness --> SubClient[src/integrations/subagents/client.ts]
+  Harness --> Plannotator[src/integrations/plannotator.ts]
+  Harness --> Queue[src/runtime/serial-task-queue.ts]
+
+  Load --> Validate[src/config/validate.ts]
+  Load --> Ceiling[src/config/ceiling.ts]
+  Load --> Conflict[src/config/command-conflicts.ts]
+  Load --> Digest[src/digest.ts]
+
+  ChildRuntime --> ToolPolicy[src/policy/tools.ts]
+  ChildRuntime --> BashPolicy[src/policy/bash.ts]
+  ChildRuntime --> BatchPolicy[src/policy/completion-batch.ts]
+  ChildRuntime --> Freeze[src/policy/immutable-input.ts]
+  ChildRuntime --> Protocol[src/integrations/subagents/protocol.ts]
+
+  SubClient --> Protocol
+```
+
+## Parent And Child Modes
+
+```mermaid
+flowchart TD
+  Start[src/index.ts loaded by Pi]
+  Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
+  ChildEnv -- no --> Parent[Create WorkflowHarness]
+  ChildEnv -- yes --> NameOk{PI_SUBAGENT_CHILD_AGENT starts with pi-workflows.?}
+  NameOk -- yes --> Child[Register child runtime]
+  NameOk -- no --> Noop[Return without registering workflow runtime]
+
+  Parent --> ParentWork[Commands, catalog, checkpoints, delegation]
+  Child --> ChildWork[Policy extraction, tool filtering, completion tool]
+```
+
+## Data Model
+
+```mermaid
+flowchart LR
+  WorkflowFile[*.workflow.json] --> Definition[WorkflowDefinition]
+  PromptFiles[prompt markdown] --> Loaded[LoadedWorkflow]
+  Definition --> Loaded
+  Loaded --> WorkflowDigest[workflow digest]
+  Loaded --> StepDigests[step digests]
+
+  Loaded --> Run[WorkflowRun]
+  Run --> History[StepHistoryEntry list]
+  Run --> Gate[PendingGate optional]
+  Run --> Baseline[baselineTools]
+  Run --> Checkpoint[pi-workflows-state-v1 session entry]
+```
+
+## Responsibility Split
+
+```mermaid
+flowchart TD
+  Config[Config layer] -->|normalized definitions| Harness
+  Engine[Engine layer] -->|pure state transitions| Harness
+  Integrations[Integration layer] -->|events and review requests| Harness
+  Policy[Policy layer] -->|child-side enforcement| ChildRuntime
+  Prompting[Prompt layer] -->|rendered step task| ChildRuntime
+
+  Harness -->|delegation request| ChildRuntime
+  ChildRuntime -->|validated result file| Harness
+```
+
+## Catalog Loading
+
+```mermaid
+flowchart TD
+  Settings[Load settings.json] --> UserDir[Load user *.workflow.json]
+  UserDir --> AddUser[Add user workflows]
+  AddUser --> ProjectEnabled{allowProjectWorkflows?}
+  ProjectEnabled -- no --> RuntimeConflicts[Check runtime command conflicts]
+  ProjectEnabled -- yes --> Trusted{Project trusted?}
+  Trusted -- no --> Warning[Warn and skip project workflows]
+  Trusted -- yes --> CeilingSet{permissionCeiling configured?}
+  CeilingSet -- no --> Error[Error and skip project workflows]
+  CeilingSet -- yes --> ProjectDir[Load .pi/workflows/*.workflow.json]
+  ProjectDir --> CeilingCheck[Apply permission ceiling]
+  CeilingCheck --> AddProject[Add nonconflicting project workflows]
+  AddProject --> RuntimeConflicts
+  Warning --> RuntimeConflicts
+  Error --> RuntimeConflicts
+  RuntimeConflicts --> Catalog[WorkflowCatalog with diagnostics]
+```
+
