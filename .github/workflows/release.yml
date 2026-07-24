@@ -76,7 +76,7 @@ jobs:
 
       - name: Publish package to npm
         if: steps.release_bump.outputs.bump != ''
-        run: npm publish release-artifact/*.tgz --access public
+        run: npm publish ./release-artifact/*.tgz --access public
 
       - name: Create GitHub Release
         if: steps.release_bump.outputs.bump != ''
