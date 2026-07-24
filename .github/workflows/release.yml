@@ -21,25 +21,25 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
+          bun-version: 1.3.14
 
       - name: Determine semantic version bump
         id: release_bump
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: node .github/scripts/release-bump.mjs
+        run: bun .github/scripts/release-bump.mjs
 
       - name: Install dependencies
         if: steps.release_bump.outputs.bump != ''
-        run: npm ci
+        run: bun ci
 
       - name: Verify merged source
         if: steps.release_bump.outputs.bump != ''
-        run: npm run check
+        run: bun run check
 
       - name: Bump package version
         if: steps.release_bump.outputs.bump != ''
@@ -47,12 +47,12 @@ jobs:
         env:
           BUMP: ${{ steps.release_bump.outputs.bump }}
         run: |
-          npm version "$BUMP" --no-git-tag-version --ignore-scripts
-          echo "version=$(node --print \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+          bun pm version "$BUMP" --no-git-tag-version
+          echo "version=$(bun --eval \"console.log(require('./package.json').version)\")" >> "$GITHUB_OUTPUT"
 
       - name: Pack plugin artifact
         if: steps.release_bump.outputs.bump != ''
-        run: npm pack --pack-destination release-artifact
+        run: bun pm pack --destination release-artifact
 
       - name: Commit and tag release
         if: steps.release_bump.outputs.bump != ''
@@ -61,7 +61,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
+          git add package.json bun.lock
           git commit -m "chore(release): v$VERSION [skip ci]"
           git tag "v$VERSION"
           git push origin HEAD:${{ github.event.repository.default_branch }} --follow-tags
