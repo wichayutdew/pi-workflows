@@ -1,5 +1,11 @@
 # Subagent Integration
 
+This integration is optional. A step runs in the main Pi agent when
+`subagent` is omitted; `subagent: {}` opts into the delegated runtime below.
+`subagent: pi-workflows.inspector` selects a named workflow agent while
+retaining the defaults. The object form accepts the same name under `agent`
+when the step also needs execution overrides.
+
 ## Event Protocol
 
 ```mermaid
@@ -97,4 +103,3 @@ flowchart TD
   StepMD --> Fresh[default fresh context]
   RuntimeName --> Policy[child runtime policy enforcement]
 ```
-

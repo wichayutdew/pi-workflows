@@ -7,7 +7,7 @@ export function freezeToolInput<T extends object>(input: T): T {
   const seen = new WeakSet<object>();
 
   const freeze = (value: unknown): void => {
-    if (value === null || typeof value !== "object" || seen.has(value)) return;
+    if (value === null || typeof value !== 'object' || seen.has(value)) return;
     seen.add(value);
     for (const child of Object.values(value)) freeze(child);
     Object.freeze(value);

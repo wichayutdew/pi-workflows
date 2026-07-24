@@ -12,11 +12,11 @@ flowchart TD
 
   Steps --> Step[WorkflowStep]
   Step --> Prompt[inline prompt or prompt file]
-  Step --> Subagent[subagent options]
+  Step --> Subagent[optional subagent delegation]
   Step --> Permissions[permissions]
   Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
-  Step --> Gate[optional Plannotator gate]
+  Step --> Gate[optional prompt or Plannotator gate]
 ```
 
 ## Minimal Two-Step Graph
@@ -30,42 +30,37 @@ stateDiagram-v2
   implement --> paused: blocked
 ```
 
-```json
-{
-  "version": 1,
-  "id": "fix",
-  "command": "fix",
-  "description": "Inspect, implement, and verify a change",
-  "start": "inspect",
-  "steps": {
-    "inspect": {
-      "prompt": "Inspect {{workflow.input}} without modifying files.",
-      "permissions": {
-        "tools": ["read", "grep", "bash"],
-        "bash": { "mode": "read-only" }
-      },
-      "transitions": {
-        "ready": "implement",
-        "blocked": "$pause"
-      }
-    },
-    "implement": {
-      "prompt": { "file": "prompts/implement.md" },
-      "permissions": {
-        "tools": ["read", "edit", "write", "bash"],
-        "bash": {
-          "mode": "allow-list",
-          "allow": [{ "executable": "npm", "argsPrefix": ["test"] }]
-        }
-      },
-      "transitions": {
-        "done": "$done",
-        "blocked": "$pause"
-      }
-    }
-  }
-}
+```yaml
+version: 1
+id: fix
+command: fix
+description: Inspect, implement, and verify a change
+start: inspect
+steps:
+  inspect:
+    prompt: Inspect {{workflow.input}} without modifying files.
+    permissions:
+      tools: [read, grep, bash]
+      bash: { mode: read-only }
+    transitions:
+      ready: implement
+      blocked: $pause
+
+  implement:
+    prompt: { file: prompts/implement.md }
+    permissions:
+      tools: [read, edit, write, bash]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: bun
+            argsPrefix: [test]
+    transitions:
+      done: $done
+      blocked: $pause
 ```
+
+Workflow definitions use YAML with either the `.yaml` or `.yml` suffix.
 
 ## Prompt Rendering
 
@@ -77,20 +72,20 @@ flowchart LR
   Gate[gate feedback] --> Values
   Prompt[inline or file prompt] --> Render[renderTemplate]
   Values --> Render
-  Render --> Task[delegated child task]
+  Render --> Task[active step task]
 ```
 
 Supported variables:
 
-| Variable | Source |
-| --- | --- |
-| `{{workflow.input}}` | Command input. |
-| `{{workflow.id}}` | Workflow definition. |
-| `{{run.id}}` | Runtime run. |
-| `{{step.id}}` | Current step. |
-| `{{step.title}}` | Current step. |
-| `{{last.summary}}` | Previous completed step. |
-| `{{gate.feedback}}` | Latest rejected gate. |
+| Variable             | Source                                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `{{workflow.input}}` | Command input.                                                                                     |
+| `{{workflow.id}}`    | Workflow definition.                                                                               |
+| `{{run.id}}`         | Runtime run.                                                                                       |
+| `{{step.id}}`        | Current step.                                                                                      |
+| `{{step.title}}`     | Current step.                                                                                      |
+| `{{last.summary}}`   | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt. |
+| `{{gate.feedback}}`  | Latest rejected gate.                                                                              |
 
 ## Prompt File Safety
 
@@ -117,8 +112,8 @@ flowchart TD
   Permissions[permissions] --> Tools[tools exact Pi tool names]
   Permissions --> MCP[mcp server or server/tool selectors]
   Permissions --> Extensions[extension source selectors]
-  Permissions --> Skills[skills injected into child]
-  Permissions --> Bash[bash mode and allow rules]
+  Permissions --> Skills[intended skills; injected into delegated child]
+  Permissions --> Bash[bash mode, allow rules, approved sources]
   Requires[requires] --> ReqTools[required tools]
   Requires --> ReqExt[required extensions]
   Requires --> ReqSkills[required skills]
@@ -127,7 +122,50 @@ flowchart TD
   ReqSkills --> Preflight
 ```
 
+## Reviewed Bash Sources
+
+An `allow-list` may supplement static rules with exact commands from the run's
+most recent human-approved gate artifact:
+
+| `approvedSources` value | Fenced JSON path                    |
+| ----------------------- | ----------------------------------- |
+| `verification-worker`   | `repositories[].worker[].command`   |
+| `verification-reviewer` | `repositories[].reviewer[].command` |
+| `remote-actions`        | Bash `actions[].input.command`      |
+
+The step must include `bash` in `permissions.tools`. Exact strings are filtered
+by source and correlated into the step policy. Static `gh api` and `glab api`
+rules are default-GET-only; API mutations and non-force pushes require an exact
+reviewed `remote-actions` command. Ordinary summaries and legacy checkpoints
+without reviewed-artifact provenance grant nothing.
+
+`approvedSources` selects provenance, not an executable family. For example,
+`verification-worker` extracts only exact
+`repositories[].worker[].command` strings from the latest approved artifact.
+Changing even one argument produces a different, unauthorized command.
+
+## Compact Bash Rules
+
+Use `argsPrefix` for one ordered token sequence. Use `argsPrefixes` to express
+several OR alternatives without repeating the executable:
+
+```yaml
+allow:
+  - executable: git
+    argsPrefixes: [[status], [diff], [show, --stat]]
+```
+
+This expands to three normalized rules. An empty inner alternative is rejected;
+omit both fields when deliberately allowing all safely tokenized arguments for
+that executable.
+
 ## Subagent Options
+
+Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
+into pi-subagents with the defaults shown below. Use a full workflow-agent
+runtime name such as `subagent: pi-workflows.inspector` when only the agent
+changes; use the object form for additional overrides. The integration is
+optional.
 
 ```mermaid
 flowchart TD
@@ -158,4 +196,3 @@ stateDiagram-v2
 ```
 
 Business intent: inspect merge-request feedback, create a reviewed plan, implement it, then verify the result.
-

@@ -3,14 +3,7 @@
   "title": "Pi workflow",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "id",
-    "command",
-    "description",
-    "start",
-    "steps"
-  ],
+  "required": ["version", "id", "command", "description", "start", "steps"],
   "properties": {
     "$schema": {
       "type": "string"
@@ -105,6 +98,10 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_@./:+-]+$"
     },
+    "workflowSubagentName": {
+      "type": "string",
+      "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
+    },
     "prompt": {
       "oneOf": [
         {
@@ -114,9 +111,7 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "file"
-          ],
+          "required": ["file"],
           "properties": {
             "file": {
               "type": "string",
@@ -129,8 +124,13 @@
     "bashRule": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "executable"
+      "required": ["executable"],
+      "allOf": [
+        {
+          "not": {
+            "required": ["argsPrefix", "argsPrefixes"]
+          }
+        }
       ],
       "properties": {
         "executable": {
@@ -144,28 +144,87 @@
             "pattern": "^\\S+$"
           },
           "default": []
+        },
+        "argsPrefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^\\S+$"
+            }
+          }
         }
       }
     },
     "bash": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "mode"
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "allow-list"
+              }
+            },
+            "required": ["mode"]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": ["allow"],
+                "properties": {
+                  "allow": {
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "required": ["approvedSources"],
+                "properties": {
+                  "approvedSources": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          },
+          "else": {
+            "properties": {
+              "allow": {
+                "maxItems": 0
+              },
+              "approvedSources": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
       ],
       "properties": {
         "mode": {
-          "enum": [
-            "deny",
-            "read-only",
-            "allow-list",
-            "unrestricted"
-          ]
+          "enum": ["deny", "read-only", "allow-list", "unrestricted"]
         },
         "allow": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/bashRule"
+          }
+        },
+        "approvedSources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "verification-worker",
+              "verification-reviewer",
+              "remote-actions"
+            ]
           }
         }
       }
@@ -240,9 +299,7 @@
     "subagentTurnBudget": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "maxTurns"
-      ],
+      "required": ["maxTurns"],
       "properties": {
         "maxTurns": {
           "type": "integer",
@@ -259,9 +316,7 @@
     "subagentToolBudget": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "hard"
-      ],
+      "required": ["hard"],
       "properties": {
         "soft": {
           "type": "integer",
@@ -292,41 +347,44 @@
       }
     },
     "subagent": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "agent": {
-          "type": "string",
-          "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$",
-          "default": "pi-workflows.step"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/workflowSubagentName"
         },
-        "context": {
-          "enum": [
-            "fresh",
-            "fork"
-          ],
-          "default": "fresh"
-        },
-        "model": {
-          "$ref": "#/$defs/resourceName"
-        },
-        "timeoutMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "maximum": 86400000,
-          "default": 900000
-        },
-        "turnBudget": {
-          "$ref": "#/$defs/subagentTurnBudget"
-        },
-        "toolBudget": {
-          "$ref": "#/$defs/subagentToolBudget"
-        },
-        "artifacts": {
-          "type": "boolean",
-          "default": false
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/workflowSubagentName",
+              "default": "pi-workflows.step"
+            },
+            "context": {
+              "enum": ["fresh", "fork"],
+              "default": "fresh"
+            },
+            "model": {
+              "$ref": "#/$defs/resourceName"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000,
+              "default": 900000
+            },
+            "turnBudget": {
+              "$ref": "#/$defs/subagentTurnBudget"
+            },
+            "toolBudget": {
+              "$ref": "#/$defs/subagentToolBudget"
+            },
+            "artifacts": {
+              "type": "boolean",
+              "default": false
+            }
+          }
         }
-      }
+      ]
     },
     "subagentCeiling": {
       "type": "object",
@@ -356,10 +414,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": [
-              "fresh",
-              "fork"
-            ]
+            "enum": ["fresh", "fork"]
           }
         },
         "models": {
@@ -397,9 +452,6 @@
     "permissionCeiling": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "subagent"
-      ],
       "properties": {
         "tools": {
           "type": "array",
@@ -440,42 +492,63 @@
       }
     },
     "gate": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "provider",
-        "submitOutcome",
-        "approvedOutcome",
-        "rejectedOutcome"
-      ],
-      "properties": {
-        "provider": {
-          "const": "plannotator"
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["submitOutcome", "approvedOutcome", "rejectedOutcome"],
+          "properties": {
+            "provider": {
+              "const": "prompt",
+              "default": "prompt"
+            },
+            "submitOutcome": {
+              "$ref": "#/$defs/identifier"
+            },
+            "approvedOutcome": {
+              "$ref": "#/$defs/identifier"
+            },
+            "rejectedOutcome": {
+              "$ref": "#/$defs/identifier"
+            }
+          }
         },
-        "submitOutcome": {
-          "$ref": "#/$defs/identifier"
-        },
-        "approvedOutcome": {
-          "$ref": "#/$defs/identifier"
-        },
-        "rejectedOutcome": {
-          "$ref": "#/$defs/identifier"
-        },
-        "timeoutMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "maximum": 30000,
-          "default": 5000
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "submitOutcome",
+            "approvedOutcome",
+            "rejectedOutcome"
+          ],
+          "properties": {
+            "provider": {
+              "const": "plannotator"
+            },
+            "submitOutcome": {
+              "$ref": "#/$defs/identifier"
+            },
+            "approvedOutcome": {
+              "$ref": "#/$defs/identifier"
+            },
+            "rejectedOutcome": {
+              "$ref": "#/$defs/identifier"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 30000,
+              "default": 5000
+            }
+          }
         }
-      }
+      ]
     },
     "step": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "prompt",
-        "transitions"
-      ],
+      "required": ["prompt", "transitions"],
       "properties": {
         "title": {
           "type": "string",

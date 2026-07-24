@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../schemas/settings.schema.json
+version: 1
+allowProjectWorkflows: false
+permissionCeiling:
+  tools: [read, grep, bash]
+  mcp: []
+  extensions: []
+  skills: []
+  bash:
+    mode: read-only
+  subagent:
+    agents: [pi-workflows.step]
+    contexts: [fresh]
+    models: []
+    maxTimeoutMs: 900000
+    maxTurns: 40
+    maxGraceTurns: 3
+    maxToolCalls: 100
+    artifacts: false

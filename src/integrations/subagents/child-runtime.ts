@@ -1,55 +1,36 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   existsSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
-} from "node:fs";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import type { WorkflowStep } from "../../config/types.ts";
-import { invalidCompletionCallIds } from "../../policy/completion-batch.ts";
-import { freezeToolInput } from "../../policy/immutable-input.ts";
+} from 'node:fs';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { WorkflowStep } from '../../config/types.ts';
+import { invalidCompletionCallIds } from '../../policy/completion-batch.ts';
+import { freezeToolInput } from '../../policy/immutable-input.ts';
+import { authorizeToolCall, resolveActiveTools } from '../../policy/tools.ts';
 import {
-  authorizeToolCall,
-  resolveActiveTools,
-} from "../../policy/tools.ts";
+  WORKFLOW_COMPLETION_PARAMETERS,
+  WORKFLOW_COMPLETION_TOOL,
+} from '../../runtime/completion-tool.ts';
 import {
   extractChildPolicy,
   isWorkflowSubagentName,
   parseDelegatedStepResult,
   type ChildStepPolicy,
-} from "./protocol.ts";
+} from './protocol.ts';
 
-export const CHILD_COMPLETION_TOOL = "workflow_complete_step";
-
-const COMPLETION_PARAMETERS = Type.Object(
-  {
-    outcome: Type.String({
-      description: "One exact outcome allowed by the delegated workflow step",
-    }),
-    summary: Type.String({
-      description: "Concise checkpoint and handoff for the next workflow step",
-      maxLength: 50_000,
-    }),
-    artifact: Type.Optional(
-      Type.String({
-        description: "Full artifact required when submitting to a configured gate",
-        maxLength: 200_000,
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const CHILD_COMPLETION_TOOL = WORKFLOW_COMPLETION_TOOL;
 
 function policyStep(policy: ChildStepPolicy): WorkflowStep {
   return {
     title: policy.stepTitle,
-    prompt: { inline: "Delegated workflow step" },
+    prompt: { inline: 'Delegated workflow step' },
     subagent: {
       agent: policy.agent,
-      context: "fresh",
+      context: 'fresh',
       timeoutMs: 900_000,
       artifacts: false,
     },
@@ -61,35 +42,35 @@ function policyStep(policy: ChildStepPolicy): WorkflowStep {
 
 function childSystemPrompt(policy: ChildStepPolicy): string {
   return [
-    "# Pi Workflows delegated step",
-    "",
+    '# Pi Workflows delegated step',
+    '',
     `Workflow: ${policy.workflowId}`,
     `Run: ${policy.runId}`,
     `Step: ${policy.stepId} (${policy.stepTitle})`,
-    "",
-    "The parent workflow harness owns orchestration and state transitions.",
-    "Perform only this delegated step. Its child-side tool policy is enforced.",
-    "When finished, call `workflow_complete_step` exactly once and as the only tool call in that message.",
-    `Valid outcomes: ${policy.outcomes.join(", ")}`,
+    '',
+    'The parent workflow harness owns orchestration and state transitions.',
+    'Perform only this delegated step. Its child-side tool policy is enforced.',
+    'When finished, call `workflow_complete_step` exactly once and as the only tool call in that message.',
+    `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     ...(policy.gateSubmitOutcome
       ? [
           `Outcome "${policy.gateSubmitOutcome}" requires the complete gate artifact.`,
         ]
       : []),
-    "If the workflow definition or environment is wrong, choose an outcome that transitions to $pause.",
-  ].join("\n");
+    'If the workflow definition or environment is wrong, choose an outcome that transitions to $pause.',
+  ].join('\n');
 }
 
 function writeResult(policy: ChildStepPolicy, result: unknown): void {
   if (existsSync(policy.resultPath)) {
-    throw new Error("Delegated workflow step already produced a result");
+    throw new Error('Delegated workflow step already produced a result');
   }
   const temporaryPath = `${policy.resultPath}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporaryPath, JSON.stringify(result), {
-      encoding: "utf8",
-      flag: "wx",
+      encoding: 'utf8',
+      flag: 'wx',
       mode: 0o600,
     });
     renameSync(temporaryPath, policy.resultPath);
@@ -108,20 +89,17 @@ function verifyCapability(
   childAgent: string | undefined,
 ): void {
   if (!isWorkflowSubagentName(childAgent) || childAgent !== policy.agent) {
-    throw new Error("child agent does not match the delegated workflow policy");
+    throw new Error('child agent does not match the delegated workflow policy');
   }
   let actual: Buffer;
   try {
-    actual = Buffer.from(readFileSync(policy.capabilityPath, "utf8"), "utf8");
+    actual = Buffer.from(readFileSync(policy.capabilityPath, 'utf8'), 'utf8');
   } catch {
-    throw new Error("delegated workflow capability is missing");
+    throw new Error('delegated workflow capability is missing');
   }
-  const expected = Buffer.from(policy.capabilityToken, "utf8");
-  if (
-    actual.length !== expected.length ||
-    !timingSafeEqual(actual, expected)
-  ) {
-    throw new Error("delegated workflow capability is invalid");
+  const expected = Buffer.from(policy.capabilityToken, 'utf8');
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error('delegated workflow capability is invalid');
   }
   unlinkSync(policy.capabilityPath);
 }
@@ -143,11 +121,11 @@ export function registerSubagentChildRuntime(
   // Runtime actions are unavailable while Pi is loading an extension. Lock the
   // child down as soon as the bound session starts; the input handler can then
   // activate exactly one verified, single-use parent capability.
-  pi.on("session_start", () => {
+  pi.on('session_start', () => {
     pi.setActiveTools([]);
   });
 
-  pi.on("input", (event) => {
+  pi.on('input', (event) => {
     let extracted;
     try {
       extracted = extractChildPolicy(event.text);
@@ -155,17 +133,17 @@ export function registerSubagentChildRuntime(
       policyError = error instanceof Error ? error.message : String(error);
       pi.setActiveTools([]);
       return {
-        action: "transform" as const,
+        action: 'transform' as const,
         text: `Delegated workflow policy is invalid: ${policyError}`,
         ...(event.images ? { images: event.images } : {}),
       };
     }
     if (!extracted) return;
     if (activePolicy) {
-      policyError = "child received more than one workflow policy";
+      policyError = 'child received more than one workflow policy';
       pi.setActiveTools([]);
       return {
-        action: "transform" as const,
+        action: 'transform' as const,
         text: `Delegated workflow policy is invalid: ${policyError}`,
         ...(event.images ? { images: event.images } : {}),
       };
@@ -179,7 +157,7 @@ export function registerSubagentChildRuntime(
       policyError = error instanceof Error ? error.message : String(error);
       pi.setActiveTools([]);
       return {
-        action: "transform" as const,
+        action: 'transform' as const,
         text: `Delegated workflow policy is invalid: ${policyError}`,
         ...(event.images ? { images: event.images } : {}),
       };
@@ -192,13 +170,13 @@ export function registerSubagentChildRuntime(
       ),
     );
     return {
-      action: "transform" as const,
+      action: 'transform' as const,
       text: extracted.task,
       ...(event.images ? { images: event.images } : {}),
     };
   });
 
-  pi.on("before_agent_start", (event) => {
+  pi.on('before_agent_start', (event) => {
     if (!activePolicy) {
       // Defense in depth for hosts that invoke a model turn without first
       // delivering the delegated input event.
@@ -210,24 +188,24 @@ export function registerSubagentChildRuntime(
     };
   });
 
-  pi.on("turn_start", () => {
+  pi.on('turn_start', () => {
     invalidCompletionCalls.clear();
   });
 
-  pi.on("message_end", (event) => {
+  pi.on('message_end', (event) => {
     const invalid = invalidCompletionCallIds(
       event.message,
       CHILD_COMPLETION_TOOL,
     );
     if (
       invalid.size > 0 ||
-      (event.message as { role?: unknown }).role === "assistant"
+      (event.message as { role?: unknown }).role === 'assistant'
     ) {
       invalidCompletionCalls = invalid;
     }
   });
 
-  pi.on("tool_call", (event) => {
+  pi.on('tool_call', (event) => {
     if (invalidCompletionCalls.has(event.toolCallId)) {
       return {
         block: true,
@@ -238,7 +216,7 @@ export function registerSubagentChildRuntime(
       if (!activePolicy || policyError) {
         return {
           block: true,
-          reason: policyError ?? "No delegated workflow policy is active",
+          reason: policyError ?? 'No delegated workflow policy is active',
         };
       }
       freezeToolInput(event.input);
@@ -247,7 +225,7 @@ export function registerSubagentChildRuntime(
     if (!activePolicy) {
       return {
         block: true,
-        reason: policyError ?? "No delegated workflow policy is active",
+        reason: policyError ?? 'No delegated workflow policy is active',
       };
     }
 
@@ -256,11 +234,12 @@ export function registerSubagentChildRuntime(
       event.input as unknown as Record<string, unknown>,
       policyStep(activePolicy),
       pi.getAllTools(),
+      activePolicy.approvedBashCommands ?? [],
     );
     if (!authorization.allowed) {
       return {
         block: true,
-        reason: authorization.reason ?? "Tool blocked by workflow child policy",
+        reason: authorization.reason ?? 'Tool blocked by workflow child policy',
       };
     }
     freezeToolInput(event.input);
@@ -268,18 +247,18 @@ export function registerSubagentChildRuntime(
 
   pi.registerTool({
     name: CHILD_COMPLETION_TOOL,
-    label: "Complete Delegated Workflow Step",
+    label: 'Complete Delegated Workflow Step',
     description:
-      "Return one validated result from a pi-workflows delegated child step",
-    promptSnippet: "Complete the delegated workflow step",
+      'Return one validated result from a pi-workflows delegated child step',
+    promptSnippet: 'Complete the delegated workflow step',
     promptGuidelines: [
-      "Call workflow_complete_step alone after all delegated work is complete.",
+      'Call workflow_complete_step alone after all delegated work is complete.',
     ],
-    parameters: COMPLETION_PARAMETERS,
-    executionMode: "sequential",
+    parameters: WORKFLOW_COMPLETION_PARAMETERS,
+    executionMode: 'sequential',
     execute: async (_toolCallId, params) => {
       if (!activePolicy) {
-        throw new Error("No delegated workflow policy is active");
+        throw new Error('No delegated workflow policy is active');
       }
       if (policyError) throw new Error(policyError);
       const result = parseDelegatedStepResult(
@@ -288,7 +267,9 @@ export function registerSubagentChildRuntime(
           policyDigest: activePolicy.policyDigest,
           outcome: params.outcome,
           summary: params.summary,
-          ...(params.artifact !== undefined ? { artifact: params.artifact } : {}),
+          ...(params.artifact !== undefined
+            ? { artifact: params.artifact }
+            : {}),
         },
         activePolicy,
       );
@@ -296,7 +277,7 @@ export function registerSubagentChildRuntime(
       return {
         content: [
           {
-            type: "text" as const,
+            type: 'text' as const,
             text: `Captured workflow step outcome "${result.outcome}".`,
           },
         ],

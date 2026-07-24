@@ -10,23 +10,23 @@ flowchart TD
   AgentEnv -- yes --> AgentDir[use PI_CODING_AGENT_DIR/workflows]
   AgentEnv -- no --> HomeDir[use ~/.pi/agent/workflows]
 
-  UserDir --> Settings[settings.json]
+  UserDir --> Settings[settings.yaml]
   AgentDir --> Settings
   HomeDir --> Settings
-  Settings --> UserFiles[user *.workflow.json]
+  Settings --> UserFiles[user workflow YAML]
 ```
 
 ## Project Workflow Gate
 
 ```mermaid
 flowchart TD
-  Settings[settings.json] --> Enabled{allowProjectWorkflows?}
+  Settings[settings.yaml] --> Enabled{allowProjectWorkflows?}
   Enabled -- no --> UserOnly[user workflows only]
   Enabled -- yes --> Trusted{ctx.isProjectTrusted?}
   Trusted -- no --> SkipWarn[skip project workflows with warning]
   Trusted -- yes --> Ceiling{permissionCeiling present?}
   Ceiling -- no --> SkipError[skip project workflows with error]
-  Ceiling -- yes --> ProjectFiles[load .pi/workflows/*.workflow.json]
+  Ceiling -- yes --> ProjectFiles[load .pi/workflows workflow YAML]
   ProjectFiles --> CeilingCheck[checkWorkflowAgainstCeiling]
   CeilingCheck --> Accepted[add accepted project workflows]
   CeilingCheck --> Rejected[diagnose rejected workflows]
@@ -40,18 +40,24 @@ flowchart TD
   Tools --> MCP{MCP selectors within ceiling?}
   MCP --> Extensions{extensions within ceiling?}
   Extensions --> Skills{skills within ceiling?}
-  Skills --> Bash{Bash mode/rules within ceiling?}
-  Bash --> Agent{agent allowed?}
+  Skills --> Bash{Bash mode, rules, and approved sources within ceiling?}
+  Bash --> Delegated{subagent configured?}
+  Delegated -- no --> Accept[accept project step]
+  Delegated -- yes --> SubCeiling{subagent ceiling present?}
+  SubCeiling -- no --> Reject[reject project step]
+  SubCeiling -- yes --> Agent{agent allowed?}
   Agent --> Context{context allowed?}
   Context --> Model{model absent or allowed?}
   Model --> Timeout{timeout <= maxTimeoutMs?}
   Timeout --> Turns{turnBudget present and within ceiling?}
   Turns --> ToolBudget{toolBudget present, hard <= maxToolCalls, block = *?}
   ToolBudget --> Artifacts{artifacts allowed?}
-  Artifacts --> Accept[accept project step]
+  Artifacts --> Accept
 ```
 
 If any decision is false, the project workflow is diagnosed and skipped.
+Main-only project workflows do not need a `subagent` ceiling. Delegated project
+steps require that ceiling plus explicit turn and tool budgets.
 
 ## Duplicate And Command Conflict Rules
 
@@ -72,7 +78,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  BadJson[invalid JSON] --> Diag[ConfigDiagnostic]
+  BadConfig[invalid workflow or settings YAML] --> Diag[ConfigDiagnostic]
   BadSchema[unknown or invalid fields] --> Diag
   BadPrompt[prompt escape or unknown variable] --> Diag
   Duplicate[duplicate id or command] --> Diag

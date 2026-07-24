@@ -1,8 +1,9 @@
-import { readdir, readFile, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { digest } from "../digest.ts";
-import { checkWorkflowAgainstCeiling } from "./ceiling.ts";
+import { readdir, readFile, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { parseDocument } from 'yaml';
+import { digest } from '../digest.ts';
+import { checkWorkflowAgainstCeiling } from './ceiling.ts';
 import {
   DEFAULT_SETTINGS,
   type ConfigDiagnostic,
@@ -11,8 +12,12 @@ import {
   type WorkflowDefinition,
   type WorkflowSettings,
   type WorkflowSourceKind,
-} from "./types.ts";
-import { validatePromptText, validateSettings, validateWorkflow } from "./validate.ts";
+} from './types.ts';
+import {
+  validatePromptText,
+  validateSettings,
+  validateWorkflow,
+} from './validate.ts';
 
 export interface LoadCatalogOptions {
   cwd: string;
@@ -28,21 +33,45 @@ interface LoadedDirectory {
 function diagnostic(
   path: string,
   message: string,
-  level: ConfigDiagnostic["level"] = "error",
+  level: ConfigDiagnostic['level'] = 'error',
 ): ConfigDiagnostic {
   return { path, message, level };
 }
 
-async function readJson(path: string): Promise<unknown> {
-  const text = await readFile(path, "utf8");
-  return JSON.parse(text) as unknown;
+async function readYaml(
+  path: string,
+  kind: 'settings' | 'workflow',
+): Promise<unknown> {
+  const text = await readFile(path, 'utf8');
+  const document = parseDocument(text, {
+    customTags: [],
+    merge: false,
+    prettyErrors: true,
+    resolveKnownTags: false,
+    schema: 'core',
+    strict: true,
+    stringKeys: true,
+    uniqueKeys: true,
+    version: '1.2',
+  });
+  const issues = [...document.errors, ...document.warnings];
+  if (issues.length > 0) {
+    throw new Error(issues.map((issue) => issue.message).join('\n'));
+  }
+  if (
+    document.directives.yaml.explicit &&
+    document.directives.yaml.version !== '1.2'
+  ) {
+    throw new Error(`${kind} YAML must use version 1.2`);
+  }
+  return document.toJS({ maxAliasCount: 100 }) as unknown;
 }
 
 function isInside(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return (
-    pathFromRoot === "" ||
-    (pathFromRoot !== ".." &&
+    pathFromRoot === '' ||
+    (pathFromRoot !== '..' &&
       !pathFromRoot.startsWith(`..${sep}`) &&
       !isAbsolute(pathFromRoot))
   );
@@ -55,7 +84,7 @@ async function loadPrompt(
 ): Promise<string> {
   const prompt = definition.steps[stepId]?.prompt;
   if (!prompt) throw new Error(`unknown step "${stepId}"`);
-  if ("inline" in prompt) return prompt.inline;
+  if ('inline' in prompt) return prompt.inline;
 
   const sourceDirectory = await realpath(dirname(sourcePath));
   const requestedPath = resolve(sourceDirectory, prompt.file);
@@ -65,28 +94,33 @@ async function loadPrompt(
 
   const actualPath = await realpath(requestedPath);
   if (!isInside(sourceDirectory, actualPath)) {
-    throw new Error(`prompt file symlink escapes workflow directory: ${prompt.file}`);
+    throw new Error(
+      `prompt file symlink escapes workflow directory: ${prompt.file}`,
+    );
   }
-  return readFile(actualPath, "utf8");
+  return readFile(actualPath, 'utf8');
 }
 
 async function loadWorkflowFile(
   sourcePath: string,
   sourceKind: WorkflowSourceKind,
 ): Promise<LoadedWorkflow> {
-  const raw = await readJson(sourcePath);
+  const raw = await readYaml(sourcePath, 'workflow');
   const validation = validateWorkflow(raw);
   if (!validation.value) {
-    throw new Error(validation.errors.join("\n"));
+    throw new Error(validation.errors.join('\n'));
   }
 
   const definition = validation.value;
   const prompts: Record<string, string> = {};
   for (const stepId of Object.keys(definition.steps)) {
     const text = await loadPrompt(sourcePath, definition, stepId);
-    const promptErrors = validatePromptText(text, `workflow.steps.${stepId}.prompt`);
+    const promptErrors = validatePromptText(
+      text,
+      `workflow.steps.${stepId}.prompt`,
+    );
     if (promptErrors.length > 0) {
-      throw new Error(promptErrors.join("\n"));
+      throw new Error(promptErrors.join('\n'));
     }
     prompts[stepId] = text;
   }
@@ -116,25 +150,35 @@ async function loadWorkflowDirectory(
     entries = await readdir(directory, { withFileTypes: true });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { workflows: [], diagnostics: [] };
+    if (code === 'ENOENT') return { workflows: [], diagnostics: [] };
     return {
       workflows: [],
-      diagnostics: [diagnostic(directory, `cannot read workflow directory: ${String(error)}`)],
+      diagnostics: [
+        diagnostic(
+          directory,
+          `cannot read workflow directory: ${String(error)}`,
+        ),
+      ],
     };
   }
 
   const workflows: LoadedWorkflow[] = [];
   const diagnostics: ConfigDiagnostic[] = [];
   const files = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".workflow.json"))
+    .filter((entry) => entry.isFile() && /\.workflow\.ya?ml$/i.test(entry.name))
     .map((entry) => join(directory, entry.name))
-    .sort((left, right) => left.localeCompare(right));
+    .sort();
 
   for (const path of files) {
     try {
       workflows.push(await loadWorkflowFile(path, sourceKind));
     } catch (error) {
-      diagnostics.push(diagnostic(path, error instanceof Error ? error.message : String(error)));
+      diagnostics.push(
+        diagnostic(
+          path,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
     }
   }
   return { workflows, diagnostics };
@@ -144,23 +188,29 @@ async function loadSettings(userDirectory: string): Promise<{
   settings: WorkflowSettings;
   diagnostics: ConfigDiagnostic[];
 }> {
-  const path = join(userDirectory, "settings.json");
+  const path = join(userDirectory, 'settings.yaml');
   try {
-    const validation = validateSettings(await readJson(path));
+    const validation = validateSettings(await readYaml(path, 'settings'));
     if (!validation.value) {
       return {
         settings: DEFAULT_SETTINGS,
-        diagnostics: validation.errors.map((message) => diagnostic(path, message)),
+        diagnostics: validation.errors.map((message) =>
+          diagnostic(path, message),
+        ),
       };
     }
     return { settings: validation.value, diagnostics: [] };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { settings: DEFAULT_SETTINGS, diagnostics: [] };
+    if (code === 'ENOENT')
+      return { settings: DEFAULT_SETTINGS, diagnostics: [] };
     return {
       settings: DEFAULT_SETTINGS,
       diagnostics: [
-        diagnostic(path, `cannot read settings: ${error instanceof Error ? error.message : String(error)}`),
+        diagnostic(
+          path,
+          `cannot read settings: ${error instanceof Error ? error.message : String(error)}`,
+        ),
       ],
     };
   }
@@ -202,43 +252,50 @@ export function defaultUserWorkflowDirectory(): string {
   const explicit = process.env.PI_WORKFLOWS_DIR?.trim();
   if (explicit) return resolve(explicit);
   const agentDirectory =
-    process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
-  return join(agentDirectory, "workflows");
+    process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), '.pi', 'agent');
+  return join(agentDirectory, 'workflows');
 }
 
-export async function loadCatalog(options: LoadCatalogOptions): Promise<WorkflowCatalog> {
-  const userDirectory = resolve(options.userDirectory ?? defaultUserWorkflowDirectory());
+export async function loadCatalog(
+  options: LoadCatalogOptions,
+): Promise<WorkflowCatalog> {
+  const userDirectory = resolve(
+    options.userDirectory ?? defaultUserWorkflowDirectory(),
+  );
   const diagnostics: ConfigDiagnostic[] = [];
   const settingsResult = await loadSettings(userDirectory);
   diagnostics.push(...settingsResult.diagnostics);
 
   const catalog = new Map<string, LoadedWorkflow>();
   const commands = new Map<string, string>();
-  const userResult = await loadWorkflowDirectory(userDirectory, "user");
+  const userResult = await loadWorkflowDirectory(userDirectory, 'user');
   diagnostics.push(...userResult.diagnostics);
   for (const workflow of userResult.workflows) {
     addWorkflow(catalog, commands, workflow, diagnostics);
   }
 
-  const projectDirectory = join(resolve(options.cwd), ".pi", "workflows");
+  const projectDirectory = join(resolve(options.cwd), '.pi', 'workflows');
   if (settingsResult.settings.allowProjectWorkflows) {
     if (!options.projectTrusted) {
       diagnostics.push(
         diagnostic(
           projectDirectory,
-          "project workflows were skipped because the project is not trusted",
-          "warning",
+          'project workflows were skipped because the project is not trusted',
+          'warning',
         ),
       );
     } else if (!settingsResult.settings.permissionCeiling) {
       diagnostics.push(
         diagnostic(
           projectDirectory,
-          "project workflows were skipped because no user permission ceiling is configured",
+          'project workflows were skipped because no user permission ceiling is configured',
         ),
       );
     } else {
-      const projectResult = await loadWorkflowDirectory(projectDirectory, "project");
+      const projectResult = await loadWorkflowDirectory(
+        projectDirectory,
+        'project',
+      );
       diagnostics.push(...projectResult.diagnostics);
       for (const workflow of projectResult.workflows) {
         const ceilingErrors = checkWorkflowAgainstCeiling(
@@ -247,7 +304,9 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<Workflow
         );
         if (ceilingErrors.length > 0) {
           diagnostics.push(
-            ...ceilingErrors.map((message) => diagnostic(workflow.sourcePath, message)),
+            ...ceilingErrors.map((message) =>
+              diagnostic(workflow.sourcePath, message),
+            ),
           );
           continue;
         }
@@ -261,6 +320,8 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<Workflow
     settings: settingsResult.settings,
     diagnostics,
     userDirectory,
-    ...(settingsResult.settings.allowProjectWorkflows ? { projectDirectory } : {}),
+    ...(settingsResult.settings.allowProjectWorkflows
+      ? { projectDirectory }
+      : {}),
   };
 }

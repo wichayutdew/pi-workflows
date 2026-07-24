@@ -3,9 +3,7 @@
   "title": "Pi workflows settings",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version"
-  ],
+  "required": ["version"],
   "properties": {
     "$schema": {
       "type": "string"

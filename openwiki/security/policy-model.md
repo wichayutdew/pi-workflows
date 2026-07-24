@@ -1,5 +1,10 @@
 # Policy Model
 
+Main-agent and delegated steps share tool authorization and completion parsing.
+The first diagram shows the stronger delegated process boundary; main-agent
+mode enforces the same model calls inside the parent process but cannot isolate
+the transcript, globally loaded skills, or extension event handlers.
+
 ## Trust Boundary
 
 ```mermaid
@@ -17,7 +22,7 @@ flowchart LR
   Result -->|validated by parent| Parent
 ```
 
-## Parent Acceptance Checks
+## Delegated Parent Acceptance Checks
 
 ```mermaid
 flowchart TD
@@ -37,7 +42,7 @@ flowchart TD
   Outcome -- yes --> Apply[apply transition or gate]
 ```
 
-## Child Policy Contents
+## Delegated Child Policy Contents
 
 ```mermaid
 flowchart TD
@@ -46,6 +51,7 @@ flowchart TD
   Policy --> ResultPath[resultPath]
   Policy --> Digest[policyDigest]
   Policy --> Perms[permissions]
+  Policy --> Approved[approvedBashCommands<br/>filtered exact reviewed strings]
   Policy --> Outcomes[allowed outcomes]
   Policy --> Limit[summaryMaxChars]
   Policy --> Gate[optional gateSubmitOutcome]
@@ -77,7 +83,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  BashCall[bash command] --> Mode{mode}
+  BashCall[bash command] --> Reviewed{exact reviewed command<br/>from configured source?}
+  Reviewed -- yes --> Allow[allow exact string]
+  Reviewed -- no --> Mode{mode}
   Mode -- deny --> Block[block]
   Mode -- unrestricted --> Allow[allow]
   Mode -- read-only --> Parse[restricted tokenizer]
@@ -88,8 +96,12 @@ flowchart TD
   ReadOnly -- yes --> Preset{allowed executable or read-only git subcommand?}
   Preset -- yes --> Allow
   Preset -- no --> Block
-  ReadOnly -- no --> Rule{matches executable and argsPrefix?}
-  Rule -- yes --> Allow
+  ReadOnly -- no --> Rule{matches executable and normalized argument prefix?}
+  Rule -- yes --> Hosted{gh or glab api?}
+  Hosted -- yes --> GetOnly{default GET and no mutation flags?}
+  GetOnly -- yes --> Allow
+  GetOnly -- no --> Block
+  Hosted -- no --> Allow
   Rule -- no --> Block
 ```
 
@@ -99,21 +111,30 @@ flowchart TD
 flowchart TD
   Complete[workflow_complete_step params] --> Outcome{outcome in policy.outcomes?}
   Outcome -- no --> Reject[throw]
-  Outcome -- yes --> Summary{summary string and <= limit?}
+  Outcome -- yes --> Summary{summary trims non-empty and <= limit?}
   Summary -- no --> Reject
   Summary -- yes --> Gate{outcome is gateSubmitOutcome?}
   Gate -- yes --> Artifact{artifact non-empty?}
   Artifact -- no --> Reject
-  Artifact -- yes --> Write[atomic result.json write]
-  Gate -- no --> Write
-  Write --> Terminate[terminate child]
+  Artifact -- yes --> Mode{execution mode}
+  Gate -- no --> Mode
+  Mode -- delegated --> Write[atomic result.json write]
+  Mode -- main --> Capture[capture pending in memory]
+  Write --> Terminate[terminate turn]
+  Capture --> Terminate
 ```
+
+Reviewed commands come only from the run's persisted human-approved artifact.
+The parent filters them in `src/policy/approved-commands.ts`, includes the list
+in the policy digest, and the child authorizes exact string equality. Ordinary
+step summaries never become command provenance. Legacy checkpoints without the
+field remain readable but receive no reviewed command capabilities.
 
 ## Immutable Input Defense
 
 ```mermaid
 sequenceDiagram
-  participant Runtime as child runtime
+  participant Runtime as main or child runtime
   participant Input as tool input object
   participant Later as later extension handlers
   participant Tool as tool executor
@@ -124,4 +145,3 @@ sequenceDiagram
   Input-->>Later: mutation rejected or ignored
   Tool->>Input: executes authorized arguments
 ```
-

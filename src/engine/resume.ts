@@ -1,4 +1,4 @@
-import type { WorkflowRun } from "./state.ts";
+import type { WorkflowRun } from './state.ts';
 
 export interface ResumeCheckpoint {
   sessionEpoch: number;
@@ -35,7 +35,7 @@ export function matchesResumeCheckpoint(
 ): run is WorkflowRun {
   return (
     sessionEpoch === checkpoint.sessionEpoch &&
-    run?.status === "paused" &&
+    run?.status === 'paused' &&
     run.runId === checkpoint.runId &&
     run.workflowId === checkpoint.workflowId &&
     run.currentStepId === checkpoint.currentStepId &&
