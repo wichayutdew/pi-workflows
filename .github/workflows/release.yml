@@ -48,7 +48,7 @@ jobs:
           BUMP: ${{ steps.release_bump.outputs.bump }}
         run: |
           bun pm version "$BUMP" --no-git-tag-version
-          echo "version=$(bun --eval \"console.log(require('./package.json').version)\")" >> "$GITHUB_OUTPUT"
+          echo "version=$(bun --eval 'console.log(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
 
       - name: Pack plugin artifact
         if: steps.release_bump.outputs.bump != ''
