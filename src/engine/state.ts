@@ -28,6 +28,8 @@ export interface PendingGate {
   requestId: string;
   stepId: string;
   artifact: string;
+  /** Self-contained child handoff to preserve when the gate is approved. */
+  summary?: string | undefined;
   submittedOutcome: string;
   requestedAt: number;
   reviewId?: string | undefined;
@@ -113,6 +115,8 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
       run.pendingGate.requestId.length > 0 &&
       typeof run.pendingGate.stepId === "string" &&
       typeof run.pendingGate.artifact === "string" &&
+      (run.pendingGate.summary === undefined ||
+        typeof run.pendingGate.summary === "string") &&
       typeof run.pendingGate.submittedOutcome === "string" &&
       typeof run.pendingGate.requestedAt === "number" &&
       (run.pendingGate.reviewId === undefined ||

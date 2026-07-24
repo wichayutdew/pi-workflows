@@ -60,7 +60,15 @@ test("manual pause preserves an in-flight gate", () => {
   raw.start = "plan";
   const workflow = loadedWorkflow(raw);
   let run = createRun(workflow, "", [], "run-3", 1);
-  run = beginGate(workflow, run, "submit", "# Plan", "request-1", 2);
+  run = beginGate(
+    workflow,
+    run,
+    "submit",
+    "Approved plan handoff",
+    "# Plan",
+    "request-1",
+    2,
+  );
   run = pauseRun(run, "repair integration", 3);
   assert.equal(run.status, "paused");
   assert.equal(run.pausedFrom, "awaiting-gate");
@@ -93,7 +101,15 @@ test("gate rejection follows its configured transition with feedback", () => {
   raw.start = "plan";
   const workflow = loadedWorkflow(raw);
   let run = createRun(workflow, "", [], "run-4", 1);
-  run = beginGate(workflow, run, "submit", "# Plan", "request-2", 2);
+  run = beginGate(
+    workflow,
+    run,
+    "submit",
+    "Plan awaiting review",
+    "# Plan",
+    "request-2",
+    2,
+  );
   run = resolveGate(
     workflow,
     run,
@@ -103,6 +119,55 @@ test("gate rejection follows its configured transition with feedback", () => {
   assert.equal(run.status, "running");
   assert.equal(run.currentStepId, "plan");
   assert.equal(run.gateFeedback, "Add rollback");
+});
+
+test("gate approval preserves the delegated step handoff", () => {
+  const raw = baseWorkflow();
+  raw.steps = {
+    plan: {
+      prompt: "Plan",
+      permissions: {
+        extensions: ["plannotator"],
+      },
+      requires: {
+        extensions: ["plannotator"],
+      },
+      gate: {
+        provider: "plannotator",
+        submitOutcome: "submit",
+        approvedOutcome: "approved",
+        rejectedOutcome: "rejected",
+      },
+      transitions: {
+        approved: "$done",
+        rejected: "plan",
+      },
+    },
+  };
+  raw.start = "plan";
+  const workflow = loadedWorkflow(raw);
+  let run = createRun(workflow, "", [], "run-gate-handoff", 1);
+  run = beginGate(
+    workflow,
+    run,
+    "submit",
+    "Exact approved implementation contract",
+    "# Plan",
+    "request-handoff",
+    2,
+  );
+  run = resolveGate(
+    workflow,
+    run,
+    { approved: true, feedback: "", resolvedAt: 3 },
+    3,
+  );
+  assert.equal(run.status, "completed");
+  assert.equal(run.lastSummary, "Exact approved implementation contract");
+  assert.equal(
+    run.history.at(-1)?.summary,
+    "Exact approved implementation contract",
+  );
 });
 
 test("configuration changes restart the earliest changed completed step", () => {

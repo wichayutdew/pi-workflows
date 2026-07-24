@@ -157,6 +157,7 @@ export function beginGate(
   workflow: LoadedWorkflow,
   run: WorkflowRun,
   outcome: string,
+  summary: string,
   artifact: string,
   requestId: string,
   now: number,
@@ -181,6 +182,7 @@ export function beginGate(
         requestId,
         stepId: run.currentStepId,
         artifact,
+        summary,
         submittedOutcome: outcome,
         requestedAt: now,
       },
@@ -245,9 +247,11 @@ export function resolveGate(
   const outcome = resolution.approved
     ? step.gate.approvedOutcome
     : step.gate.rejectedOutcome;
-  const summary = resolution.feedback
-    ? `Gate ${resolution.approved ? "approved" : "rejected"}: ${resolution.feedback}`
-    : `Gate ${resolution.approved ? "approved" : "rejected"}`;
+  const summary = resolution.approved && pending.summary
+    ? pending.summary
+    : resolution.feedback
+      ? `Gate ${resolution.approved ? "approved" : "rejected"}: ${resolution.feedback}`
+      : `Gate ${resolution.approved ? "approved" : "rejected"}`;
   const runnable = withUpdate(
     run,
     {

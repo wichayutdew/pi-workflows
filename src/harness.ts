@@ -778,6 +778,7 @@ export class WorkflowHarness implements WorkflowCommandController {
           workflow,
           this.run,
           result.outcome,
+          result.summary,
           result.artifact ?? "",
         );
         return;
@@ -896,6 +897,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     workflow: LoadedWorkflow,
     originalRun: WorkflowRun,
     outcome: string,
+    summary: string,
     artifact: string,
   ) {
     const requestSessionEpoch = this.sessionEpoch;
@@ -908,6 +910,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       workflow,
       originalRun,
       outcome,
+      summary,
       artifact,
       requestId,
       Date.now(),
