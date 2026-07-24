@@ -749,4 +749,4 @@ extensions, without hard-coding them into the orchestrator, are:
 
 ## License
 
-Licensed under the [Apache License 2.0](./LICENSE).
+Licensed under the [MIT License](./LICENSE).
