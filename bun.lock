@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "pi-workflows",
+      "name": "@wichayutdew/pi-workflows",
       "dependencies": {
         "yaml": "^2.8.3",
       },

@@ -18,7 +18,13 @@ calling `workflow_complete_step` with an outcome declared by that step.
 
 ## Install
 
-Pi Workflows works without either optional integration. For local development:
+Install Pi Workflows from npm:
+
+```bash
+pi install npm:@wichayutdew/pi-workflows
+```
+
+For local development, install it from the repository instead:
 
 ```bash
 pi install /absolute/path/to/pi-workflows
