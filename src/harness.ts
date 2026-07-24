@@ -77,6 +77,12 @@ import {
 import { SerialTaskQueue } from './runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from './runtime/step-result.ts';
 import { formatWorkflowList } from './workflow-list.ts';
+import {
+  formatWorkflowStatusText,
+  showWorkflowStatus,
+  type WorkflowStatusExecution,
+  type WorkflowStatusSnapshot,
+} from './workflow-status.ts';
 
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const STATUS_KEY = 'pi-workflows';
@@ -586,32 +592,38 @@ export class WorkflowHarness implements WorkflowCommandController {
   }
 
   async status(ctx: ExtensionCommandContext): Promise<void> {
-    if (!this.run) {
+    const snapshot = this.workflowStatusSnapshot();
+    if (!snapshot) {
       ctx.ui.notify('No workflow checkpoint in this session', 'info');
       return;
     }
-    const gate = this.run.pendingGate?.reviewId
-      ? `\nReview: ${this.run.pendingGate.reviewId}`
-      : '';
-    const reason = this.run.pauseReason
-      ? `\nReason: ${this.run.pauseReason}`
-      : '';
-    const delegation = this.activeDelegation
-      ? `\nSubagent: ${this.activeDelegation.agent} (${this.activeDelegation.requestId})`
-      : '';
-    const mainExecution = this.mainSteps.activeStepId
-      ? '\nExecution: main agent'
-      : '';
-    ctx.ui.notify(
-      [
-        `Workflow: ${this.run.workflowId}`,
-        `Run: ${this.run.runId}`,
-        `Status: ${this.run.status}`,
-        `Step: ${this.run.currentStepId}`,
-        `Completed steps: ${this.run.history.length}${gate}${delegation}${mainExecution}${reason}`,
-      ].join('\n'),
-      'info',
-    );
+    if (ctx.hasUI && ctx.mode === 'tui') {
+      await showWorkflowStatus(ctx, () => this.workflowStatusSnapshot());
+      return;
+    }
+    ctx.ui.notify(formatWorkflowStatusText(snapshot), 'info');
+  }
+
+  private workflowStatusSnapshot(): WorkflowStatusSnapshot | undefined {
+    if (!this.run) return undefined;
+    const workflow = this.catalog.workflows.get(this.run.workflowId);
+    let execution: WorkflowStatusExecution | undefined;
+    if (this.activeDelegation) {
+      execution = {
+        kind: 'subagent',
+        agent: this.activeDelegation.agent,
+        requestId: this.activeDelegation.requestId,
+        progress: this.activeDelegation.progress ?? 'starting',
+      };
+    } else if (this.mainSteps.activeStepId) {
+      execution = { kind: 'main' };
+    }
+    return {
+      run: this.run,
+      now: Date.now(),
+      ...(workflow ? { workflow } : {}),
+      ...(execution ? { execution } : {}),
+    };
   }
 
   private registerLifecycle(): void {
@@ -765,6 +777,11 @@ export class WorkflowHarness implements WorkflowCommandController {
         step.permissions.skills.length > 0
           ? [...step.permissions.skills]
           : false,
+      acceptance: {
+        level: 'none',
+        reason:
+          'Pi Workflows owns correlated step completion and human-review gates',
+      },
       artifacts: subagent.artifacts,
       ...(subagent.model ? { model: subagent.model } : {}),
       ...(subagent.turnBudget

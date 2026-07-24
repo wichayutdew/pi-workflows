@@ -32,7 +32,7 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
   const policy: ChildStepPolicy = {
     version: 1,
     requestId: 'request-child',
-    agent: 'pi-workflows.step',
+    agent: 'worker',
     workflowId: 'example',
     runId: 'run-child',
     stepId: 'inspect',
@@ -53,6 +53,7 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
   };
   const handlers = new Map<string, Handler[]>();
   const activeTools: string[][] = [];
+  let currentActiveTools = ['read', 'bash'];
   let completionTool: RegisteredToolLike | undefined;
   const inventory = [
     { name: 'read', sourceInfo: { source: 'builtin' } },
@@ -83,7 +84,11 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
     getAllTools() {
       return inventory;
     },
+    getActiveTools() {
+      return [...currentActiveTools];
+    },
     setActiveTools(tools: string[]) {
+      currentActiveTools = [...tools];
       activeTools.push(tools);
     },
   } as unknown as ExtensionAPI;
@@ -95,27 +100,33 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
     });
     registerSubagentChildRuntime(pi, { childAgent: policy.agent });
     assert.deepEqual(activeTools, []);
-    const sessionStart = handlers.get('session_start')?.[0];
-    assert.ok(sessionStart);
-    sessionStart({ type: 'session_start', reason: 'startup' });
-    assert.deepEqual(activeTools, [[]]);
+    assert.equal(completionTool, undefined);
 
     const toolCall = handlers.get('tool_call')?.[0];
     assert.ok(toolCall);
     assert.equal(
-      (
-        toolCall({
-          type: 'tool_call',
-          toolCallId: 'before-policy',
-          toolName: 'read',
-          input: { path: 'README.md' },
-        }) as { block?: boolean }
-      ).block,
-      true,
+      toolCall({
+        type: 'tool_call',
+        toolCallId: 'before-policy',
+        toolName: 'read',
+        input: { path: 'README.md' },
+      }),
+      undefined,
     );
 
     const input = handlers.get('input')?.[0];
     assert.ok(input);
+    assert.equal(
+      input({
+        type: 'input',
+        source: 'rpc',
+        text: 'Review this ordinary subagent task.',
+      }),
+      undefined,
+    );
+    assert.deepEqual(activeTools, []);
+    assert.equal(completionTool, undefined);
+
     const transformed = input({
       type: 'input',
       source: 'rpc',
@@ -128,11 +139,24 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
     assert.deepEqual(activeTools.at(-1), [
       'read',
       'bash',
-      'mcp',
       CHILD_COMPLETION_TOOL,
     ]);
     await assert.rejects(readFile(policy.capabilityPath, 'utf8'), /ENOENT/);
 
+    assert.match(
+      (
+        toolCall({
+          type: 'tool_call',
+          toolCallId: 'profile-denied',
+          toolName: 'mcp',
+          input: {
+            server: 'gitlab',
+            tool: 'get_merge_request',
+          },
+        }) as { reason?: string }
+      ).reason ?? '',
+      /not enabled by subagent "worker"/,
+    );
     assert.equal(
       (
         toolCall({
@@ -154,8 +178,10 @@ test('child runtime narrows tools, enforces Bash, and writes a correlated result
       undefined,
     );
 
-    assert.ok(completionTool);
-    const completion = await completionTool.execute('complete', {
+    const activeCompletionTool = completionTool as
+      RegisteredToolLike | undefined;
+    assert.ok(activeCompletionTool);
+    const completion = await activeCompletionTool.execute('complete', {
       outcome: 'ready',
       summary: 'Inspection complete',
     });

@@ -83,7 +83,7 @@ sequenceDiagram
   Harness->>Tmp: write capability token
   Harness->>Harness: build ChildStepPolicy and digest
   Harness->>Sub: request with encoded policy envelope
-  Sub->>Child: start pi-workflows.* child
+  Sub->>Child: resolve configured agent and start child
   Child->>Tmp: verify and delete capability
   Child->>Child: narrow active tools
   Child->>Tmp: write result.json via workflow_complete_step

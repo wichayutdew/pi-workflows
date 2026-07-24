@@ -19,7 +19,7 @@ async function withPolicy(
   const policy: ChildStepPolicy = {
     version: 1,
     requestId: 'request-1',
-    agent: 'pi-workflows.step',
+    agent: 'worker',
     workflowId: 'example',
     runId: 'run-1',
     stepId: 'inspect',
@@ -54,6 +54,16 @@ test('child policy envelope is removed before the subagent sees the task', async
     );
     assert.deepEqual(extracted?.policy, policy);
     assert.equal(extracted?.task, 'Inspect the merge request.');
+    assert.equal(
+      extractChildPolicy(`Explain this literal: ${envelope}`),
+      undefined,
+    );
+    assert.equal(
+      extractChildPolicy(
+        `Fork context\n\nTask:\n${envelope}\n\nInspect the merge request.`,
+      )?.task,
+      'Fork context\n\nTask:\n\n\nInspect the merge request.',
+    );
     assert.equal(isSafeStepCapabilityPath(policy.capabilityPath), true);
     assert.equal(isSafeStepResultPath(policy.resultPath), true);
     assert.equal(isSafeStepResultPath(join(tmpdir(), 'result.json')), false);

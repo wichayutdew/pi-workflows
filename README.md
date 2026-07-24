@@ -194,12 +194,12 @@ steps:
 The expanded defaults are `agent: pi-workflows.step`, `context: fresh`,
 `timeoutMs: 900000`, and `artifacts: false`.
 
-Use a workflow agent's runtime name directly when only the agent changes:
+Use a Pi Subagents runtime name directly when only the agent changes:
 
 ```yaml
 steps:
   inspect:
-    subagent: pi-workflows.inspector
+    subagent: scout
     prompt: Inspect the request.
     transitions:
       done: $done
@@ -210,22 +210,36 @@ step also needs a context, model, timeout, budget, or artifact override:
 
 ```yaml
 subagent:
-  agent: pi-workflows.inspector
+  agent: reviewer
   context: fresh
   timeoutMs: 600000
 ```
 
-The bundled `pi-workflows.step` profile inherits project instructions but not
-the parent transcript or its skill catalog. The workflow explicitly sends only
-the configured step prompt and skills. Pi Workflows then narrows the child's
-active tools and enforces the step's MCP, Bash, extension-tool, and completion
-policy inside the child process.
+`agent` is the same runtime name Pi Subagents uses. For example,
+`subagent: worker` selects its builtin `worker`, then Pi Subagents applies the
+matching `subagents.agentOverrides.worker` entry from
+`~/.pi/agent/settings.json` and any higher-precedence project settings. Pi
+Workflows does not parse that file or reimplement agent discovery. An
+`agentOverrides` entry modifies a discovered builtin, package, user, or project
+agent; the entry alone does not create a new agent.
+
+This is separate from `~/.pi/agent/workflows/settings.yaml`, which configures
+Pi Workflows project trust and permission ceilings. Use
+`/subagents-models worker` to inspect Pi Subagents' live resolved profile and
+`/subagents-doctor` to diagnose discovery or loading problems.
+
+The bundled `pi-workflows.step` remains the default for `subagent: {}`. It
+inherits project instructions but not the parent transcript or its skill
+catalog. A named agent contributes its Pi Subagents system prompt, thinking,
+model unless the step overrides it, extension loading, and initial tool
+visibility. The workflow sends its configured step prompt and explicit skill
+selection.
 
 Supported fields:
 
 | Field        | Default              | Description                                                                         |
 | ------------ | -------------------- | ----------------------------------------------------------------------------------- |
-| `agent`      | `pi-workflows.step`  | Configured workflow-only pi-subagents agent in the `pi-workflows.*` namespace.      |
+| `agent`      | `pi-workflows.step`  | Any discovered Pi Subagents runtime name, such as `scout`, `worker`, or `reviewer`. |
 | `context`    | `fresh`              | `fresh` isolates the step; `fork` deliberately includes filtered parent context.    |
 | `model`      | Agent/default model  | Optional pi-subagents model override.                                               |
 | `timeoutMs`  | `900000`             | Child deadline, from 1 second through 24 hours.                                     |
@@ -233,19 +247,26 @@ Supported fields:
 | `toolBudget` | pi-subagents default | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array. |
 | `artifacts`  | `false`              | Ask pi-subagents to retain its normal run artifacts.                                |
 
-You may define another workflow-only agent by using `package: pi-workflows` in
-its frontmatter, which gives it a runtime name such as
-`pi-workflows.inspector`. Both subagent forms require this full runtime name.
-This namespace lets the extension leave every unrelated pi-subagents child
-untouched. A custom profile's own `tools` and `extensions` frontmatter remains
-an outer visibility boundary: Pi Workflows can remove access but cannot grant a
-tool or load an extension that the profile excluded.
+Builtin names are unqualified (`worker`); packaged names may be qualified, such
+as `pi-workflows.step`. Pi Workflows installs an inert listener in every
+Pi Subagents child. It registers `workflow_complete_step` and activates policy
+only after a valid, single-use workflow capability arrives, so ordinary
+subagent runs remain unchanged.
 
-Use the bundled profile unless you intentionally maintain a stricter one. If a
-custom profile declares `tools`, it must include `workflow_complete_step`; if it
-declares `extensions`, it must keep the installed Pi Workflows extension
-available. Otherwise the child fails closed because it cannot verify and write
-the correlated result.
+A selected profile's active tools and loaded extensions remain an outer
+boundary. Effective step tools are the intersection of that profile and
+`permissions`, plus the workflow completion tool. Pi Workflows can remove
+access but cannot grant a normal tool or load an extension excluded by the
+profile. If a custom profile declares `extensions`, it must keep the installed
+Pi Workflows extension available; otherwise the child never receives the
+policy runtime and the step fails closed.
+
+Workflow `permissions.skills` is sent as Pi Subagents' request-level skill
+selection, so it replaces the selected profile's normal skill list for that
+step; an empty list disables injected skills. Pi Workflows also disables Pi
+Subagents' separate acceptance report for these requests because the harness
+already owns correlated completion, declared outcomes, and optional human
+review gates.
 
 At runtime:
 
@@ -543,12 +564,18 @@ Resume reloads configuration before continuing:
 
 ## Commands
 
+In TUI mode, `/workflow-status` opens a read-only board for the current
+checkpoint. It refreshes once per second and shows run timing, the current
+execution or review, pause reasons, configuration drift, and the completed
+attempt path. Press `q`, `Esc`, `Ctrl-C`, or `Ctrl-D` to close it. Non-TUI modes
+receive the same checkpoint as text.
+
 | Command                         | Purpose                                               |
 | ------------------------------- | ----------------------------------------------------- |
 | `/workflow-list`                | List loaded workflows and their configured commands.  |
 | `/workflow-start <id> [input]`  | Start by workflow identifier.                         |
 | `/<configured-command> [input]` | Start through a workflow alias.                       |
-| `/workflow-status`              | Show run, state, current step, and review identifier. |
+| `/workflow-status`              | Open a live run-status board (text outside TUI mode). |
 | `/workflow-pause [reason]`      | Halt without losing the checkpoint.                   |
 | `/workflow-resume`              | Reload, reconcile, and continue.                      |
 | `/workflow-abort [reason]`      | End the active run and restore baseline tools.        |
@@ -577,7 +604,7 @@ permissionCeiling:
   skills: []
   bash: { mode: read-only }
   subagent:
-    agents: [pi-workflows.step]
+    agents: [pi-workflows.step, scout, worker, reviewer]
     contexts: [fresh]
     models: []
     maxTimeoutMs: 900000

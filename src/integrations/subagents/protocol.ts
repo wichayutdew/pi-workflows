@@ -6,8 +6,10 @@ import type {
   SubagentDelegationStatus as UpstreamDelegationStatus,
   SubagentDelegationUpdate as UpstreamDelegationUpdate,
 } from 'pi-subagents/delegation';
-import type { StepPermissions } from '../../config/types.ts';
-import { WORKFLOW_SUBAGENT_NAMESPACE } from '../../config/types.ts';
+import {
+  SUBAGENT_RUNTIME_NAME_PATTERN,
+  type StepPermissions,
+} from '../../config/types.ts';
 import {
   parseWorkflowStepResult,
   type WorkflowStepResult,
@@ -31,6 +33,7 @@ export const SUBAGENT_DELEGATION_CANCEL_EVENT =
 
 const CHILD_POLICY_OPEN = '<pi-workflows-policy-v1>';
 const CHILD_POLICY_CLOSE = '</pi-workflows-policy-v1>';
+const FORK_TASK_BOUNDARY = '\n\nTask:\n';
 const POLICY_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const CAPABILITY_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const RESULT_FILE_NAME = 'result.json';
@@ -143,8 +146,10 @@ export function isSafeStepCapabilityPath(path: string): boolean {
   return isSafeStepFilePath(path, CAPABILITY_FILE_NAME);
 }
 
-export function isWorkflowSubagentName(name: string | undefined): boolean {
-  return Boolean(name?.startsWith(WORKFLOW_SUBAGENT_NAMESPACE));
+export function isSubagentRuntimeName(
+  name: string | undefined,
+): name is string {
+  return Boolean(name && SUBAGENT_RUNTIME_NAME_PATTERN.test(name));
 }
 
 function parseChildPolicy(value: unknown): ChildStepPolicy {
@@ -192,8 +197,8 @@ function parseChildPolicy(value: unknown): ChildStepPolicy {
   if (!POLICY_DIGEST_PATTERN.test(value.policyDigest as string)) {
     throw new Error('child policy digest is invalid');
   }
-  if (!isWorkflowSubagentName(value.agent as string)) {
-    throw new Error('child policy agent is outside the workflow namespace');
+  if (!isSubagentRuntimeName(value.agent as string)) {
+    throw new Error('child policy agent is not a valid subagent runtime name');
   }
   if (!CAPABILITY_TOKEN_PATTERN.test(value.capabilityToken as string)) {
     throw new Error('child policy capability token is invalid');
@@ -260,8 +265,12 @@ export function encodeChildPolicy(policy: ChildStepPolicy): string {
 export function extractChildPolicy(
   text: string,
 ): ExtractedChildPolicy | undefined {
-  const start = text.indexOf(CHILD_POLICY_OPEN);
-  if (start === -1) return undefined;
+  let start = 0;
+  if (!text.startsWith(CHILD_POLICY_OPEN)) {
+    const forkStart = text.indexOf(`${FORK_TASK_BOUNDARY}${CHILD_POLICY_OPEN}`);
+    if (forkStart === -1) return undefined;
+    start = forkStart + FORK_TASK_BOUNDARY.length;
+  }
   const payloadStart = start + CHILD_POLICY_OPEN.length;
   const end = text.indexOf(CHILD_POLICY_CLOSE, payloadStart);
   if (end === -1 || text.indexOf(CHILD_POLICY_OPEN, payloadStart) !== -1) {

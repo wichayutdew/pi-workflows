@@ -3,7 +3,7 @@ import {
   DEFAULT_STEP_SUBAGENT,
   EMPTY_PERMISSIONS,
   EMPTY_REQUIREMENTS,
-  WORKFLOW_SUBAGENT_NAMESPACE,
+  SUBAGENT_RUNTIME_NAME_PATTERN,
   WORKFLOW_SCHEMA_VERSION,
   type BashMode,
   type BashApprovalSource,
@@ -34,8 +34,6 @@ const IDENTIFIER_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const OUTCOME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const TOOL_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 const RESOURCE_SELECTOR_PATTERN = /^[A-Za-z0-9_@./:+-]+$/;
-const WORKFLOW_SUBAGENT_PATTERN =
-  /^pi-workflows\.[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 const MCP_SELECTOR_PATTERN = /^[A-Za-z0-9_.:-]+(?:\/[A-Za-z0-9_.:-]+)?$/;
 const EXECUTABLE_PATTERN = /^[A-Za-z0-9_./+-]+$/;
 const BASH_APPROVAL_SOURCE_PATTERN =
@@ -508,7 +506,7 @@ function parseStepSubagent(
   if (typeof value === 'string') {
     const agent =
       readString(value, path, errors, {
-        pattern: WORKFLOW_SUBAGENT_PATTERN,
+        pattern: SUBAGENT_RUNTIME_NAME_PATTERN,
       }) ?? DEFAULT_STEP_SUBAGENT.agent;
     return { ...DEFAULT_STEP_SUBAGENT, agent };
   }
@@ -535,13 +533,8 @@ function parseStepSubagent(
     value.agent === undefined
       ? DEFAULT_STEP_SUBAGENT.agent
       : (readString(value.agent, `${path}.agent`, errors, {
-          pattern: WORKFLOW_SUBAGENT_PATTERN,
+          pattern: SUBAGENT_RUNTIME_NAME_PATTERN,
         }) ?? DEFAULT_STEP_SUBAGENT.agent);
-  if (!agent.startsWith(WORKFLOW_SUBAGENT_NAMESPACE)) {
-    errors.push(
-      `${path}.agent: must use the "${WORKFLOW_SUBAGENT_NAMESPACE}" workflow-agent namespace`,
-    );
-  }
   const contextValue =
     value.context === undefined
       ? DEFAULT_STEP_SUBAGENT.context
@@ -1023,7 +1016,7 @@ function parseSubagentPermissionCeiling(
     value.agents,
     `${path}.agents`,
     errors,
-    WORKFLOW_SUBAGENT_PATTERN,
+    SUBAGENT_RUNTIME_NAME_PATTERN,
   );
   const contexts = readStringList(
     value.contexts,
@@ -1038,7 +1031,7 @@ function parseSubagentPermissionCeiling(
     RESOURCE_SELECTOR_PATTERN,
   );
   if (agents.length === 0) {
-    errors.push(`${path}.agents: at least one workflow agent is required`);
+    errors.push(`${path}.agents: at least one subagent is required`);
   }
   if (contexts.length === 0) {
     errors.push(`${path}.contexts: at least one context mode is required`);

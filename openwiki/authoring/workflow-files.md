@@ -162,10 +162,11 @@ that executable.
 ## Subagent Options
 
 Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
-into pi-subagents with the defaults shown below. Use a full workflow-agent
-runtime name such as `subagent: pi-workflows.inspector` when only the agent
-changes; use the object form for additional overrides. The integration is
-optional.
+into pi-subagents with the defaults shown below. Use the exact Pi Subagents
+runtime name, such as `subagent: worker`, when only the agent changes; use the
+object form for additional overrides. Pi Subagents resolves builtin, package,
+user, and project agents and applies matching `settings.json` overrides. The
+integration is optional.
 
 ```mermaid
 flowchart TD

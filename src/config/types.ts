@@ -1,5 +1,6 @@
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
-export const WORKFLOW_SUBAGENT_NAMESPACE = 'pi-workflows.';
+export const SUBAGENT_RUNTIME_NAME_PATTERN =
+  /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 
 export const TERMINAL_TARGETS = ['$done', '$pause'] as const;
 export type TerminalTarget = (typeof TERMINAL_TARGETS)[number];

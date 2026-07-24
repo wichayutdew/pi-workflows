@@ -97,7 +97,7 @@ Core commands:
 | `/workflow-list`               | List loaded workflows.              |
 | `/workflow-start <id> [input]` | Start by workflow id.               |
 | `/<workflow command> [input]`  | Start through configured alias.     |
-| `/workflow-status`             | Show checkpoint status.             |
+| `/workflow-status`             | Open a live run-status board.       |
 | `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
 | `/workflow-resume`             | Reload, reconcile, and continue.    |
 | `/workflow-abort [reason]`     | Abort active run.                   |

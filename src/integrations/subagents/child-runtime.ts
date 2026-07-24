@@ -17,7 +17,7 @@ import {
 } from '../../runtime/completion-tool.ts';
 import {
   extractChildPolicy,
-  isWorkflowSubagentName,
+  isSubagentRuntimeName,
   parseDelegatedStepResult,
   type ChildStepPolicy,
 } from './protocol.ts';
@@ -88,7 +88,7 @@ function verifyCapability(
   policy: ChildStepPolicy,
   childAgent: string | undefined,
 ): void {
-  if (!isWorkflowSubagentName(childAgent) || childAgent !== policy.agent) {
+  if (!isSubagentRuntimeName(childAgent) || childAgent !== policy.agent) {
     throw new Error('child agent does not match the delegated workflow policy');
   }
   let actual: Buffer;
@@ -115,15 +115,61 @@ export function registerSubagentChildRuntime(
   let activePolicy: ChildStepPolicy | undefined;
   let policyError: string | undefined;
   let invalidCompletionCalls = new Set<string>();
+  let effectiveTools = new Set<string>();
+  let completionRegistered = false;
   const childAgent =
     options.childAgent ?? process.env.PI_SUBAGENT_CHILD_AGENT?.trim();
 
-  // Runtime actions are unavailable while Pi is loading an extension. Lock the
-  // child down as soon as the bound session starts; the input handler can then
-  // activate exactly one verified, single-use parent capability.
-  pi.on('session_start', () => {
-    pi.setActiveTools([]);
-  });
+  const registerCompletionTool = (): void => {
+    if (completionRegistered) return;
+    completionRegistered = true;
+    pi.registerTool({
+      name: CHILD_COMPLETION_TOOL,
+      label: 'Complete Delegated Workflow Step',
+      description:
+        'Return one validated result from a pi-workflows delegated child step',
+      promptSnippet: 'Complete the delegated workflow step',
+      promptGuidelines: [
+        'Call workflow_complete_step alone after all delegated work is complete.',
+      ],
+      parameters: WORKFLOW_COMPLETION_PARAMETERS,
+      executionMode: 'sequential',
+      execute: async (_toolCallId, params) => {
+        if (!activePolicy) {
+          throw new Error('No delegated workflow policy is active');
+        }
+        if (policyError) throw new Error(policyError);
+        const result = parseDelegatedStepResult(
+          {
+            version: 1,
+            policyDigest: activePolicy.policyDigest,
+            outcome: params.outcome,
+            summary: params.summary,
+            ...(params.artifact !== undefined
+              ? { artifact: params.artifact }
+              : {}),
+          },
+          activePolicy,
+        );
+        writeResult(activePolicy, result);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Captured workflow step outcome "${result.outcome}".`,
+            },
+          ],
+          details: {
+            workflowId: activePolicy.workflowId,
+            runId: activePolicy.runId,
+            stepId: activePolicy.stepId,
+            outcome: result.outcome,
+          },
+          terminate: true,
+        };
+      },
+    });
+  };
 
   pi.on('input', (event) => {
     let extracted;
@@ -151,10 +197,23 @@ export function registerSubagentChildRuntime(
 
     try {
       verifyCapability(extracted.policy, childAgent);
+      const profileTools = new Set(pi.getActiveTools());
       activePolicy = extracted.policy;
       policyError = undefined;
+      registerCompletionTool();
+      effectiveTools = new Set(
+        resolveActiveTools(
+          pi.getAllTools(),
+          policyStep(activePolicy),
+          CHILD_COMPLETION_TOOL,
+        ).filter(
+          (toolName) =>
+            toolName === CHILD_COMPLETION_TOOL || profileTools.has(toolName),
+        ),
+      );
     } catch (error) {
       policyError = error instanceof Error ? error.message : String(error);
+      effectiveTools.clear();
       pi.setActiveTools([]);
       return {
         action: 'transform' as const,
@@ -162,13 +221,7 @@ export function registerSubagentChildRuntime(
         ...(event.images ? { images: event.images } : {}),
       };
     }
-    pi.setActiveTools(
-      resolveActiveTools(
-        pi.getAllTools(),
-        policyStep(activePolicy),
-        CHILD_COMPLETION_TOOL,
-      ),
-    );
+    pi.setActiveTools([...effectiveTools]);
     return {
       action: 'transform' as const,
       text: extracted.task,
@@ -178,9 +231,7 @@ export function registerSubagentChildRuntime(
 
   pi.on('before_agent_start', (event) => {
     if (!activePolicy) {
-      // Defense in depth for hosts that invoke a model turn without first
-      // delivering the delegated input event.
-      pi.setActiveTools([]);
+      if (policyError) pi.setActiveTools([]);
       return;
     }
     return {
@@ -193,6 +244,7 @@ export function registerSubagentChildRuntime(
   });
 
   pi.on('message_end', (event) => {
+    if (!activePolicy) return;
     const invalid = invalidCompletionCallIds(
       event.message,
       CHILD_COMPLETION_TOOL,
@@ -206,6 +258,13 @@ export function registerSubagentChildRuntime(
   });
 
   pi.on('tool_call', (event) => {
+    if (!activePolicy) {
+      if (!policyError) return;
+      return {
+        block: true,
+        reason: policyError,
+      };
+    }
     if (invalidCompletionCalls.has(event.toolCallId)) {
       return {
         block: true,
@@ -213,19 +272,19 @@ export function registerSubagentChildRuntime(
       };
     }
     if (event.toolName === CHILD_COMPLETION_TOOL) {
-      if (!activePolicy || policyError) {
+      if (policyError) {
         return {
           block: true,
-          reason: policyError ?? 'No delegated workflow policy is active',
+          reason: policyError,
         };
       }
       freezeToolInput(event.input);
       return;
     }
-    if (!activePolicy) {
+    if (!effectiveTools.has(event.toolName)) {
       return {
         block: true,
-        reason: policyError ?? 'No delegated workflow policy is active',
+        reason: `tool "${event.toolName}" is not enabled by subagent "${childAgent ?? 'unknown'}"`,
       };
     }
 
@@ -243,52 +302,5 @@ export function registerSubagentChildRuntime(
       };
     }
     freezeToolInput(event.input);
-  });
-
-  pi.registerTool({
-    name: CHILD_COMPLETION_TOOL,
-    label: 'Complete Delegated Workflow Step',
-    description:
-      'Return one validated result from a pi-workflows delegated child step',
-    promptSnippet: 'Complete the delegated workflow step',
-    promptGuidelines: [
-      'Call workflow_complete_step alone after all delegated work is complete.',
-    ],
-    parameters: WORKFLOW_COMPLETION_PARAMETERS,
-    executionMode: 'sequential',
-    execute: async (_toolCallId, params) => {
-      if (!activePolicy) {
-        throw new Error('No delegated workflow policy is active');
-      }
-      if (policyError) throw new Error(policyError);
-      const result = parseDelegatedStepResult(
-        {
-          version: 1,
-          policyDigest: activePolicy.policyDigest,
-          outcome: params.outcome,
-          summary: params.summary,
-          ...(params.artifact !== undefined
-            ? { artifact: params.artifact }
-            : {}),
-        },
-        activePolicy,
-      );
-      writeResult(activePolicy, result);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Captured workflow step outcome "${result.outcome}".`,
-          },
-        ],
-        details: {
-          workflowId: activePolicy.workflowId,
-          runId: activePolicy.runId,
-          stepId: activePolicy.stepId,
-          outcome: result.outcome,
-        },
-        terminate: true,
-      };
-    },
   });
 }

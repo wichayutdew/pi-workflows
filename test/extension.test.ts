@@ -33,13 +33,14 @@ test('extension entry point registers the harness surface', () => {
   assert.equal(commands.has('workflow-start'), true);
   assert.equal(commands.has('workflow-pause'), true);
   assert.equal(commands.has('workflow-resume'), true);
+  assert.equal(commands.has('workflow-status'), true);
   assert.equal(events.has('before_agent_start'), true);
   assert.equal(events.has('session_start'), true);
   assert.equal(channels.has('plannotator:review-result'), true);
   assert.equal(channels.has('prompt-template:subagent:response'), false);
 });
 
-test('the entry point leaves unrelated pi-subagents children untouched', () => {
+test('the entry point installs an inert policy listener in pi-subagents children', () => {
   const previousChild = process.env.PI_SUBAGENT_CHILD;
   const previousAgent = process.env.PI_SUBAGENT_CHILD_AGENT;
   process.env.PI_SUBAGENT_CHILD = '1';
@@ -67,7 +68,10 @@ test('the entry point leaves unrelated pi-subagents children untouched', () => {
     piWorkflowsExtension(pi);
     assert.deepEqual([...commands], []);
     assert.deepEqual([...tools], []);
-    assert.deepEqual([...events], []);
+    assert.equal(events.has('input'), true);
+    assert.equal(events.has('before_agent_start'), true);
+    assert.equal(events.has('tool_call'), true);
+    assert.equal(events.has('session_start'), false);
     assert.deepEqual(activeTools, []);
   } finally {
     if (previousChild === undefined) delete process.env.PI_SUBAGENT_CHILD;

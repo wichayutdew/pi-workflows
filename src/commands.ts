@@ -74,7 +74,7 @@ export function registerHarnessCommands(
   });
 
   pi.registerCommand('workflow-status', {
-    description: 'Show the active workflow checkpoint',
+    description: 'Open the active workflow status board',
     handler: async (_args, ctx) => controller.status(ctx),
   });
 }

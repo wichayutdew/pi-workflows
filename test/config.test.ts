@@ -35,7 +35,7 @@ test('validates per-step subagent model and execution budgets', () => {
   steps.inspect = {
     ...steps.inspect,
     subagent: {
-      agent: 'pi-workflows.inspector',
+      agent: 'worker',
       context: 'fork',
       model: 'anthropic/claude-sonnet-4',
       timeoutMs: 120_000,
@@ -47,7 +47,7 @@ test('validates per-step subagent model and execution budgets', () => {
   const result = validateWorkflow(raw);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.value?.steps.inspect?.subagent, {
-    agent: 'pi-workflows.inspector',
+    agent: 'worker',
     context: 'fork',
     model: 'anthropic/claude-sonnet-4',
     timeoutMs: 120_000,
@@ -61,7 +61,7 @@ test('validates per-step subagent model and execution budgets', () => {
   invalidSteps.inspect = {
     ...invalidSteps.inspect,
     subagent: {
-      agent: 'reviewer',
+      agent: 'Reviewer!',
       context: 'shared',
       toolBudget: { soft: 10, hard: 5 },
     },
@@ -69,7 +69,7 @@ test('validates per-step subagent model and execution budgets', () => {
   const invalidResult = validateWorkflow(invalid);
   assert.match(
     invalidResult.errors.join('\n'),
-    /agent: invalid value "reviewer"/,
+    /agent: invalid value "Reviewer!"/,
   );
   assert.match(invalidResult.errors.join('\n'), /expected fresh or fork/);
   assert.match(invalidResult.errors.join('\n'), /soft: must not exceed hard/);
@@ -93,12 +93,12 @@ test('validates per-step subagent model and execution budgets', () => {
   const namedSteps = named.steps as Record<string, Record<string, unknown>>;
   namedSteps.inspect = {
     ...namedSteps.inspect,
-    subagent: 'pi-workflows.inspector',
+    subagent: 'reviewer',
   };
   const namedResult = validateWorkflow(named);
   assert.deepEqual(namedResult.errors, []);
   assert.deepEqual(namedResult.value?.steps.inspect?.subagent, {
-    agent: 'pi-workflows.inspector',
+    agent: 'reviewer',
     context: 'fresh',
     timeoutMs: 900_000,
     artifacts: false,
@@ -111,11 +111,11 @@ test('validates per-step subagent model and execution budgets', () => {
   >;
   invalidNameSteps.inspect = {
     ...invalidNameSteps.inspect,
-    subagent: 'reviewer',
+    subagent: 'Reviewer!',
   };
   assert.match(
     validateWorkflow(invalidName).errors.join('\n'),
-    /subagent: invalid value "reviewer"/,
+    /subagent: invalid value "Reviewer!"/,
   );
 });
 
@@ -530,7 +530,7 @@ test('loader accepts YAML workflow files and rejects duplicate YAML keys', async
       'steps:',
       '  inspect:',
       '    prompt: Inspect safely',
-      '    subagent: pi-workflows.inspector',
+      '    subagent: reviewer',
       '    permissions:',
       '      tools: [bash]',
       '      bash:',
@@ -595,7 +595,7 @@ test('loader accepts YAML workflow files and rejects duplicate YAML keys', async
     assert.deepEqual(
       catalog.workflows.get('compact')?.definition.steps.inspect?.subagent,
       {
-        agent: 'pi-workflows.inspector',
+        agent: 'reviewer',
         context: 'fresh',
         timeoutMs: 900_000,
         artifacts: false,

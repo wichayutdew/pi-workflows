@@ -7,7 +7,9 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  Theme,
 } from '@earendil-works/pi-coding-agent';
+import type { Component } from '@earendil-works/pi-tui';
 import { WorkflowHarness } from '../src/harness.ts';
 import { loadCatalog } from '../src/config/load.ts';
 import { createRun } from '../src/engine/state.ts';
@@ -78,9 +80,16 @@ interface HarnessFixture {
     display?: boolean;
   }>;
   sentUserMessages: string[];
+  notifications: Array<{
+    message: string;
+    type: 'info' | 'warning' | 'error' | undefined;
+  }>;
+  customRenders: string[][];
+  repaintRequests: Array<boolean | undefined>;
   selectResponses: Array<string | undefined>;
   inputResponses: Array<string | undefined>;
   activeTools: () => string[];
+  setMode(value: ExtensionContext['mode']): void;
   setIdle(value: boolean): void;
   abortCount: () => number;
   waitForIdleCount: () => number;
@@ -101,17 +110,45 @@ function createHarnessFixture(
     display?: boolean;
   }> = [];
   const sentUserMessages: string[] = [];
+  const notifications: HarnessFixture['notifications'] = [];
+  const customRenders: string[][] = [];
+  const repaintRequests: Array<boolean | undefined> = [];
   const selectResponses: Array<string | undefined> = [];
   const inputResponses: Array<string | undefined> = [];
   let activeTools = ['read', 'bash'];
   let idle = true;
   let abortCount = 0;
   let waitForIdleCount = 0;
+  type CustomFactory = (
+    tui: { requestRender(force?: boolean): void },
+    theme: Theme,
+    keybindings: unknown,
+    done: (value: unknown) => void,
+  ) => Component | Promise<Component>;
+  const theme = {
+    fg: (_color: string, value: string) => value,
+    bg: (_color: string, value: string) => value,
+    bold: (value: string) => value,
+  } as unknown as Theme;
   const ui = {
-    notify() {},
+    notify(message: string, type: 'info' | 'warning' | 'error' | undefined) {
+      notifications.push({ message, type });
+    },
     setStatus() {},
     select: async () => selectResponses.shift(),
     input: async () => inputResponses.shift(),
+    custom: async (factory: CustomFactory) =>
+      new Promise<unknown>((resolve, reject) => {
+        const tui = {
+          requestRender(force?: boolean) {
+            repaintRequests.push(force);
+          },
+        };
+        Promise.resolve(factory(tui, theme, {}, resolve)).then((component) => {
+          customRenders.push(component.render(120));
+          component.handleInput?.('q');
+        }, reject);
+      }),
   };
   const context = {
     cwd,
@@ -207,9 +244,15 @@ function createHarnessFixture(
     checkpoints,
     sentMessages,
     sentUserMessages,
+    notifications,
+    customRenders,
+    repaintRequests,
     selectResponses,
     inputResponses,
     activeTools: () => [...activeTools],
+    setMode(value) {
+      (context as unknown as { mode: ExtensionContext['mode'] }).mode = value;
+    },
     setIdle(value: boolean) {
       idle = value;
     },
@@ -451,6 +494,70 @@ test('/workflow-list displays loaded workflows as a Markdown table', async () =>
         display: true,
       },
     ]);
+  } finally {
+    if (previousDirectory === undefined) delete process.env.PI_WORKFLOWS_DIR;
+    else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('/workflow-status opens a live TUI and keeps a text fallback', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-status-'));
+  const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+  process.env.PI_WORKFLOWS_DIR = directory;
+  try {
+    await writeMainWorkflow(directory);
+    const fixture = createHarnessFixture(directory);
+    await initialize(fixture);
+    const start = fixture.commands.get('main-workflow');
+    const status = fixture.commands.get('workflow-status');
+    assert.ok(start);
+    assert.ok(status);
+
+    await start('inspect the repository', fixture.context);
+    await status('', fixture.context);
+
+    assert.equal(fixture.customRenders.length, 1);
+    const board = fixture.customRenders[0]?.join('\n') ?? '';
+    assert.match(board, /✦ Workflow Status/);
+    assert.match(board, /\[RUNNING\]/);
+    assert.match(board, /main/);
+    assert.match(board, /execution main agent/);
+    assert.deepEqual(fixture.repaintRequests, [true]);
+
+    fixture.setMode('json');
+    await status('', fixture.context);
+    const fallback = fixture.notifications.at(-1);
+    assert.ok(fallback);
+    assert.equal(fallback.type, 'info');
+    assert.match(fallback.message, /Workflow: main/);
+    assert.match(fallback.message, /Status: running/);
+    assert.match(fallback.message, /Execution: main agent/);
+    assert.equal(fixture.customRenders.length, 1);
+  } finally {
+    if (previousDirectory === undefined) delete process.env.PI_WORKFLOWS_DIR;
+    else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('/workflow-status keeps the no-checkpoint notification', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-empty-status-'));
+  const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+  process.env.PI_WORKFLOWS_DIR = directory;
+  try {
+    const fixture = createHarnessFixture(directory);
+    await initialize(fixture);
+    const status = fixture.commands.get('workflow-status');
+    assert.ok(status);
+
+    await status('', fixture.context);
+
+    assert.deepEqual(fixture.customRenders, []);
+    assert.deepEqual(fixture.notifications.at(-1), {
+      message: 'No workflow checkpoint in this session',
+      type: 'info',
+    });
   } finally {
     if (previousDirectory === undefined) delete process.env.PI_WORKFLOWS_DIR;
     else process.env.PI_WORKFLOWS_DIR = previousDirectory;
@@ -719,6 +826,11 @@ test('the harness delegates a step and advances only from its correlated child r
     assert.equal(delegatedRequest?.agent, 'pi-workflows.step');
     assert.equal(delegatedRequest?.context, 'fresh');
     assert.equal(delegatedRequest?.skill, false);
+    assert.deepEqual(delegatedRequest?.acceptance, {
+      level: 'none',
+      reason:
+        'Pi Workflows owns correlated step completion and human-review gates',
+    });
     assert.deepEqual(fixture.activeTools(), ['read', 'bash']);
   } finally {
     if (previousDirectory === undefined) delete process.env.PI_WORKFLOWS_DIR;

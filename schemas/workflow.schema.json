@@ -98,9 +98,9 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_@./:+-]+$"
     },
-    "workflowSubagentName": {
+    "subagentRuntimeName": {
       "type": "string",
-      "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
     },
     "prompt": {
       "oneOf": [
@@ -349,14 +349,14 @@
     "subagent": {
       "oneOf": [
         {
-          "$ref": "#/$defs/workflowSubagentName"
+          "$ref": "#/$defs/subagentRuntimeName"
         },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "agent": {
-              "$ref": "#/$defs/workflowSubagentName",
+              "$ref": "#/$defs/subagentRuntimeName",
               "default": "pi-workflows.step"
             },
             "context": {
@@ -405,8 +405,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "pattern": "^pi-workflows\\.[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
+            "$ref": "#/$defs/subagentRuntimeName"
           }
         },
         "contexts": {
