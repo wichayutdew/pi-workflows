@@ -7,10 +7,13 @@ flowchart LR
   Install[bun install] --> Check[bun run check]
   Check --> Typecheck[tsc --noEmit]
   Typecheck --> Tests[bun run test:coverage]
-  Tests --> Coverage[100% lines, functions, statements<br/>plus src manifest check]
+  Tests --> Coverage[LCOV lines and functions above 90%<br/>plus Bun coverage thresholds]
   Coverage --> E2E[bun run test:e2e<br/>real Pi RPC /work]
   E2E --> Build[bun run build]
 ```
+
+The E2E run uses `bunfig.e2e.toml` with coverage disabled so it cannot replace
+the unit suite's `coverage/lcov.info` before CI uploads that report to Codecov.
 
 ## Test Coverage Map
 

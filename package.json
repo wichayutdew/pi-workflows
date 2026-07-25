@@ -44,9 +44,11 @@
     "lint": "bun --bun eslint .",
     "lint:fix": "bun --bun eslint . --fix",
     "test": "bun test --no-orphans --reporter=dots",
-    "test:e2e": "bun test --no-orphans test/e2e/workflow-runtime.test.ts --reporter=dots",
+    "test:coverage": "bun run test && bun run coverage:check",
+    "coverage:check": "bun .github/scripts/check-coverage.mjs coverage/lcov.info",
+    "test:e2e": "bun --config=bunfig.e2e.toml test --no-orphans test/e2e/workflow-runtime.test.ts --reporter=dots",
     "typecheck": "tsc --noEmit",
-    "check": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run test:e2e && bun run build"
+    "check": "bun run lint && bun run format:check && bun run typecheck && bun run test:coverage && bun run test:e2e && bun run build"
   },
   "dependencies": {
     "yaml": "^2.8.3"
