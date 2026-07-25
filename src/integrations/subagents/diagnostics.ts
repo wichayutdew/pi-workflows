@@ -9,6 +9,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import type { BashPermission } from '../../config/types.ts';
 import { authorizeBash } from '../../policy/bash.ts';
 
 const SESSION_FILE_NAME = 'session.jsonl';
@@ -59,6 +60,17 @@ export interface ToolFailureDiagnostic {
   transcriptTurnCount?: number;
   correlation?:
     'latest-before-completion' | 'successful-output-before-completion';
+}
+
+export interface DelegationReplayAudit {
+  replaySafe: boolean;
+  toolCount: number;
+}
+
+export interface DelegationReplayExpectation {
+  task: string;
+  bashPermission: BashPermission;
+  approvedBashCommands: readonly string[];
 }
 
 export interface SubagentSessionIdentity {
@@ -154,6 +166,142 @@ function toolCallText(
 
 export function failedToolName(error: string | undefined): string | undefined {
   return error?.match(/\b([a-z][\w-]*) failed(?:\s*\(|:)/i)?.[1];
+}
+
+function initialDelegationTask(transcript: string): string | undefined {
+  for (const line of transcript.split('\n')) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(entry) || entry.type !== 'message') continue;
+    const message = entry.message;
+    if (!isRecord(message) || message.role !== 'user') continue;
+    if (!Array.isArray(message.content)) return undefined;
+    const textParts = message.content.flatMap((item) =>
+      isRecord(item) && item.type === 'text' && typeof item.text === 'string'
+        ? [item.text]
+        : [],
+    );
+    if (textParts.length !== 1) return undefined;
+    const text = textParts[0];
+    if (text === undefined) return undefined;
+    return text;
+  }
+  return undefined;
+}
+
+function transcriptMatchesDelegation(
+  transcript: string,
+  expectedTask: string,
+): boolean {
+  return initialDelegationTask(transcript) === expectedTask;
+}
+
+export function parseDelegationReplayAudit(
+  transcript: string,
+  expectation: DelegationReplayExpectation,
+  completeTranscript = true,
+): DelegationReplayAudit {
+  const calls = new Map<string, RecordedToolCall>();
+  const recordedCalls: RecordedToolCall[] = [];
+  const diagnostics: RecordedToolFailure[] = [];
+  const resultCallIds = new Set<string>();
+  let structurallyValid = true;
+  let order = 0;
+
+  for (const line of transcript.split('\n')) {
+    order += 1;
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      structurallyValid = false;
+      continue;
+    }
+    if (!isRecord(entry) || entry.type !== 'message') continue;
+    const message = entry.message;
+    if (!isRecord(message)) {
+      structurallyValid = false;
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      if (!Array.isArray(message.content)) {
+        structurallyValid = false;
+        continue;
+      }
+      for (const item of message.content) {
+        if (!isRecord(item) || item.type !== 'toolCall') continue;
+        if (
+          typeof item.id !== 'string' ||
+          typeof item.name !== 'string' ||
+          calls.has(item.id)
+        ) {
+          structurallyValid = false;
+          continue;
+        }
+        const call = toolCallText(item.name, item.arguments);
+        const recordedCall: RecordedToolCall = {
+          id: item.id,
+          order,
+          tool: item.name,
+          ...(call ? { call } : {}),
+        };
+        calls.set(item.id, recordedCall);
+        recordedCalls.push(recordedCall);
+      }
+      continue;
+    }
+
+    if (message.role !== 'toolResult') continue;
+    if (
+      typeof message.toolCallId !== 'string' ||
+      typeof message.toolName !== 'string' ||
+      typeof message.isError !== 'boolean' ||
+      !Array.isArray(message.content) ||
+      resultCallIds.has(message.toolCallId)
+    ) {
+      structurallyValid = false;
+      continue;
+    }
+    resultCallIds.add(message.toolCallId);
+    const recorded = calls.get(message.toolCallId);
+    if (recorded?.tool !== message.toolName) {
+      structurallyValid = false;
+      continue;
+    }
+    if (message.isError) {
+      const output = textContent(message.content);
+      diagnostics.push({
+        tool: message.toolName,
+        callId: message.toolCallId,
+        order,
+        ...(recorded.call ? { call: recorded.call } : {}),
+        ...(output ? { output } : {}),
+      });
+    }
+  }
+
+  return {
+    replaySafe:
+      completeTranscript &&
+      structurallyValid &&
+      transcriptMatchesDelegation(transcript, expectation.task) &&
+      recordedCalls.every((call) =>
+        replaySafeToolCall(
+          call,
+          diagnostics,
+          expectation.bashPermission,
+          expectation.approvedBashCommands,
+        ),
+      ),
+    toolCount: recordedCalls.length,
+  };
 }
 
 export function parseToolFailureDiagnostic(
@@ -546,6 +694,8 @@ function preExecutionBashFailure(output: string | undefined): boolean {
 function replaySafeToolCall(
   call: RecordedToolCall,
   diagnostics: RecordedToolFailure[],
+  bashPermission?: BashPermission,
+  approvedBashCommands: readonly string[] = [],
 ): boolean {
   const tool = call.tool.toLowerCase();
   if (REPLAY_SAFE_TOOLS.has(tool)) return true;
@@ -554,6 +704,13 @@ function replaySafeToolCall(
     authorizeBash(call.call, { mode: 'read-only', allow: [] }).allowed === true
   ) {
     return true;
+  }
+  if (
+    !bashPermission ||
+    authorizeBash(call.call, bashPermission, approvedBashCommands).allowed ===
+      true
+  ) {
+    return false;
   }
   const failure = diagnostics.find(
     (diagnostic) => diagnostic.callId === call.id,
@@ -763,6 +920,27 @@ export async function readToolFailureDiagnostic(
       terminalError,
       tail?.truncated !== true,
     );
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readDelegationReplayAudit(
+  sessionFile: string | undefined,
+  trustedRoot: string | undefined,
+  identity: SubagentSessionIdentity | undefined,
+  expectation: DelegationReplayExpectation,
+): Promise<DelegationReplayAudit | undefined> {
+  if (!sessionFile || !trustedRoot || !identity) return undefined;
+  try {
+    const tail = await readContainedSessionTail(
+      sessionFile,
+      trustedRoot,
+      identity,
+    );
+    return tail
+      ? parseDelegationReplayAudit(tail.content, expectation, !tail.truncated)
+      : undefined;
   } catch {
     return undefined;
   }

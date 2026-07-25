@@ -248,16 +248,16 @@ configured in `~/.pi/agent/workflows/settings.yaml`.
 
 Supported fields:
 
-| Field               | Default               | Description                                                                                                          |
-| ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `agent`             | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.                                    |
-| `context`           | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                                                 |
-| `model`             | Profile/default model | Optional pi-subagents model override for the selected profile.                                                       |
-| `timeoutMs`         | `900000`              | Child deadline, from 1 second through 24 hours.                                                                      |
-| `turnBudget`        | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                                                                |
-| `toolBudget`        | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array.                                  |
-| `artifacts`         | `false`               | Ask pi-subagents to retain its normal run artifacts.                                                                 |
-| `retryToolFailures` | `false`               | Authorize one fresh-context retry after a tool failure; only for wholly replay-safe steps without `edit` or `write`. |
+| Field               | Default               | Description                                                                                                                                                     |
+| ------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`             | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.                                                                               |
+| `context`           | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                                                                                            |
+| `model`             | Profile/default model | Optional pi-subagents model override for the selected profile.                                                                                                  |
+| `timeoutMs`         | `900000`              | Child deadline, from 1 second through 24 hours.                                                                                                                 |
+| `turnBudget`        | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                                                                                                           |
+| `toolBudget`        | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array.                                                                             |
+| `artifacts`         | `false`               | Ask pi-subagents to retain its normal run artifacts.                                                                                                            |
+| `retryToolFailures` | `false`               | Authorize one fresh reinforcement retry in allow-list or unrestricted Bash mode; runtime still requires a wholly replay-safe attempt without `edit` or `write`. |
 
 Pi Workflows installs an inert listener in every Pi Subagents child and
 activates policy only after a valid, single-use workflow capability arrives, so
@@ -590,21 +590,34 @@ blocked. Wait for the terminal event; if the delegation channel has already
 failed, restart Pi before resuming. This prevents an old writer and a resumed
 writer from overlapping.
 
-When a delegated tool fails, the harness correlates the terminal response with
-the retained Pi child session and records the exact failed tool call, tool
-error, subagent exit code, terminal error, and validated diagnostic session
-path. The fallback accepts only regular, non-symlink session files contained
-by the current parent session's child-run root, reads a bounded tail, and
-requires the tool error to match the terminal failure. If correlation is not
-safe, the terminal error is preserved without claiming an exact command. A
-failed process status is treated as resolved when the retained session proves
-a successful `structured_output` occurred after every failed tool result and
-the correlated result validates. This accepts the same finalized child result;
-it never replays mutation-capable work. Without a valid finalized result, a
-delegated step may receive the actionable detail in one bounded retry prompt
-only when a complete trusted transcript proves every recorded call was
-read-only or rejected before execution. An unknown-effect Bash call, a
-truncated transcript, or missing correlation pauses instead.
+When a delegated child returns `failed` or `structured_output_failed` with a
+terminal error or nonzero exit code, the harness audits the retained Pi child
+session before deciding whether to launch one fresh reinforcement retry. The
+audit accepts only regular, non-symlink session files contained by the current
+parent session's child-run root, requires the persisted policy-stripped task and
+its per-request binding to match the active delegation, reads a bounded complete
+tail, and proves that every recorded call was read-only or rejected by that
+step's actual Bash policy before execution. Approved exact Bash commands are
+evaluated with the same authorization inputs used by the child. A zero-tool
+attempt is also replay-safe when the complete bound transcript proves it.
+
+When the terminal error identifies a failed tool, the harness also records the
+exact correlated call, tool error, subagent exit code, terminal error, and
+validated diagnostic session path. If exact correlation is unavailable, the
+generic terminal evidence is retained without claiming an unrelated command.
+A failed process status is treated as resolved when the transcript proves a
+successful `structured_output` occurred after every failed tool result and the
+correlated result validates. This accepts the same finalized child result; it
+never replays mutation-capable work.
+
+Without a valid finalized result, the next fresh child receives the bounded
+terminal evidence in an escaped JSON data boundary and is told to inspect
+current state, change its approach, resolve the cause, and finish the original
+step. A second failure pauses. Mutation-capable or unknown-effect calls, a
+truncated or malformed transcript, a missing active-request binding,
+cancellation, interruption, timeout, and budget exhaustion do not trigger an
+automatic retry. Local channel failures also wait for confirmed child
+termination instead of risking two live children.
 
 Inside a live child, recovery is not tied to a list of known error strings. The
 completion contract requires the agent to inspect the exact error and current
@@ -793,8 +806,9 @@ ceilings, deterministic transitions, configuration reconciliation, pause/resume
 state, gate handling, MCP isolation, Bash policy, extension tool selection,
 main-agent completion, built-in feedback/approval, subagent request correlation
 and cancellation, child policy enforcement, and dependency preflight,
-including reviewed exact-command propagation and fail-closed legacy
-checkpoints. `bun run check` also launches real Pi RPC subprocesses, invokes
+including reinforcement retry after replay-safe terminal errors and nonzero
+exits, reviewed exact-command propagation, and fail-closed legacy checkpoints.
+`bun run check` also launches real Pi RPC subprocesses, invokes
 `/work`, and verifies fresh `scout`, `worker`, and `reviewer` children receive
 only the explicit compact handoff from the immediately preceding step.
 
@@ -815,7 +829,7 @@ extensions, without hard-coding them into the orchestrator, are:
 
 | Parameter                         | Why it belongs in configuration                                                             |
 | --------------------------------- | ------------------------------------------------------------------------------------------- |
-| Retry and backoff                 | Let a step distinguish a transient child failure from a workflow-level pause.               |
+| Configurable retry and backoff    | Extend the single safe reinforcement retry with per-step transient-failure policy.          |
 | Acceptance criteria               | Give each step machine-checkable completion evidence and verification commands.             |
 | Working directory or worktree     | Isolate mutating steps, monorepo packages, and concurrent branches.                         |
 | Parallel groups and join policy   | Run independent steps together and declare fail-fast, quorum, or all-success behavior.      |
