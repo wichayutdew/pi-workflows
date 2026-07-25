@@ -284,14 +284,8 @@ export async function loadCatalog(
           'warning',
         ),
       );
-    } else if (!settingsResult.settings.permissionCeiling) {
-      diagnostics.push(
-        diagnostic(
-          projectDirectory,
-          'project workflows were skipped because no user permission ceiling is configured',
-        ),
-      );
     } else {
+      const permissionCeiling = settingsResult.settings.permissionCeiling!;
       const projectResult = await loadWorkflowDirectory(
         projectDirectory,
         'project',
@@ -300,7 +294,7 @@ export async function loadCatalog(
       for (const workflow of projectResult.workflows) {
         const ceilingErrors = checkWorkflowAgainstCeiling(
           workflow.definition,
-          settingsResult.settings.permissionCeiling,
+          permissionCeiling,
         );
         if (ceilingErrors.length > 0) {
           diagnostics.push(

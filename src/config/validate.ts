@@ -5,8 +5,8 @@ import {
   EMPTY_REQUIREMENTS,
   SUBAGENT_RUNTIME_NAME_PATTERN,
   WORKFLOW_SCHEMA_VERSION,
-  type BashMode,
   type BashApprovalSource,
+  type BashMode,
   type BashPermission,
   type BashRule,
   type PermissionCeiling,
@@ -268,18 +268,7 @@ function parseBashPermission(
           errors,
           BASH_APPROVAL_SOURCE_PATTERN,
         )
-  ).filter((source): source is BashApprovalSource => {
-    const valid =
-      source === 'verification-worker' ||
-      source === 'verification-reviewer' ||
-      source === 'remote-actions';
-    if (!valid) {
-      errors.push(
-        `${path}.approvedSources: expected verification-worker, verification-reviewer, or remote-actions`,
-      );
-    }
-    return valid;
-  });
+  ) as BashApprovalSource[];
 
   const normalizedMode = validMode ? mode : 'deny';
   if (normalizedMode !== 'allow-list' && allow.length > 0) {

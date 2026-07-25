@@ -143,15 +143,6 @@ export function tokenizeRestrictedCommand(command: string): ValidationTokens {
       tokenStarted = true;
       continue;
     }
-    if (quote) {
-      if (character === quote) {
-        quote = undefined;
-      } else {
-        token += character;
-      }
-      tokenStarted = true;
-      continue;
-    }
     if (character === "'" || character === '"') {
       quote = character;
       tokenStarted = true;

@@ -1,58 +1,58 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { describe, expect, test } from 'bun:test';
 import { invalidCompletionCallIds } from '../src/policy/completion-batch.ts';
 
-const completionTool = 'workflow_complete_step';
+describe('when testing completion batch', () => {
+  const completionTool = 'workflow_complete_step';
 
-function assistantMessage(
-  calls: Array<{ id: string; name: string }>,
-): Record<string, unknown> {
-  return {
-    role: 'assistant',
-    content: calls.map((call) => ({
-      type: 'toolCall',
-      ...call,
-      arguments: {},
-    })),
-  };
-}
+  function assistantMessage(
+    calls: Array<{ id: string; name: string }>,
+  ): Record<string, unknown> {
+    return {
+      role: 'assistant',
+      content: calls.map((call) => ({
+        type: 'toolCall',
+        ...call,
+        arguments: {},
+      })),
+    };
+  }
 
-test('accepts completion only as the sole tool call', () => {
-  assert.deepEqual(
-    [
-      ...invalidCompletionCallIds(
-        assistantMessage([{ id: 'complete', name: completionTool }]),
-        completionTool,
-      ),
-    ],
-    [],
-  );
-});
+  describe('should satisfy its behavioral contract', () => {
+    test('accepts completion only as the sole tool call', () => {
+      // given
+      // when
+      // then
+      expect([
+        ...invalidCompletionCallIds(
+          assistantMessage([{ id: 'complete', name: completionTool }]),
+          completionTool,
+        ),
+      ]).toEqual([]);
+    });
 
-test('rejects completion anywhere in a mixed or duplicate batch', () => {
-  assert.deepEqual(
-    [
-      ...invalidCompletionCallIds(
-        assistantMessage([
-          { id: 'complete', name: completionTool },
-          { id: 'read', name: 'read' },
-        ]),
-        completionTool,
-      ),
-    ],
-    ['complete'],
-  );
-  assert.deepEqual(
-    [
-      ...invalidCompletionCallIds(
-        assistantMessage([
-          { id: 'read', name: 'read' },
-          { id: 'complete-1', name: completionTool },
-          { id: 'complete-2', name: completionTool },
-        ]),
-        completionTool,
-      ),
-    ],
-    ['complete-1', 'complete-2'],
-  );
+    test('rejects completion anywhere in a mixed or duplicate batch', () => {
+      // given
+      // when
+      // then
+      expect([
+        ...invalidCompletionCallIds(
+          assistantMessage([
+            { id: 'complete', name: completionTool },
+            { id: 'read', name: 'read' },
+          ]),
+          completionTool,
+        ),
+      ]).toEqual(['complete']);
+      expect([
+        ...invalidCompletionCallIds(
+          assistantMessage([
+            { id: 'read', name: 'read' },
+            { id: 'complete-1', name: completionTool },
+            { id: 'complete-2', name: completionTool },
+          ]),
+          completionTool,
+        ),
+      ]).toEqual(['complete-1', 'complete-2']);
+    });
+  });
 });

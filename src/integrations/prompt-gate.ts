@@ -33,22 +33,23 @@ export async function requestPromptGateReview(
     return { status: 'dismissed' };
   }
 
-  while (true) {
-    const feedback = await ui.input(
+  let feedback = await ui.input(
+    'Workflow review feedback',
+    'Describe the required changes',
+    ...(signal ? [{ signal }] : []),
+  );
+  while (feedback !== undefined && !feedback.trim()) {
+    ui.notify('Feedback cannot be empty', 'warning');
+    feedback = await ui.input(
       'Workflow review feedback',
       'Describe the required changes',
       ...(signal ? [{ signal }] : []),
     );
-    if (feedback === undefined) {
-      return { status: 'dismissed' };
-    }
-    if (feedback.trim()) {
-      return {
-        status: 'resolved',
-        approved: false,
-        feedback: feedback.trim(),
-      };
-    }
-    ui.notify('Feedback cannot be empty', 'warning');
   }
+  if (feedback === undefined) return { status: 'dismissed' };
+  return {
+    status: 'resolved',
+    approved: false,
+    feedback: feedback.trim(),
+  };
 }

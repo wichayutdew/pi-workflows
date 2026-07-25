@@ -1,126 +1,197 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { describe, expect, test } from 'bun:test';
 import { preflightStep } from '../src/preflight.ts';
 import { loadedWorkflow } from './helpers.ts';
 
-test('preflight checks required tools, extensions, and skills', () => {
-  const workflow = loadedWorkflow({
-    version: 1,
-    id: 'preflight',
-    command: 'preflight',
-    description: 'Preflight',
-    start: 'run',
-    steps: {
-      run: {
-        subagent: {},
-        prompt: 'Run',
-        permissions: {
-          tools: ['read'],
-          extensions: ['plannotator'],
-          skills: ['planning'],
+describe('when testing preflight', () => {
+  describe('should satisfy its behavioral contract', () => {
+    test('preflight checks required tools, extensions, and skills', () => {
+      // given
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'preflight',
+        command: 'preflight',
+        description: 'Preflight',
+        start: 'run',
+        steps: {
+          run: {
+            subagent: {},
+            prompt: 'Run',
+            permissions: {
+              tools: ['read'],
+              extensions: ['plannotator'],
+              skills: ['planning'],
+            },
+            requires: {
+              tools: ['read'],
+              extensions: ['plannotator'],
+              skills: ['planning'],
+            },
+            transitions: { done: '$done' },
+          },
         },
-        requires: {
-          tools: ['read'],
-          extensions: ['plannotator'],
-          skills: ['planning'],
-        },
-        transitions: { done: '$done' },
-      },
-    },
-  });
-  const step = workflow.definition.steps.run!;
-  assert.deepEqual(
-    preflightStep(step, {
-      tools: [
-        { name: 'read', sourceInfo: { source: 'builtin' } },
-        {
-          name: 'subagent',
-          sourceInfo: { path: '/packages/pi-subagents/index.ts' },
-        },
-      ],
-      commands: [
-        {
-          name: 'plannotator',
-          sourceInfo: { path: '/packages/plannotator/index.ts' },
-        },
-      ],
-      skills: new Set(['planning']),
-    }),
-    [],
-  );
+      });
+      // when
+      const step = workflow.definition.steps.run!;
+      // then
+      expect(
+        preflightStep(step, {
+          tools: [
+            { name: 'read', sourceInfo: { source: 'builtin' } },
+            {
+              name: 'subagent',
+              sourceInfo: { path: '/packages/pi-subagents/index.ts' },
+            },
+          ],
+          commands: [
+            {
+              name: 'plannotator',
+              sourceInfo: { path: '/packages/plannotator/index.ts' },
+            },
+          ],
+          skills: new Set(['planning']),
+        }),
+      ).toEqual([]);
 
-  const errors = preflightStep(step, {
-    tools: [],
-    commands: [],
-    skills: new Set(),
-  });
-  assert.match(errors.join('\n'), /required tool "read"/);
-  assert.match(errors.join('\n'), /required extension "plannotator"/);
-  assert.match(errors.join('\n'), /required skill "planning"/);
-  assert.match(errors.join('\n'), /pi-subagents is required/);
-});
+      const errors = preflightStep(step, {
+        tools: [],
+        commands: [],
+        skills: new Set(),
+      });
+      expect(errors.join('\n')).toMatch(/required tool "read"/);
+      expect(errors.join('\n')).toMatch(/required extension "plannotator"/);
+      expect(errors.join('\n')).toMatch(/required skill "planning"/);
+      expect(errors.join('\n')).toMatch(/pi-subagents is required/);
+    });
 
-test('main-agent steps and prompt gates need no optional integration', () => {
-  const workflow = loadedWorkflow({
-    version: 1,
-    id: 'portable',
-    command: 'portable',
-    description: 'Portable workflow',
-    start: 'plan',
-    steps: {
-      plan: {
-        prompt: 'Plan',
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'rejected',
+    test('main-agent steps and prompt gates need no optional integration', () => {
+      // given
+      // when
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'portable',
+        command: 'portable',
+        description: 'Portable workflow',
+        start: 'plan',
+        steps: {
+          plan: {
+            prompt: 'Plan',
+            gate: {
+              submitOutcome: 'submit',
+              approvedOutcome: 'approved',
+              rejectedOutcome: 'rejected',
+            },
+            transitions: {
+              approved: '$done',
+              rejected: 'plan',
+            },
+          },
         },
-        transitions: {
-          approved: '$done',
-          rejected: 'plan',
-        },
-      },
-    },
-  });
+      });
 
-  assert.deepEqual(
-    preflightStep(workflow.definition.steps.plan!, {
-      tools: [],
-      commands: [],
-      skills: new Set(),
-    }),
-    [],
-  );
-});
+      // then
+      expect(
+        preflightStep(workflow.definition.steps.plan!, {
+          tools: [],
+          commands: [],
+          skills: new Set(),
+        }),
+      ).toEqual([]);
+    });
 
-test('Plannotator gates require only the Plannotator integration', () => {
-  const workflow = loadedWorkflow({
-    version: 1,
-    id: 'reviewed',
-    command: 'reviewed',
-    description: 'Reviewed workflow',
-    start: 'plan',
-    steps: {
-      plan: {
-        prompt: 'Plan',
-        gate: {
-          provider: 'plannotator',
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'rejected',
+    test('Plannotator gates require only the Plannotator integration', () => {
+      // given
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'reviewed',
+        command: 'reviewed',
+        description: 'Reviewed workflow',
+        start: 'plan',
+        steps: {
+          plan: {
+            prompt: 'Plan',
+            gate: {
+              provider: 'plannotator',
+              submitOutcome: 'submit',
+              approvedOutcome: 'approved',
+              rejectedOutcome: 'rejected',
+            },
+            transitions: {
+              approved: '$done',
+              rejected: 'plan',
+            },
+          },
         },
-        transitions: {
-          approved: '$done',
-          rejected: 'plan',
+      });
+      // when
+      const errors = preflightStep(workflow.definition.steps.plan!, {
+        tools: [],
+        commands: [],
+        skills: new Set(),
+      });
+      // then
+      expect(errors.join('\n')).toMatch(/Plannotator is required/);
+      expect(errors.join('\n')).not.toMatch(/pi-subagents/);
+    });
+
+    test('reports a missing MCP proxy for configured selectors', () => {
+      // given
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'mcp',
+        command: 'mcp',
+        description: 'MCP workflow',
+        start: 'run',
+        steps: {
+          run: {
+            prompt: 'Run',
+            permissions: { mcp: ['gitlab/get_merge_request'] },
+            transitions: { done: '$done' },
+          },
         },
-      },
-    },
+      });
+
+      // when
+      const errors = preflightStep(workflow.definition.steps.run!, {
+        tools: [],
+        commands: [],
+        skills: new Set(),
+      });
+
+      // then
+      expect(errors).toEqual([
+        'MCP selectors are configured, but the "mcp" proxy tool is not installed',
+      ]);
+      const plannotatorWorkflow = loadedWorkflow({
+        version: 1,
+        id: 'plannotator-present',
+        command: 'plannotator-present',
+        description: 'Plannotator present',
+        start: 'run',
+        steps: {
+          run: {
+            prompt: 'Run',
+            gate: {
+              provider: 'plannotator',
+              submitOutcome: 'submit',
+              approvedOutcome: 'approved',
+              rejectedOutcome: 'rejected',
+            },
+            transitions: { approved: '$done', rejected: 'run' },
+          },
+        },
+      });
+      expect(
+        preflightStep(plannotatorWorkflow.definition.steps.run!, {
+          tools: [
+            {
+              name: 'plannotator',
+              sourceInfo: { path: '/extensions/plannotator/index.ts' },
+            },
+          ],
+          commands: [],
+          skills: new Set(),
+        }),
+      ).toEqual([]);
+    });
   });
-  const errors = preflightStep(workflow.definition.steps.plan!, {
-    tools: [],
-    commands: [],
-    skills: new Set(),
-  });
-  assert.match(errors.join('\n'), /Plannotator is required/);
-  assert.doesNotMatch(errors.join('\n'), /pi-subagents/);
 });

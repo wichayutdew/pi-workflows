@@ -1,10 +1,14 @@
-import assert from 'node:assert/strict';
+import { expect } from 'bun:test';
 import { digest } from '../src/digest.ts';
 import type {
   LoadedWorkflow,
   WorkflowDefinition,
 } from '../src/config/types.ts';
 import { validateWorkflow } from '../src/config/validate.ts';
+
+export function expectTruthy<T>(value: T): asserts value {
+  expect(value).toBeTruthy();
+}
 
 export function baseWorkflow(): Record<string, unknown> {
   return {
@@ -44,7 +48,7 @@ export function baseWorkflow(): Record<string, unknown> {
 
 export function loadedWorkflow(raw = baseWorkflow()): LoadedWorkflow {
   const result = validateWorkflow(raw);
-  assert.ok(result.value, result.errors.join('\n'));
+  expect(result.value).toBeTruthy();
   const definition = result.value as WorkflowDefinition;
   const prompts = Object.fromEntries(
     Object.entries(definition.steps).map(([stepId, step]) => [

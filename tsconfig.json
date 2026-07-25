@@ -10,7 +10,7 @@
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["bun", "node"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

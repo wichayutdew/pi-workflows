@@ -120,7 +120,7 @@ export function registerSubagentChildRuntime(
   const childAgent =
     options.childAgent ?? process.env.PI_SUBAGENT_CHILD_AGENT?.trim();
 
-  const registerCompletionTool = (): void => {
+  const registerCompletionTool = (policy: ChildStepPolicy): void => {
     if (completionRegistered) return;
     completionRegistered = true;
     pi.registerTool({
@@ -135,23 +135,20 @@ export function registerSubagentChildRuntime(
       parameters: WORKFLOW_COMPLETION_PARAMETERS,
       executionMode: 'sequential',
       execute: async (_toolCallId, params) => {
-        if (!activePolicy) {
-          throw new Error('No delegated workflow policy is active');
-        }
         if (policyError) throw new Error(policyError);
         const result = parseDelegatedStepResult(
           {
             version: 1,
-            policyDigest: activePolicy.policyDigest,
+            policyDigest: policy.policyDigest,
             outcome: params.outcome,
             summary: params.summary,
             ...(params.artifact !== undefined
               ? { artifact: params.artifact }
               : {}),
           },
-          activePolicy,
+          policy,
         );
-        writeResult(activePolicy, result);
+        writeResult(policy, result);
         return {
           content: [
             {
@@ -160,9 +157,9 @@ export function registerSubagentChildRuntime(
             },
           ],
           details: {
-            workflowId: activePolicy.workflowId,
-            runId: activePolicy.runId,
-            stepId: activePolicy.stepId,
+            workflowId: policy.workflowId,
+            runId: policy.runId,
+            stepId: policy.stepId,
             outcome: result.outcome,
           },
           terminate: true,
@@ -200,7 +197,7 @@ export function registerSubagentChildRuntime(
       const profileTools = new Set(pi.getActiveTools());
       activePolicy = extracted.policy;
       policyError = undefined;
-      registerCompletionTool();
+      registerCompletionTool(activePolicy);
       effectiveTools = new Set(
         resolveActiveTools(
           pi.getAllTools(),
