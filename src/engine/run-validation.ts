@@ -109,6 +109,7 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
 
   const hasValidOptionalFields =
     isOptionalString(value.reviewedArtifact) &&
+    isOptionalString(value.reviewedFeedback) &&
     isOptionalString(value.stepHandoff) &&
     isOptionalString(value.pauseReason) &&
     isOptionalString(value.failedStepId) &&

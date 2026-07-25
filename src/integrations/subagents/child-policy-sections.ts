@@ -46,7 +46,18 @@ const isStepPermissions = (value: unknown): value is StepPermissions => {
         (source) =>
           source === 'verification-worker' ||
           source === 'verification-reviewer' ||
-          source === 'remote-actions',
+          source === 'remote-actions' ||
+          source === 'remote-push' ||
+          source === 'remote-drafts',
+      ));
+  const hasValidHandoffSources =
+    bash.handoffSources === undefined ||
+    (isStringArray(bash.handoffSources) &&
+      new Set(bash.handoffSources).size === bash.handoffSources.length &&
+      bash.handoffSources.every(
+        (source) =>
+          source === 'verification-worker' ||
+          source === 'verification-reviewer',
       ));
   const hasValidApprovalShape =
     bash.mode === 'allow-list'
@@ -62,6 +73,7 @@ const isStepPermissions = (value: unknown): value is StepPermissions => {
     isValidMode &&
     hasValidRules &&
     hasValidApprovedSources &&
+    hasValidHandoffSources &&
     hasValidApprovalShape
   );
 };

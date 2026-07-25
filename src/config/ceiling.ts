@@ -33,10 +33,14 @@ function bashWithinCeiling(
 
   const allowedRules = new Set(ceiling.allow.map(ruleKey));
   const allowedSources = new Set(ceiling.approvedSources ?? []);
+  const allowedHandoffSources = new Set(ceiling.handoffSources ?? []);
   return (
     requested.allow.every((rule) => allowedRules.has(ruleKey(rule))) &&
     (requested.approvedSources ?? []).every((source) =>
       allowedSources.has(source),
+    ) &&
+    (requested.handoffSources ?? []).every((source) =>
+      allowedHandoffSources.has(source),
     )
   );
 }

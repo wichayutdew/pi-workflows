@@ -13,7 +13,7 @@ export const RESOURCE_SELECTOR_PATTERN = /^[A-Za-z0-9_@./:+-]+$/;
 export const MCP_SELECTOR_PATTERN = /^[A-Za-z0-9_.:-]+(?:\/[A-Za-z0-9_.:-]+)?$/;
 export const EXECUTABLE_PATTERN = /^[A-Za-z0-9_./+-]+$/;
 export const BASH_APPROVAL_SOURCE_PATTERN =
-  /^(verification-worker|verification-reviewer|remote-actions)$/;
+  /^(verification-worker|verification-reviewer|remote-actions|remote-push|remote-drafts)$/;
 
 type StringOptions = {
   readonly pattern?: RegExp;

@@ -77,15 +77,17 @@ flowchart LR
 
 Supported variables:
 
-| Variable             | Source                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `{{workflow.input}}` | Command input.                                                                                     |
-| `{{workflow.id}}`    | Workflow definition.                                                                               |
-| `{{run.id}}`         | Runtime run.                                                                                       |
-| `{{step.id}}`        | Current step.                                                                                      |
-| `{{step.title}}`     | Current step.                                                                                      |
-| `{{last.summary}}`   | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt. |
-| `{{gate.feedback}}`  | Latest rejected gate.                                                                              |
+| Variable                | Source                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `{{workflow.input}}`    | Command input.                                                                                     |
+| `{{workflow.id}}`       | Workflow definition.                                                                               |
+| `{{run.id}}`            | Runtime run.                                                                                       |
+| `{{step.id}}`           | Current step.                                                                                      |
+| `{{step.title}}`        | Current step.                                                                                      |
+| `{{last.summary}}`      | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt. |
+| `{{gate.feedback}}`     | Latest rejected gate.                                                                              |
+| `{{reviewed.artifact}}` | Immutable artifact from the approved gate.                                                         |
+| `{{reviewed.feedback}}` | Feedback paired with that approval.                                                                |
 
 ## Prompt File Safety
 
@@ -127,17 +129,24 @@ flowchart TD
 An `allow-list` may supplement static rules with exact commands from the run's
 most recent human-approved gate artifact:
 
-| `approvedSources` value | Fenced JSON path                    |
-| ----------------------- | ----------------------------------- |
-| `verification-worker`   | `repositories[].worker[].command`   |
-| `verification-reviewer` | `repositories[].reviewer[].command` |
-| `remote-actions`        | Bash `actions[].input.command`      |
+| `approvedSources` value | Fenced JSON path                                 |
+| ----------------------- | ------------------------------------------------ |
+| `verification-worker`   | `repositories[].worker[].command`                |
+| `verification-reviewer` | `repositories[].reviewer[].command`              |
+| `remote-actions`        | Bash `actions[].input.command`                   |
+| `remote-push`           | Exact approved non-force push command            |
+| `remote-drafts`         | Parent-synthesized author-private draft commands |
 
 The step must include `bash` in `permissions.tools`. Exact strings are filtered
 by source and correlated into the step policy. Static `gh api` and `glab api`
 rules are default-GET-only; API mutations and non-force pushes require an exact
 reviewed `remote-actions` command. Ordinary summaries and legacy checkpoints
 without reviewed-artifact provenance grant nothing.
+
+`handoffSources` optionally permits only `verification-worker` and
+`verification-reviewer` to propose command-only retry repairs. It never grants
+new targets, effects, paths, or authority; a material change must pause or be
+handled by a new workflow.
 
 `approvedSources` selects provenance, not an executable family. For example,
 `verification-worker` extracts only exact

@@ -85,6 +85,7 @@ steps:
       skills: [superpowers:test-driven-development]
     transitions:
       ready: verify
+      retry: implement
       blocked: $pause
   verify:
     title: Verify the result
@@ -112,4 +113,5 @@ steps:
     transitions:
       passed: $done
       failed: implement
+      retry: verify
       blocked: $pause

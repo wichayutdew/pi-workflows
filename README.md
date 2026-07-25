@@ -398,6 +398,8 @@ Supported sources are:
 | `verification-worker`   | `repositories[].worker[].command`                                     |
 | `verification-reviewer` | `repositories[].reviewer[].command`                                   |
 | `remote-actions`        | `actions[]` where `toolName` is `bash` and `input.command` is present |
+| `remote-push`           | Exact approved non-force `git push` command                           |
+| `remote-drafts`         | Parent-synthesized author-private review drafts                       |
 
 The JSON must be the whole reviewed artifact or appear in a fenced `json`
 block. The harness copies only exact strings into the correlated step policy.

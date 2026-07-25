@@ -211,6 +211,7 @@ describe('when testing engine', () => {
       expect(run.lastSummary).toBe('# Plan');
       expect(run.stepHandoff).toBe('# Plan');
       expect(run.reviewedArtifact).toBe('# Plan');
+      expect(run.reviewedFeedback).toBe('');
       expect(run.history.at(-1)?.summary).toBe('# Plan');
     });
 

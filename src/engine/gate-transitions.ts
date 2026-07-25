@@ -169,7 +169,10 @@ export const resolveGate = (
       status: 'running',
       pendingGate: undefined,
       ...(resolution.approved
-        ? { reviewedArtifact: pendingGate.artifact }
+        ? {
+            reviewedArtifact: pendingGate.artifact,
+            reviewedFeedback: resolution.feedback,
+          }
         : {}),
       pausedFrom: undefined,
       pauseReason: undefined,

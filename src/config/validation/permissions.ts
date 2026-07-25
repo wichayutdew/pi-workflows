@@ -24,6 +24,8 @@ const BASH_APPROVAL_SOURCES = [
   'verification-worker',
   'verification-reviewer',
   'remote-actions',
+  'remote-push',
+  'remote-drafts',
 ] as const satisfies ReadonlyArray<BashApprovalSource>;
 
 function isBashApprovalSource(value: string): value is BashApprovalSource {
@@ -129,7 +131,12 @@ function parseBashPermission(
     errors.push(`${path}: expected an object`);
     return { ...EMPTY_PERMISSIONS.bash, allow: [] };
   }
-  rejectUnknownKeys(value, ['mode', 'allow', 'approvedSources'], path, errors);
+  rejectUnknownKeys(
+    value,
+    ['mode', 'allow', 'approvedSources', 'handoffSources'],
+    path,
+    errors,
+  );
 
   const mode = readString(value.mode, `${path}.mode`, errors);
   const isValidMode =
@@ -162,6 +169,16 @@ function parseBashPermission(
           BASH_APPROVAL_SOURCE_PATTERN,
         )
   ).filter(isBashApprovalSource);
+  const handoffSources = (
+    value.handoffSources === undefined
+      ? []
+      : readStringList(
+          value.handoffSources,
+          `${path}.handoffSources`,
+          errors,
+          /^(verification-worker|verification-reviewer)$/,
+        )
+  ) as Array<'verification-worker' | 'verification-reviewer'>;
 
   const normalizedMode: BashMode = isValidMode ? mode : 'deny';
   if (normalizedMode !== 'allow-list' && allow.length > 0) {
@@ -181,11 +198,15 @@ function parseBashPermission(
       `${path}.approvedSources: only valid when mode is "allow-list"`,
     );
   }
+  if (normalizedMode !== 'allow-list' && handoffSources.length > 0) {
+    errors.push(`${path}.handoffSources: only valid when mode is "allow-list"`);
+  }
 
   return {
     mode: normalizedMode,
     allow,
     ...(approvedSources.length > 0 ? { approvedSources } : {}),
+    ...(handoffSources.length > 0 ? { handoffSources } : {}),
   };
 }
 
