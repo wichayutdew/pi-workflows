@@ -18,7 +18,7 @@ flowchart LR
   Parent --> Policy
   Policy --> Child
   Child -->|authorized calls only| Tools
-  Child -->|workflow_complete_step| Result
+  Child -->|structured_output| Result
   Result -->|validated by parent| Parent
 ```
 
@@ -61,7 +61,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Call[tool call] --> Completion{workflow_complete_step?}
+  Call[tool call] --> Completion{active completion tool?}
   Completion -- yes --> Batch{only tool call in message?}
   Batch -- no --> Block[block]
   Batch -- yes --> Complete[validate completion result]
@@ -109,7 +109,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Complete[workflow_complete_step params] --> Outcome{outcome in policy.outcomes?}
+  Complete[completion params] --> Outcome{outcome in policy.outcomes?}
   Outcome -- no --> Reject[throw]
   Outcome -- yes --> Summary{summary trims non-empty and <= limit?}
   Summary -- no --> Reject
@@ -118,11 +118,25 @@ flowchart TD
   Artifact -- no --> Reject
   Artifact -- yes --> Mode{execution mode}
   Gate -- no --> Mode
-  Mode -- delegated --> Write[atomic result.json write]
+  Mode -- delegated structured_output --> Write[atomic result.json write]
   Mode -- main --> Capture[capture pending in memory]
   Write --> Terminate[terminate turn]
   Capture --> Terminate
 ```
+
+For a delegated step, pi-subagents 0.36 creates `structured_output` from the
+request's workflow result schema and agent contract v1. For a main-agent step,
+the harness registers `workflow_complete_step`. Both paths feed the same
+outcome, summary, artifact, sole-call, and policy-digest validation. The
+workflow step permissions become the sole active-tool allow-list after the
+child capability is verified. The selected subagent profile still controls
+which extension providers are loaded; unavailable providers fail closed.
+
+For a reviewed repository contract, `edit` and `write` inputs are also confined
+to the sole absolute `repositories[].cwd`. If that target worktree does not yet
+exist, the child may bootstrap from the one reviewed existing `sourceCwd`, but
+relative mutations there are rejected; it must create the target with an exact
+approved Bash command and then use target-rooted paths.
 
 Reviewed commands come only from the run's persisted human-approved artifact.
 The parent filters them in `src/policy/approved-commands.ts`, includes the list

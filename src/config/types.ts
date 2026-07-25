@@ -1,4 +1,7 @@
+import type { KeyId } from '@earendil-works/pi-tui';
+
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
+export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
 export const SUBAGENT_RUNTIME_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 
@@ -43,7 +46,7 @@ export interface StepRequirements {
   skills: string[];
 }
 
-export type SubagentContext = 'fresh' | 'fork';
+export type SubagentContext = 'fresh';
 
 export interface SubagentTurnBudget {
   maxTurns: number;
@@ -57,15 +60,20 @@ export interface SubagentToolBudget {
 }
 
 export interface StepSubagent {
-  /** Configured pi-subagents agent name. */
+  /** Pi Subagents agent profile launched for this isolated step. */
   agent: string;
-  /** Fresh keeps workflow work out of the parent transcript. */
+  /** Workflow steps always use a fresh context. */
   context: SubagentContext;
   model?: string;
   timeoutMs: number;
   turnBudget?: SubagentTurnBudget;
   toolBudget?: SubagentToolBudget;
   artifacts: boolean;
+  /**
+   * Authorizes one fresh-context continuation after a tool failure when the
+   * trusted complete transcript proves every recorded call was replay-safe.
+   */
+  retryToolFailures: boolean;
 }
 
 export type PromptSpec = { inline: string } | { file: string };
@@ -138,11 +146,13 @@ export interface SubagentPermissionCeiling {
   maxGraceTurns: number;
   maxToolCalls: number;
   artifacts: boolean;
+  retryToolFailures: boolean;
 }
 
 export interface WorkflowSettings {
   version: typeof WORKFLOW_SCHEMA_VERSION;
   allowProjectWorkflows: boolean;
+  statusShortcut: KeyId;
   permissionCeiling?: PermissionCeiling;
 }
 
@@ -179,9 +189,11 @@ export const DEFAULT_STEP_SUBAGENT: StepSubagent = {
   context: 'fresh',
   timeoutMs: 900_000,
   artifacts: false,
+  retryToolFailures: false,
 };
 
 export const DEFAULT_SETTINGS: WorkflowSettings = {
   version: WORKFLOW_SCHEMA_VERSION,
   allowProjectWorkflows: false,
+  statusShortcut: DEFAULT_STATUS_SHORTCUT,
 };

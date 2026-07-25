@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=../schemas/settings.schema.json
 version: 1
 allowProjectWorkflows: false
+statusShortcut: ctrl+alt+w
 permissionCeiling:
   tools: [read, grep, bash]
   mcp: []
@@ -9,7 +10,7 @@ permissionCeiling:
   bash:
     mode: read-only
   subagent:
-    agents: [pi-workflows.step, scout, worker, reviewer]
+    agents: [scout, planner, worker, reviewer]
     contexts: [fresh]
     models: []
     maxTimeoutMs: 900000
@@ -17,3 +18,4 @@ permissionCeiling:
     maxGraceTurns: 3
     maxToolCalls: 100
     artifacts: false
+    retryToolFailures: false

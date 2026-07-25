@@ -15,6 +15,14 @@
       "type": "boolean",
       "default": false
     },
+    "statusShortcut": {
+      "type": "string",
+      "default": "ctrl+alt+w",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^\\S+$",
+      "description": "Pi key identifier used to toggle workflow status. Restart extensions with Pi /reload after changing it."
+    },
     "permissionCeiling": {
       "$ref": "workflow.schema.json#/$defs/permissionCeiling"
     }

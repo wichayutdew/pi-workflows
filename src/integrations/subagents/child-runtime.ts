@@ -1,20 +1,20 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import type { WorkflowStep } from '../../config/types.ts';
 import { invalidCompletionCallIds } from '../../policy/completion-batch.ts';
 import { freezeToolInput } from '../../policy/immutable-input.ts';
 import { authorizeToolCall, resolveActiveTools } from '../../policy/tools.ts';
-import {
-  WORKFLOW_COMPLETION_PARAMETERS,
-  WORKFLOW_COMPLETION_TOOL,
-} from '../../runtime/completion-tool.ts';
 import {
   extractChildPolicy,
   isSubagentRuntimeName,
@@ -22,7 +22,14 @@ import {
   type ChildStepPolicy,
 } from './protocol.ts';
 
-export const CHILD_COMPLETION_TOOL = WORKFLOW_COMPLETION_TOOL;
+export const CHILD_COMPLETION_TOOL = 'structured_output';
+const CHILD_COORDINATION_TOOLS = new Set([
+  'contact_supervisor',
+  'subagent_supervisor',
+  'intercom',
+]);
+const STRUCTURED_RESULT_KEYS = new Set(['outcome', 'summary', 'artifact']);
+const FILE_MUTATION_TOOLS = new Set(['edit', 'write']);
 
 function policyStep(policy: ChildStepPolicy): WorkflowStep {
   return {
@@ -33,6 +40,7 @@ function policyStep(policy: ChildStepPolicy): WorkflowStep {
       context: 'fresh',
       timeoutMs: 900_000,
       artifacts: false,
+      retryToolFailures: false,
     },
     permissions: policy.permissions,
     requires: { tools: [], extensions: [], skills: [] },
@@ -41,6 +49,7 @@ function policyStep(policy: ChildStepPolicy): WorkflowStep {
 }
 
 function childSystemPrompt(policy: ChildStepPolicy): string {
+  const hasPauseOutcome = policy.pauseOutcomes.length > 0;
   return [
     '# Pi Workflows delegated step',
     '',
@@ -50,15 +59,50 @@ function childSystemPrompt(policy: ChildStepPolicy): string {
     '',
     'The parent workflow harness owns orchestration and state transitions.',
     'Perform only this delegated step. Its child-side tool policy is enforced.',
-    'When finished, call `workflow_complete_step` exactly once and as the only tool call in that message.',
+    'When finished, call `structured_output` exactly once and as the only tool call in that message.',
+    'Pass the workflow result as its `value`: outcome, summary, and optional artifact.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
+    `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     ...(policy.gateSubmitOutcome
       ? [
           `Outcome "${policy.gateSubmitOutcome}" requires the complete gate artifact.`,
         ]
       : []),
-    'If the workflow definition or environment is wrong, choose an outcome that transitions to $pause.',
+    ...(hasPauseOutcome
+      ? [
+          `If the workflow definition or environment is wrong, choose a pause outcome (${policy.pauseOutcomes.join(', ')}).`,
+        ]
+      : [
+          'If the workflow definition or environment is wrong, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step.',
+        ]),
+    'This is a non-interactive workflow child. Never call contact_supervisor, subagent_supervisor, or intercom.',
+    ...(policy.gateSubmitOutcome
+      ? [
+          'Put every unresolved decision in the gate artifact with evidence, options, a recommendation, and an adopted default; do not ask a terminal question.',
+        ]
+      : hasPauseOutcome
+        ? [
+            'Treat the step instructions and incoming handoff as the final execution contract.',
+            'If that contract is missing, stale, or contradictory, finish with a pause outcome and describe the unresolved contract and evidence declaratively in the summary; do not ask a terminal question.',
+          ]
+        : [
+            'Treat the step instructions and incoming handoff as the final execution contract.',
+            'If that contract is missing, stale, or contradictory, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step. Do not ask a terminal question.',
+          ]),
+    ...(policy.repositoryCwd
+      ? [
+          `Reviewed repository root: ${policy.repositoryCwd}`,
+          ...(policy.bootstrapCwd
+            ? [
+                `Bootstrap directory: ${policy.bootstrapCwd}`,
+                'The reviewed repository root does not exist yet. Run only its exact approved setup command first, then use absolute paths under the reviewed repository root for every edit and write. Never mutate the bootstrap directory.',
+              ]
+            : [
+                'Keep every edit and write inside the reviewed repository root.',
+              ]),
+        ]
+      : []),
   ].join('\n');
 }
 
@@ -84,6 +128,43 @@ function writeResult(policy: ChildStepPolicy, result: unknown): void {
   }
 }
 
+function structuredResult(
+  input: unknown,
+  policy: ChildStepPolicy,
+): ReturnType<typeof parseDelegatedStepResult> {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('structured_output input must be an object');
+  }
+  const wrapper = input as Record<string, unknown>;
+  if (Object.keys(wrapper).length !== 1 || !Object.hasOwn(wrapper, 'value')) {
+    throw new Error('structured_output input must contain only value');
+  }
+  if (
+    wrapper.value === null ||
+    typeof wrapper.value !== 'object' ||
+    Array.isArray(wrapper.value)
+  ) {
+    throw new Error('structured_output value must be an object');
+  }
+  const value = wrapper.value as Record<string, unknown>;
+  const unknownKey = Object.keys(value).find(
+    (key) => !STRUCTURED_RESULT_KEYS.has(key),
+  );
+  if (unknownKey) {
+    throw new Error(
+      `structured_output value has unknown property "${unknownKey}"`,
+    );
+  }
+  return parseDelegatedStepResult(
+    {
+      version: 1,
+      policyDigest: policy.policyDigest,
+      ...value,
+    },
+    policy,
+  );
+}
+
 function verifyCapability(
   policy: ChildStepPolicy,
   childAgent: string | undefined,
@@ -104,6 +185,67 @@ function verifyCapability(
   unlinkSync(policy.capabilityPath);
 }
 
+function authorizeRepositoryMutation(
+  toolName: string,
+  input: Record<string, unknown>,
+  policy: ChildStepPolicy,
+): string | undefined {
+  if (!policy.repositoryCwd || !FILE_MUTATION_TOOLS.has(toolName)) return;
+  if (typeof input.path !== 'string' || !input.path.trim()) {
+    return `${toolName} must name a path inside the reviewed repository root`;
+  }
+  const candidate = resolve(process.cwd(), input.path);
+  const root = resolve(policy.repositoryCwd);
+  if (!pathIsInside(root, candidate)) {
+    return `${toolName} path is outside the reviewed repository root "${policy.repositoryCwd}"`;
+  }
+  let canonicalRoot: string;
+  try {
+    if (!statSync(root).isDirectory()) throw new Error('not a directory');
+    canonicalRoot = realpathSync(root);
+  } catch {
+    return `reviewed repository root is not an existing directory: ${policy.repositoryCwd}`;
+  }
+  const canonicalAncestor = nearestCanonicalAncestor(candidate);
+  if (
+    canonicalAncestor === undefined ||
+    !pathIsInside(canonicalRoot, canonicalAncestor)
+  ) {
+    return `${toolName} path is outside the reviewed repository root "${policy.repositoryCwd}"`;
+  }
+  return;
+}
+
+function pathIsInside(root: string, candidate: string): boolean {
+  const fromRoot = relative(root, candidate);
+  return (
+    fromRoot !== '..' &&
+    !fromRoot.startsWith(`..${sep}`) &&
+    !isAbsolute(fromRoot)
+  );
+}
+
+function nearestCanonicalAncestor(path: string): string | undefined {
+  let candidate = path;
+  while (true) {
+    try {
+      lstatSync(candidate);
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code !== 'ENOENT') return undefined;
+      const parent = dirname(candidate);
+      if (parent === candidate) return undefined;
+      candidate = parent;
+      continue;
+    }
+    try {
+      return realpathSync(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 export interface SubagentChildRuntimeOptions {
   childAgent?: string;
 }
@@ -116,57 +258,8 @@ export function registerSubagentChildRuntime(
   let policyError: string | undefined;
   let invalidCompletionCalls = new Set<string>();
   let effectiveTools = new Set<string>();
-  let completionRegistered = false;
   const childAgent =
     options.childAgent ?? process.env.PI_SUBAGENT_CHILD_AGENT?.trim();
-
-  const registerCompletionTool = (policy: ChildStepPolicy): void => {
-    if (completionRegistered) return;
-    completionRegistered = true;
-    pi.registerTool({
-      name: CHILD_COMPLETION_TOOL,
-      label: 'Complete Delegated Workflow Step',
-      description:
-        'Return one validated result from a pi-workflows delegated child step',
-      promptSnippet: 'Complete the delegated workflow step',
-      promptGuidelines: [
-        'Call workflow_complete_step alone after all delegated work is complete.',
-      ],
-      parameters: WORKFLOW_COMPLETION_PARAMETERS,
-      executionMode: 'sequential',
-      execute: async (_toolCallId, params) => {
-        if (policyError) throw new Error(policyError);
-        const result = parseDelegatedStepResult(
-          {
-            version: 1,
-            policyDigest: policy.policyDigest,
-            outcome: params.outcome,
-            summary: params.summary,
-            ...(params.artifact !== undefined
-              ? { artifact: params.artifact }
-              : {}),
-          },
-          policy,
-        );
-        writeResult(policy, result);
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Captured workflow step outcome "${result.outcome}".`,
-            },
-          ],
-          details: {
-            workflowId: policy.workflowId,
-            runId: policy.runId,
-            stepId: policy.stepId,
-            outcome: result.outcome,
-          },
-          terminate: true,
-        };
-      },
-    });
-  };
 
   pi.on('input', (event) => {
     let extracted;
@@ -195,18 +288,19 @@ export function registerSubagentChildRuntime(
     try {
       verifyCapability(extracted.policy, childAgent);
       const profileTools = new Set(pi.getActiveTools());
+      if (!profileTools.has(CHILD_COMPLETION_TOOL)) {
+        throw new Error(
+          'pi-subagents structured_output completion is unavailable',
+        );
+      }
       activePolicy = extracted.policy;
       policyError = undefined;
-      registerCompletionTool(activePolicy);
       effectiveTools = new Set(
         resolveActiveTools(
           pi.getAllTools(),
           policyStep(activePolicy),
           CHILD_COMPLETION_TOOL,
-        ).filter(
-          (toolName) =>
-            toolName === CHILD_COMPLETION_TOOL || profileTools.has(toolName),
-        ),
+        ).filter((toolName) => !CHILD_COORDINATION_TOOLS.has(toolName)),
       );
     } catch (error) {
       policyError = error instanceof Error ? error.message : String(error);
@@ -275,16 +369,25 @@ export function registerSubagentChildRuntime(
           reason: policyError,
         };
       }
-      freezeToolInput(event.input);
-      return;
+      try {
+        const result = structuredResult(event.input, activePolicy);
+        writeResult(activePolicy, result);
+        freezeToolInput(event.input);
+        return;
+      } catch (error) {
+        return {
+          block: true,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
-    if (!effectiveTools.has(event.toolName)) {
+    if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {
       return {
         block: true,
-        reason: `tool "${event.toolName}" is not enabled by subagent "${childAgent ?? 'unknown'}"`,
+        reason:
+          'workflow children are non-interactive; use structured_output with a pause outcome and describe the unresolved contract in summary',
       };
     }
-
     const authorization = authorizeToolCall(
       event.toolName,
       event.input as unknown as Record<string, unknown>,
@@ -296,6 +399,24 @@ export function registerSubagentChildRuntime(
       return {
         block: true,
         reason: authorization.reason ?? 'Tool blocked by workflow child policy',
+      };
+    }
+    if (!effectiveTools.has(event.toolName)) {
+      return {
+        block: true,
+        reason: `tool "${event.toolName}" is allowed by the workflow but unavailable in this child runtime`,
+      };
+    }
+
+    const mutationError = authorizeRepositoryMutation(
+      event.toolName,
+      event.input as unknown as Record<string, unknown>,
+      activePolicy,
+    );
+    if (mutationError) {
+      return {
+        block: true,
+        reason: mutationError,
       };
     }
     freezeToolInput(event.input);

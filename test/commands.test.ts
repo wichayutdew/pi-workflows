@@ -40,7 +40,6 @@ describe('when testing commands', () => {
         resume: async () => void calls.push(['resume']),
         abort: async (reason) => void calls.push(['abort', reason]),
         reload: async () => void calls.push(['reload']),
-        status: async () => void calls.push(['status']),
       };
       const pi = {
         registerCommand(
@@ -76,7 +75,6 @@ describe('when testing commands', () => {
       await commands.get('workflow-resume')!.handler('', context);
       await commands.get('workflow-abort')!.handler('  stop  ', context);
       await commands.get('workflow-reload')!.handler('', context);
-      await commands.get('workflow-status')!.handler('', context);
 
       expect(calls).toEqual([
         ['start', 'deploy', '--dry-run'],
@@ -86,8 +84,8 @@ describe('when testing commands', () => {
         ['resume'],
         ['abort', 'stop'],
         ['reload'],
-        ['status'],
       ]);
+      expect(commands.has('workflow-status')).toBe(false);
     });
   });
 });

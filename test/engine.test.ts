@@ -214,6 +214,59 @@ describe('when testing engine', () => {
       expect(run.history.at(-1)?.summary).toBe('# Plan');
     });
 
+    test('replanning clears stale reviewed authority before the next gate', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          permissions: { extensions: ['plannotator'] },
+          requires: { extensions: ['plannotator'] },
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: 'plan',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            replan: 'plan',
+            done: '$done',
+          },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      const artifact =
+        '{"repositories":[{"worker":[{"command":"bun install"}]}]}';
+      let run = createRun(workflow, '', [], 'run-replan', 1);
+      run = beginGate(workflow, run, 'submit', artifact, 'request-replan', 2);
+      run = resolveGate(
+        workflow,
+        run,
+        { approved: true, feedback: '', resolvedAt: 3 },
+        3,
+      );
+      expect(run.reviewedArtifact).toBe(artifact);
+
+      run = advanceRun(
+        workflow,
+        run,
+        'replan',
+        'The approved command is invalid',
+        4,
+      );
+
+      expect(run.currentStepId).toBe('plan');
+      expect(run.reviewedArtifact).toBe('');
+      expect(run.stepHandoff).toBe('The approved command is invalid');
+    });
+
     test('configuration rewind never promotes legacy gate summaries to reviewed artifacts', () => {
       // given
       const raw = baseWorkflow();
@@ -299,6 +352,70 @@ describe('when testing engine', () => {
       expect(result.run?.currentStepId).toBe('inspect');
       expect(result.run?.history.length).toBe(0);
       expect(result.run?.status).toBe('paused');
+    });
+
+    test('an approved gate artifact survives a planning prompt reload', () => {
+      // given
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          permissions: { extensions: ['plannotator'] },
+          requires: { extensions: ['plannotator'] },
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: 'plan',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            done: '$done',
+            blocked: '$pause',
+          },
+        },
+      };
+      const original = loadedWorkflow(raw);
+      const artifact = '# Human-approved plan';
+      let run = createRun(original, '', [], 'approved-plan-reload', 1);
+      run = beginGate(original, run, 'submit', artifact, 'review-request', 2);
+      run = resolveGate(
+        original,
+        run,
+        { approved: true, feedback: '', resolvedAt: 3 },
+        3,
+      );
+      run = pauseRun(run, 'Runtime repaired', 4);
+      const changedRaw = structuredClone(raw);
+      const changedSteps = changedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      changedSteps.plan = {
+        ...changedSteps.plan,
+        prompt: 'Updated completion instructions',
+      };
+      const changed = loadedWorkflow(changedRaw);
+
+      // when
+      const result = reconcileRun(run, changed, 5);
+
+      // then
+      expect(result.changed).toBe(true);
+      expect(result.restartedStep).toBe(undefined);
+      expect(result.run?.currentStepId).toBe('implement');
+      expect(result.run?.status).toBe('paused');
+      expect(result.run?.reviewedArtifact).toBe(artifact);
+      expect(result.run?.history).toHaveLength(1);
+      expect(result.run?.history[0]?.summary).toBe(artifact);
+      expect(result.run?.history[0]?.stepDigest).toBe(changed.stepDigests.plan);
     });
 
     test('pauses a looping workflow after its maximum step visits', () => {

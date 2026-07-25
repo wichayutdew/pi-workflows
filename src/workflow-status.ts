@@ -1,26 +1,34 @@
 import type {
-  ExtensionCommandContext,
+  ExtensionContext,
   Theme,
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import {
+  Key,
   matchesKey,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
   type Component,
+  type KeyId,
   type TUI,
 } from '@earendil-works/pi-tui';
-import type { LoadedWorkflow } from './config/types.ts';
+import {
+  DEFAULT_STATUS_SHORTCUT,
+  type LoadedWorkflow,
+} from './config/types.ts';
 import type {
   StepHistoryEntry,
   WorkflowRun,
   WorkflowRunStatus,
 } from './engine/state.ts';
 
-const REFRESH_INTERVAL_MS = 1_000;
+const REFRESH_INTERVAL_MS = 250;
+const WORKING_ICON_FRAME_MS = 250;
+const WORKING_ICON_FRAMES = ['◐', '◓', '◑', '◒'] as const;
 const WIDE_LAYOUT_MIN_COLUMNS = 92;
 const MAX_PATH_ROWS = 16;
+const MAX_REASON_ROWS = 5;
 
 export type WorkflowStatusExecution =
   | {
@@ -41,7 +49,10 @@ export interface WorkflowStatusSnapshot {
 }
 
 type SnapshotProvider = () => WorkflowStatusSnapshot | undefined;
-type StepDisplayStatus = WorkflowRunStatus | 'completed';
+type StepDisplayStatus = WorkflowRunStatus | 'completed' | 'failed';
+type StatusViewTui = Pick<TUI, 'requestRender'> & {
+  terminal?: { rows: number };
+};
 
 interface PathEntry {
   stepId: string;
@@ -78,27 +89,110 @@ export function formatWorkflowStatusText(
   return lines.join('\n');
 }
 
+/** Format the full workflow status board. */
+export function formatWorkflowStatusBoard(
+  snapshot: WorkflowStatusSnapshot,
+  width = 88,
+  theme: Theme = unstyledTheme,
+): string[] {
+  return renderBoard(
+    theme,
+    snapshot,
+    Math.max(8, Math.floor(width)),
+    false,
+    formatShortcutLabel(DEFAULT_STATUS_SHORTCUT),
+  );
+}
+
+const unstyledTheme = {
+  fg: (_color: string, value: string) => value,
+  bg: (_color: string, value: string) => value,
+  bold: (value: string) => value,
+} as unknown as Theme;
+
+const SHORTCUT_LABELS: Readonly<Record<string, string>> = {
+  ctrl: 'Ctrl',
+  shift: 'Shift',
+  alt: 'Alt',
+  super: 'Super',
+  escape: 'Esc',
+  esc: 'Esc',
+  enter: 'Enter',
+  return: 'Enter',
+  tab: 'Tab',
+  space: 'Space',
+  backspace: 'Backspace',
+  delete: 'Del',
+  insert: 'Ins',
+  clear: 'Clear',
+  home: 'Home',
+  end: 'End',
+  pageUp: 'PgUp',
+  pageDown: 'PgDn',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+};
+
+export function formatShortcutLabel(shortcut: KeyId): string {
+  return shortcut
+    .split('+')
+    .map((part) => {
+      const label = SHORTCUT_LABELS[part];
+      if (label) return label;
+      if (/^f\d+$/.test(part)) return part.toUpperCase();
+      return part.length === 1 ? part.toUpperCase() : part;
+    })
+    .join('+');
+}
+
 export async function showWorkflowStatus(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   getSnapshot: SnapshotProvider,
+  statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
 ): Promise<void> {
-  await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-    const view = new WorkflowStatusView(getSnapshot, tui, theme, done);
-    view.start();
-    return view;
-  });
+  await ctx.ui.custom<void>(
+    (tui, theme, _keybindings, done) => {
+      const view = new WorkflowStatusView(
+        getSnapshot,
+        tui,
+        theme,
+        done,
+        statusShortcut,
+      );
+      view.start();
+      return view;
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: 'center',
+        width: '95%',
+        maxHeight: '95%',
+        margin: 1,
+      },
+    },
+  );
 }
 
 export class WorkflowStatusView implements Component {
   private timer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  private scrollOffset = 0;
+  private viewportRows = 0;
+  private contentRows = 0;
+  private readonly statusShortcutLabel: string;
 
   constructor(
     private readonly getSnapshot: SnapshotProvider,
-    private readonly tui: Pick<TUI, 'requestRender'>,
+    private readonly tui: StatusViewTui,
     private readonly theme: Theme,
     private readonly done: () => void,
-  ) {}
+    private readonly statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
+  ) {
+    this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
+  }
 
   start(): void {
     this.timer = setInterval(
@@ -121,9 +215,25 @@ export class WorkflowStatusView implements Component {
       data === 'Q' ||
       matchesKey(data, 'escape') ||
       matchesKey(data, 'ctrl+c') ||
-      matchesKey(data, 'ctrl+d')
+      matchesKey(data, 'ctrl+d') ||
+      matchesKey(data, this.statusShortcut)
     ) {
       this.close();
+      return;
+    }
+    const pageSize = Math.max(1, this.viewportRows - 2);
+    if (matchesKey(data, Key.down) || data === 'j') {
+      this.scrollBy(1);
+    } else if (matchesKey(data, Key.up) || data === 'k') {
+      this.scrollBy(-1);
+    } else if (matchesKey(data, Key.pageDown)) {
+      this.scrollBy(pageSize);
+    } else if (matchesKey(data, Key.pageUp)) {
+      this.scrollBy(-pageSize);
+    } else if (matchesKey(data, Key.home)) {
+      this.setScrollOffset(0);
+    } else if (matchesKey(data, Key.end)) {
+      this.setScrollOffset(Number.MAX_SAFE_INTEGER);
     }
   }
 
@@ -132,18 +242,65 @@ export class WorkflowStatusView implements Component {
     const snapshot = this.getSnapshot();
     if (viewportWidth < 12) {
       const label = snapshot
-        ? `${statusGlyph(this.theme, snapshot.run.status)} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
+        ? `${statusGlyph(this.theme, runDisplayStatus(snapshot.run), snapshot.now)} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
         : 'No workflow';
       return [truncateToWidth(label, viewportWidth, '…', true)];
     }
 
     const contentWidth = viewportWidth - 2;
     const lines = snapshot
-      ? renderBoard(this.theme, snapshot, contentWidth)
+      ? renderBoard(
+          this.theme,
+          snapshot,
+          contentWidth,
+          false,
+          this.statusShortcutLabel,
+        )
       : renderEmptyBoard(this.theme, contentWidth);
-    return lines.map((line) =>
+    const rendered = lines.map((line) =>
       padAnsi(truncateToWidth(line, contentWidth, '…'), viewportWidth),
     );
+    return this.paginate(rendered, viewportWidth);
+  }
+
+  private paginate(lines: string[], width: number): string[] {
+    this.contentRows = lines.length;
+    const terminalRows = this.tui.terminal?.rows;
+    const maximumRows =
+      terminalRows === undefined
+        ? lines.length + 1
+        : Math.max(4, Math.floor(terminalRows * 0.95));
+    this.viewportRows = maximumRows;
+    const contentHeight = Math.max(1, maximumRows - 1);
+    const maximumOffset = Math.max(0, lines.length - contentHeight);
+    this.scrollOffset = Math.min(this.scrollOffset, maximumOffset);
+    const visible = lines.slice(
+      this.scrollOffset,
+      this.scrollOffset + contentHeight,
+    );
+    const first = lines.length === 0 ? 0 : this.scrollOffset + 1;
+    const last = Math.min(lines.length, this.scrollOffset + contentHeight);
+    const hint =
+      maximumOffset > 0
+        ? `↑/↓ PgUp/PgDn Home/End · rows ${first}-${last}/${lines.length} · ${this.statusShortcutLabel} / q / Esc hide`
+        : `${this.statusShortcutLabel} / q / Esc hide · live refresh`;
+    return [
+      ...visible,
+      padAnsi(truncateToWidth(this.theme.fg('dim', hint), width, '…'), width),
+    ];
+  }
+
+  private scrollBy(delta: number): void {
+    this.setScrollOffset(this.scrollOffset + delta);
+  }
+
+  private setScrollOffset(value: number): void {
+    const contentHeight = Math.max(1, this.viewportRows - 1);
+    const maximumOffset = Math.max(0, this.contentRows - contentHeight);
+    const next = Math.max(0, Math.min(value, maximumOffset));
+    if (next === this.scrollOffset) return;
+    this.scrollOffset = next;
+    this.tui.requestRender(true);
   }
 
   private close(): void {
@@ -159,6 +316,8 @@ function renderBoard(
   theme: Theme,
   snapshot: WorkflowStatusSnapshot,
   width: number,
+  showCloseHint = true,
+  statusShortcutLabel = formatShortcutLabel(DEFAULT_STATUS_SHORTCUT),
 ): string[] {
   const header = boxed(
     theme,
@@ -206,13 +365,14 @@ function renderBoard(
     ];
   }
 
-  return [
-    ...header,
-    '',
-    ...body,
-    '',
-    theme.fg('dim', 'q / Esc close · live refresh'),
-  ];
+  const lines = [...header, '', ...body];
+  if (showCloseHint) {
+    lines.push(
+      '',
+      theme.fg('dim', `${statusShortcutLabel} / q / Esc hide · live refresh`),
+    );
+  }
+  return lines;
 }
 
 function renderEmptyBoard(theme: Theme, width: number): string[] {
@@ -242,7 +402,7 @@ function renderHeaderLines(
     `${run.history.length} completed attempt${run.history.length === 1 ? '' : 's'}`,
   );
   const firstLine = [
-    statusGlyph(theme, run.status),
+    statusGlyph(theme, runDisplayStatus(run), snapshot.now),
     theme.bold(workflowName),
     status,
     theme.fg('muted', '·'),
@@ -336,16 +496,36 @@ function renderSummaryLines(
   }
   if (run.pauseReason) {
     lines.push(
-      ...keyValueLines(
-        theme,
-        'reason',
-        run.pauseReason,
+      ...clampRows(
+        keyValueLines(
+          theme,
+          'reason',
+          run.pauseReason,
+          width,
+          run.status === 'aborted' ? 'error' : 'warning',
+        ),
+        MAX_REASON_ROWS,
         width,
-        run.status === 'aborted' ? 'error' : 'warning',
+        theme,
       ),
     );
   }
   return lines;
+}
+
+function clampRows(
+  lines: string[],
+  maximum: number,
+  width: number,
+  theme: Theme,
+): string[] {
+  if (lines.length <= maximum) return lines;
+  const visible = lines.slice(0, maximum);
+  const last = visible.at(-1) ?? '';
+  visible[maximum - 1] =
+    truncateToWidth(last, Math.max(1, width - 1), '', true) +
+    theme.fg('dim', '…');
+  return visible;
 }
 
 function renderPathLines(
@@ -372,7 +552,7 @@ function renderPathLines(
   for (const entry of visible) {
     const visit =
       entry.visit > 1 ? theme.fg('dim', ` · visit ${entry.visit}`) : '';
-    const left = `${statusGlyph(theme, entry.status)} ${theme.fg(
+    const left = `${statusGlyph(theme, entry.status, snapshot.now)} ${theme.fg(
       entry.current ? 'text' : 'muted',
       entry.title,
     )}${visit}`;
@@ -407,7 +587,7 @@ function buildPathEntries(snapshot: WorkflowStatusSnapshot): PathEntry[] {
     entries.push({
       stepId: run.currentStepId,
       title: stepTitle(workflow, run.currentStepId),
-      status: run.status,
+      status: runDisplayStatus(run),
       visit: Math.max(
         visits.get(run.currentStepId) ?? 0,
         run.visits[run.currentStepId] ?? 1,
@@ -525,13 +705,21 @@ function padAnsi(value: string, width: number): string {
   return `${value}${' '.repeat(width - visible)}`;
 }
 
-function statusGlyph(theme: Theme, status: StepDisplayStatus): string {
+function statusGlyph(
+  theme: Theme,
+  status: StepDisplayStatus,
+  now = Date.now(),
+): string {
   if (status === 'completed') return theme.fg('success', '✓');
-  if (status === 'running') return theme.fg('accent', '↻');
+  if (status === 'running') {
+    return theme.fg('accent', workingIcon(now));
+  }
   if (status === 'paused' || status === 'awaiting-gate') {
     return theme.fg('warning', '◆');
   }
-  if (status === 'aborted') return theme.fg('error', '✕');
+  if (status === 'failed' || status === 'aborted') {
+    return theme.fg('error', '✕');
+  }
   return theme.fg('dim', '•');
 }
 
@@ -539,7 +727,7 @@ function statusColor(status: StepDisplayStatus): ThemeColor {
   if (status === 'completed') return 'success';
   if (status === 'running') return 'accent';
   if (status === 'paused' || status === 'awaiting-gate') return 'warning';
-  if (status === 'aborted') return 'error';
+  if (status === 'failed' || status === 'aborted') return 'error';
   return 'dim';
 }
 
@@ -551,6 +739,27 @@ function statusLabel(status: StepDisplayStatus): string {
 
 function statusBadge(theme: Theme, status: StepDisplayStatus): string {
   return theme.fg(statusColor(status), theme.bold(`[${statusLabel(status)}]`));
+}
+
+function runDisplayStatus(run: WorkflowRun): StepDisplayStatus {
+  return run.status === 'paused' && run.failedStepId === run.currentStepId
+    ? 'failed'
+    : run.status;
+}
+
+export function workflowStatusIcon(run: WorkflowRun, now = Date.now()): string {
+  const status = runDisplayStatus(run);
+  if (status === 'completed') return '✓';
+  if (status === 'running') return workingIcon(now);
+  if (status === 'failed' || status === 'aborted') return '✕';
+  if (status === 'paused' || status === 'awaiting-gate') return '◆';
+  return '•';
+}
+
+function workingIcon(now: number): string {
+  return WORKING_ICON_FRAMES[
+    Math.floor(now / WORKING_ICON_FRAME_MS) % WORKING_ICON_FRAMES.length
+  ]!;
 }
 
 function stepTitle(

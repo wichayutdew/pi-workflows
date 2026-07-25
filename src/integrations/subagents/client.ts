@@ -41,6 +41,7 @@ const DELEGATION_STATUSES = new Set<SubagentDelegationStatus>([
   'interrupted',
   'turn_budget_exhausted',
   'tool_budget_exhausted',
+  'structured_output_failed',
   'acceptance_failed',
   'invalid_request',
   'unavailable_context',
@@ -105,9 +106,9 @@ export class SubagentDelegationClient {
       return Promise.reject(new Error('subagent delegation was cancelled'));
     }
 
-    let start: () => void = () => undefined;
-    let requestCancellation: () => void = () => undefined;
-    let resolveTerminal: () => void = () => undefined;
+    let start!: () => void;
+    let requestCancellation!: () => void;
+    let resolveTerminal!: () => void;
     const terminal = new Promise<void>((resolve) => {
       resolveTerminal = resolve;
     });

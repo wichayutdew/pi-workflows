@@ -142,7 +142,15 @@ without reviewed-artifact provenance grant nothing.
 `approvedSources` selects provenance, not an executable family. For example,
 `verification-worker` extracts only exact
 `repositories[].worker[].command` strings from the latest approved artifact.
-Changing even one argument produces a different, unauthorized command.
+Each cwd-dependent command must encode the exact absolute
+`repositories[].cwd` from the same object. Changing an argument or directory
+produces a different, unauthorized execution. A delegated step currently
+accepts one distinct reviewed directory; repeated identical values are allowed,
+while missing, relative, or multiple different directories fail closed. A
+missing target worktree may bootstrap only from the same contract's one
+existing absolute `sourceCwd`. The child confines edits and writes to the
+reviewed target, and every setup or later Bash command still requires an exact
+reviewed string.
 
 ## Compact Bash Rules
 
@@ -162,21 +170,34 @@ that executable.
 ## Subagent Options
 
 Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
-into pi-subagents with the defaults shown below. Use the exact Pi Subagents
-runtime name, such as `subagent: worker`, when only the agent changes; use the
-object form for additional overrides. Pi Subagents resolves builtin, package,
-user, and project agents and applies matching `settings.json` overrides. The
-integration is optional.
+into pi-subagents with the defaults shown below. A name such as
+`subagent: worker` launches the actual Pi Subagents `worker` profile. Its
+profile prompt supplies the specialty, while the workflow prompt supplies the
+exact step contract. Use the object form for model, timeout, budget, or artifact
+overrides.
+
+Delegation requires pi-subagents 0.36.0 or newer. Requests disable any
+profile-default output file, provide the workflow result schema, and opt into
+agent contract v1. The upstream `structured_output` tool completes delegated
+steps; `workflow_complete_step` remains the main-agent completion tool. After
+capability verification, workflow permissions replace the profile's ordinary
+active-tool list. The selected profile still determines which extension
+providers are loaded, so an unavailable provider cannot be activated.
+
+Each child receives the original workflow input plus only the previous step's
+self-contained compact `summary` or approved review artifact. It never inherits
+the parent or sibling transcript.
 
 ```mermaid
 flowchart TD
-  Subagent[subagent] --> Agent[agent<br/>default pi-workflows.step]
-  Subagent --> Context[context<br/>fresh or fork]
+  Subagent[subagent] --> Profile[actual agent profile<br/>default pi-workflows.step]
+  Subagent --> Context[context<br/>fresh only]
   Subagent --> Model[model override]
   Subagent --> Timeout[timeoutMs<br/>1000 to 86400000]
   Subagent --> TurnBudget[turnBudget<br/>maxTurns, graceTurns]
   Subagent --> ToolBudget[toolBudget<br/>soft, hard, block]
   Subagent --> Artifacts[artifacts boolean]
+  Subagent --> Retry[retryToolFailures<br/>explicit replay-safe opt-in]
 ```
 
 ## Example MR Comments Workflow

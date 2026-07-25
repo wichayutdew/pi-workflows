@@ -47,7 +47,7 @@ sequenceDiagram
   alt subagent omitted
     Harness->>Main: activate policy and send user message
   else subagent configured
-    Harness->>Sub: delegation request
+    Harness->>Sub: configured profile delegation request
   end
 ```
 
@@ -82,16 +82,37 @@ sequenceDiagram
 
   Harness->>Tmp: write capability token
   Harness->>Harness: build ChildStepPolicy and digest
-  Harness->>Sub: request with encoded policy envelope
-  Sub->>Child: resolve configured agent and start child
+  Harness->>Sub: request configured profile with handoff and encoded policy
+  Sub->>Child: start selected profile in a fresh context
   Child->>Tmp: verify and delete capability
   Child->>Child: narrow active tools
-  Child->>Tmp: write result.json via workflow_complete_step
+  Child->>Tmp: validate structured_output and write result.json
   Sub-->>Harness: completed response
   Harness->>Tmp: read result.json
   Harness->>Engine: advanceRun or beginGate
   Harness->>Tmp: cleanup
 ```
+
+The workflow `subagent.agent` value selects the actual Pi Subagents profile.
+Each v1 request uses `output: false`, the workflow `outputSchema`, and agent
+contract v1. It starts in a clean context with the original workflow input and
+the previous step's compact result or approved artifact. No accumulated parent
+or sibling transcript crosses the step boundary.
+
+## Live Status
+
+```mermaid
+flowchart LR
+  Run[Workflow checkpoint] --> Board[shortcut-toggleable detail overlay]
+  Active[active delegation or main step] --> Board
+  Active --> Footer[one animated working indicator]
+```
+
+The footer cycles through `◐`, `◓`, `◑`, and `◒` only while work runs and is
+cleared when execution stops. It never renders a below-editor task board.
+Completed steps, failures, pauses, reviews, progress, and full history live in
+the overlay; its rendering clamps long reasons to the available terminal width
+without altering the full persisted reason.
 
 ## Pause And Resume
 
@@ -151,10 +172,20 @@ flowchart TD
   Exists -- no --> Error[block resume]
   Exists -- yes --> Current{current step exists?}
   Current -- no --> Error
-  Current -- yes --> CompletedChanged{any completed step digest changed?}
-  CompletedChanged -- yes --> Restart[restart at earliest changed completed step]
+  Current -- yes --> ApprovedChanged{approved gate digest changed?}
+  ApprovedChanged -- yes --> Preserve[refresh digest and preserve reviewed artifact]
+  ApprovedChanged -- no --> CompletedChanged{ordinary completed step changed?}
+  Preserve --> CompletedChanged
+  CompletedChanged -- yes --> Restart[restart at earliest changed ordinary step]
   CompletedChanged -- no --> CurrentChanged{current step digest changed?}
   CurrentChanged -- yes --> Pause[stay paused for inspection]
   CurrentChanged -- no --> Continue[resume current step or gate]
   Restart --> Pause
 ```
+
+A completed human-approved gate is reconciled from its persisted reviewed
+artifact, so editing or reloading the planning prompt does not ask the planning
+child to run again. This exception applies only while the gate still exists,
+its approved outcome matches the recorded outcome, and the recorded history
+summary is the same reviewed artifact. Other completed-step drift still rewinds
+to the earliest changed step.

@@ -3,6 +3,13 @@
 Plannotator is optional. A gate with no `provider` uses Pi's built-in prompt
 panel; `provider: plannotator` opts into this integration.
 
+Planning is the human-decision boundary. A delegated planning child returns its
+artifact through `structured_output`; a main-agent planning step uses
+`workflow_complete_step`. The user resolves all remaining decisions in the
+built-in review or Plannotator before approval. Implementation and verification
+steps then treat that approved artifact as final and never open a supervisor or
+terminal-question side channel.
+
 ## Gate State Machine
 
 ```mermaid
@@ -89,6 +96,11 @@ flowchart TD
   Store --> Apply
   Fail --> Apply
 ```
+
+A built-in review opened from print or JSON mode remains paused because those
+modes cannot show the dialog. Reopen the same session in TUI or RPC mode and
+run `/workflow-resume`; the harness presents the preserved pending plan instead
+of rerunning the planning child.
 
 ## Feedback Flow
 

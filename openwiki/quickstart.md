@@ -33,7 +33,8 @@ flowchart LR
   Main[Main Pi agent]
   Child[pi-subagents child]
   Policy[Step policy]
-  Complete[workflow_complete_step result]
+  MainComplete[workflow_complete_step]
+  ChildComplete[structured_output]
   Gate[Optional prompt or Plannotator gate]
 
   Files --> Harness
@@ -42,10 +43,11 @@ flowchart LR
   Harness --> Policy
   Policy --> Main
   Policy --> Child
-  Main --> Complete
-  Child --> Complete
-  Complete --> Harness
-  Complete --> Gate
+  Main --> MainComplete
+  Child --> ChildComplete
+  MainComplete --> Harness
+  ChildComplete --> Harness
+  Harness --> Gate
   Gate --> Harness
   Harness --> State
 ```
@@ -72,7 +74,7 @@ flowchart TD
 
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
-  Agents --> StepAgent[step.md<br/>pi-workflows.step]
+  Agents --> StepAgent[step.md<br/>default profile and child guidance]
   Examples --> MR[mr-comments workflow]
   Tests --> TestSuite[Bun test suite]
 ```
@@ -97,11 +99,30 @@ Core commands:
 | `/workflow-list`               | List loaded workflows.              |
 | `/workflow-start <id> [input]` | Start by workflow id.               |
 | `/<workflow command> [input]`  | Start through configured alias.     |
-| `/workflow-status`             | Open a live run-status board.       |
 | `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
 | `/workflow-resume`             | Reload, reconcile, and continue.    |
 | `/workflow-abort [reason]`     | Abort active run.                   |
 | `/workflow-reload`             | Reload files when no run is active. |
+
+The main surface has no task-viewer pane. Its footer shows only a compact
+`◐`/`◓`/`◑`/`◒` indicator while work is running, then clears it. The full
+overlay opens at workflow start; toggle it with `Ctrl+Alt+W` by default, or
+hide it with `q` or `Esc`. Configure another Pi key identifier with
+`statusShortcut` in `settings.yaml`, then run Pi's `/reload` to register the
+change. `/workflow-reload` reloads workflow files but cannot rebind extension
+shortcuts. The overlay contains every step and diagnostic detail, using `✓` for
+completed, `✕` for failed or aborted, and `◆` for paused or awaiting review. It
+clamps long reasons to its available width while the checkpoint keeps the
+complete message. On short terminals, scroll with `↑`/`↓`, PgUp/PgDn, or
+Home/End.
+
+Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`
+value selects the actual Pi Subagents profile, and each profile starts with a
+fresh context containing only the explicit workflow input and compact handoff.
+
+Configured workflow aliases accept multiline input. For example,
+`/work\n"""request"""` is normalized to `/work """request"""` and dispatched as
+the workflow command rather than as a normal parent-agent turn.
 
 ## Default Workflow Location
 

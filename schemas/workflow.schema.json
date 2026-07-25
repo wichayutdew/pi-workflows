@@ -360,7 +360,7 @@
               "default": "pi-workflows.step"
             },
             "context": {
-              "enum": ["fresh", "fork"],
+              "enum": ["fresh"],
               "default": "fresh"
             },
             "model": {
@@ -379,6 +379,10 @@
               "$ref": "#/$defs/subagentToolBudget"
             },
             "artifacts": {
+              "type": "boolean",
+              "default": false
+            },
+            "retryToolFailures": {
               "type": "boolean",
               "default": false
             }
@@ -413,7 +417,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["fresh", "fork"]
+            "enum": ["fresh"]
           }
         },
         "models": {
@@ -445,6 +449,10 @@
         },
         "artifacts": {
           "type": "boolean"
+        },
+        "retryToolFailures": {
+          "type": "boolean",
+          "default": false
         }
       }
     },

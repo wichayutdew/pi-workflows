@@ -16,6 +16,20 @@ flowchart TD
   Settings --> UserFiles[user workflow YAML]
 ```
 
+## Status Shortcut
+
+The workflow status overlay uses `Ctrl+Alt+W` by default. Configure another Pi
+key identifier in the user-owned settings file:
+
+```yaml
+version: 1
+statusShortcut: ctrl+shift+y
+```
+
+Run Pi's `/reload` after changing `statusShortcut` so the extension can
+re-register the key. `/workflow-reload` reloads workflow definitions and warns
+about a shortcut mismatch, but the active editor keeps the startup binding.
+
 ## Project Workflow Gate
 
 ```mermaid
@@ -45,19 +59,32 @@ flowchart TD
   Delegated -- no --> Accept[accept project step]
   Delegated -- yes --> SubCeiling{subagent ceiling present?}
   SubCeiling -- no --> Reject[reject project step]
-  SubCeiling -- yes --> Agent{agent allowed?}
-  Agent --> Context{context allowed?}
+  SubCeiling -- yes --> Profile{agent profile allowed?}
+  Profile --> Context{fresh context allowed?}
   Context --> Model{model absent or allowed?}
   Model --> Timeout{timeout <= maxTimeoutMs?}
   Timeout --> Turns{turnBudget present and within ceiling?}
   Turns --> ToolBudget{toolBudget present, hard <= maxToolCalls, block = *?}
   ToolBudget --> Artifacts{artifacts allowed?}
-  Artifacts --> Accept
+  Artifacts --> Retry{tool-failure retry allowed?}
+  Retry --> Accept
 ```
 
 If any decision is false, the project workflow is diagnosed and skipped.
 Main-only project workflows do not need a `subagent` ceiling. Delegated project
-steps require that ceiling plus explicit turn and tool budgets.
+steps require that ceiling plus explicit turn and tool budgets. The ceiling's
+`agents` list contains the actual Pi Subagents profiles a project workflow may
+launch. Each delegated request still uses a fresh context. After its capability
+is verified, the workflow policy is the sole active-tool allow-list inside the
+child; the selected profile still determines which extension providers were
+loaded and therefore available to activate.
+
+`retryToolFailures` authorizes one full fresh-context replay after a retryable
+tool failure. It is rejected for steps with `edit` or `write`, and runtime
+retry additionally requires a complete trusted child transcript proving every
+recorded call was read-only or rejected before execution. Unknown-effect Bash
+or a truncated transcript pauses. Project workflows may enable it only when
+the user ceiling also sets `subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules
 

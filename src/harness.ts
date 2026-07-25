@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { constants, mkdtempSync, writeFileSync } from 'node:fs';
+import { lstat, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -8,6 +8,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import type { KeyId } from '@earendil-works/pi-tui';
 import {
   registerHarnessCommands,
   type WorkflowCommandController,
@@ -16,6 +17,7 @@ import { loadCatalog } from './config/load.ts';
 import { hasRuntimeCommandConflict } from './config/command-conflicts.ts';
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_STATUS_SHORTCUT,
   type LoadedWorkflow,
   type WorkflowCatalog,
   type WorkflowStep,
@@ -28,6 +30,7 @@ import {
   attachGateReviewId,
   beginGate,
   failGate,
+  failRun,
   pauseRun,
   reconcileRun,
   resolveGate,
@@ -63,29 +66,66 @@ import {
   type SubagentDelegationResponse,
   type SubagentDelegationUpdate,
 } from './integrations/subagents/protocol.ts';
+import {
+  deriveSubagentSessionRoot,
+  failedToolName,
+  formatToolFailureDiagnostic,
+  readToolFailureDiagnostic,
+  type ToolFailureDiagnostic,
+} from './integrations/subagents/diagnostics.ts';
 import { preflightStep } from './preflight.ts';
 import {
   buildDelegatedStepTask,
   buildMainStepTask,
   buildMainWorkflowNotice,
+  toolRetryTask,
 } from './prompt.ts';
-import { extractApprovedBashCommands } from './policy/approved-commands.ts';
+import {
+  narrowApprovedBashCommands,
+  resolveReviewedRepositoryCwd,
+  reviewedCommandShapeError,
+} from './policy/approved-commands.ts';
 import {
   MainStepRuntime,
   type MainStepExecution,
 } from './runtime/main-step-runtime.ts';
+import { WORKFLOW_COMPLETION_PARAMETERS } from './runtime/completion-tool.ts';
 import { SerialTaskQueue } from './runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from './runtime/step-result.ts';
 import { formatWorkflowList } from './workflow-list.ts';
 import {
-  formatWorkflowStatusText,
-  showWorkflowStatus,
+  formatShortcutLabel,
+  showWorkflowStatus as showWorkflowStatusOverlay,
+  workflowStatusIcon,
   type WorkflowStatusExecution,
   type WorkflowStatusSnapshot,
 } from './workflow-status.ts';
 
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const STATUS_KEY = 'pi-workflows';
+const LEGACY_PROGRESS_WIDGET_KEY = 'pi-workflows-progress';
+const STATUS_REFRESH_INTERVAL_MS = 250;
+const MAX_TOOL_FAILURE_RETRIES = 1;
+
+function isRetryableToolFailure(reason: string): boolean {
+  return failedToolName(reason) !== undefined;
+}
+
+function isSafeToRetryDelegation(
+  policy: ChildStepPolicy,
+  replayExplicitlyAuthorized: boolean,
+  diagnostic: ToolFailureDiagnostic | undefined,
+): boolean {
+  const tools = new Set(policy.permissions.tools);
+  return (
+    diagnostic?.replaySafe === true &&
+    !tools.has('edit') &&
+    !tools.has('write') &&
+    (replayExplicitlyAuthorized ||
+      policy.permissions.bash.mode === 'deny' ||
+      policy.permissions.bash.mode === 'read-only')
+  );
+}
 
 interface ActiveDelegation {
   requestId: string;
@@ -96,8 +136,242 @@ interface ActiveDelegation {
   resultDirectory: string;
   policy: ChildStepPolicy;
   agent: string;
+  trustedSessionRoot?: string;
+  retryToolFailures: boolean;
+  toolFailureRetryCount: number;
+  retryDiagnostic?: ToolFailureDiagnostic;
   progress?: string;
   cancelling?: boolean;
+}
+
+const MAX_FAILURE_FIELD_CHARS = 1_600;
+const MAX_DELEGATED_RESULT_BYTES = 1024 * 1024;
+
+function boundedFailureField(value: string): string {
+  if (value.length <= MAX_FAILURE_FIELD_CHARS) return value;
+  const marker = '… [truncated] …';
+  const available = MAX_FAILURE_FIELD_CHARS - marker.length - 2;
+  const startLength = Math.ceil(available / 2);
+  const endLength = Math.floor(available / 2);
+  return `${value.slice(0, startLength)}\n${marker}\n${value.slice(-endLength)}`;
+}
+
+async function readStableDelegatedResult(
+  active: ActiveDelegation,
+): Promise<string> {
+  const expectedPath = join(active.resultDirectory, 'result.json');
+  if (active.policy.resultPath !== expectedPath) {
+    throw new Error(
+      'delegated result path does not match its private directory',
+    );
+  }
+  const inspected = await lstat(expectedPath);
+  if (inspected.isSymbolicLink() || !inspected.isFile()) {
+    throw new Error('delegated result is not a regular file');
+  }
+  const handle = await open(
+    expectedPath,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    const beforeRead = await handle.stat();
+    if (!beforeRead.isFile() || beforeRead.size > MAX_DELEGATED_RESULT_BYTES) {
+      throw new Error('delegated result is not a bounded regular file');
+    }
+    const value = await handle.readFile({ encoding: 'utf8' });
+    const afterRead = await handle.stat();
+    if (
+      afterRead.dev !== beforeRead.dev ||
+      afterRead.ino !== beforeRead.ino ||
+      afterRead.size !== beforeRead.size ||
+      afterRead.mtimeMs !== beforeRead.mtimeMs
+    ) {
+      throw new Error('delegated result changed while it was being read');
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
+}
+
+function rejectedRecoveryReason(
+  failure: DelegationFailureDetails,
+  error: unknown,
+): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `${failure.reason}\nRecovery rejected: ${boundedFailureField(detail)}`;
+}
+
+function completionMatchesResult(
+  diagnostic: NonNullable<DelegationFailureDetails['diagnostic']>,
+  result: WorkflowStepResult,
+  policy: ChildStepPolicy,
+): boolean {
+  const value = diagnostic.completionValue;
+  if (!value) return false;
+  const expectedKeys = [
+    'outcome',
+    'summary',
+    ...(result.artifact === undefined ? [] : ['artifact']),
+  ].sort();
+  const actualKeys = Object.keys(value).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    !actualKeys.every((key, index) => key === expectedKeys[index])
+  ) {
+    return false;
+  }
+  try {
+    const completion = parseDelegatedStepResult(
+      {
+        ...value,
+        version: 1,
+        policyDigest: policy.policyDigest,
+      },
+      policy,
+    );
+    return (
+      completion.outcome === result.outcome &&
+      completion.summary === result.summary &&
+      completion.artifact === result.artifact
+    );
+  } catch {
+    return false;
+  }
+}
+
+function recoveredProjectionError(
+  active: ActiveDelegation,
+  response: SubagentDelegationResponse,
+  diagnostic: NonNullable<DelegationFailureDetails['diagnostic']>,
+): string | undefined {
+  if (response.agent !== active.agent) {
+    return `terminal agent identity is ${JSON.stringify(response.agent)}; expected ${JSON.stringify(active.agent)}`;
+  }
+  if (response.childIndex !== 0) {
+    return `terminal child index is ${JSON.stringify(response.childIndex)}; expected 0`;
+  }
+  if (
+    typeof response.exitCode !== 'number' ||
+    !Number.isSafeInteger(response.exitCode) ||
+    response.exitCode <= 0
+  ) {
+    return `terminal exit code is ${JSON.stringify(response.exitCode)}; expected a positive safe integer`;
+  }
+  const execution = response.execution;
+  if (!execution) return 'terminal response has no execution projection';
+  if (execution.status !== 'failed' || execution.success !== false) {
+    return `execution projection is ${JSON.stringify({
+      status: execution.status,
+      success: execution.success,
+    })}; expected failed/false`;
+  }
+  if (execution.exitCode !== response.exitCode) {
+    return `execution exit code ${JSON.stringify(execution.exitCode)} does not match terminal exit code ${JSON.stringify(response.exitCode)}`;
+  }
+  if (
+    typeof response.error !== 'string' ||
+    !response.error ||
+    typeof execution.error !== 'string' ||
+    execution.error !== response.error
+  ) {
+    return 'terminal and execution errors are missing or do not match exactly';
+  }
+  const warnings = response.warnings as unknown;
+  if (
+    warnings !== undefined &&
+    (!Array.isArray(warnings) ||
+      warnings.some(
+        (warning) => typeof warning !== 'string' || warning.trim().length > 0,
+      ))
+  ) {
+    return `terminal response contains warning evidence: ${JSON.stringify(warnings)}`;
+  }
+  if (
+    diagnostic.transcriptToolCount !== undefined &&
+    response.toolCount !== undefined &&
+    response.toolCount !== diagnostic.transcriptToolCount
+  ) {
+    return `terminal tool count ${response.toolCount} does not match transcript tool count ${diagnostic.transcriptToolCount}`;
+  }
+  if (
+    diagnostic.transcriptTurnCount !== undefined &&
+    response.turns !== undefined &&
+    response.turns !== diagnostic.transcriptTurnCount
+  ) {
+    return `terminal turn count ${response.turns} does not match transcript turn count ${diagnostic.transcriptTurnCount}`;
+  }
+  const toolFailure = response.error.match(
+    /^\s*([a-z][\w-]*) failed\s*\(exit\s+(\d+)\)\s*:/i,
+  );
+  if (!toolFailure) {
+    return 'terminal error is not a recognized "<tool> failed (exit N): <detail>" failure';
+  }
+  const terminalTool = toolFailure[1]!;
+  const terminalExitCode = Number(toolFailure[2]);
+  if (
+    terminalTool.toLowerCase() !== diagnostic.tool.toLowerCase() ||
+    terminalExitCode !== response.exitCode
+  ) {
+    return `terminal tool/exit ${JSON.stringify({
+      tool: terminalTool,
+      exitCode: terminalExitCode,
+    })} does not match the correlated failure ${JSON.stringify({
+      tool: diagnostic.tool,
+      exitCode: response.exitCode,
+    })}`;
+  }
+  const unsafeFlag = (
+    [
+      ['interrupted', execution.interrupted],
+      ['timedOut', execution.timedOut],
+      ['stopped', execution.stopped],
+      ['detached', execution.detached],
+    ] as const
+  ).find(([, enabled]) => enabled === true)?.[0];
+  return unsafeFlag
+    ? `execution projection reports ${unsafeFlag}=true`
+    : undefined;
+}
+
+interface DelegationFailureDetails {
+  reason: string;
+  diagnostic?: Awaited<ReturnType<typeof readToolFailureDiagnostic>>;
+}
+
+async function delegationFailureDetails(
+  active: ActiveDelegation,
+  response: SubagentDelegationResponse,
+): Promise<DelegationFailureDetails> {
+  const error =
+    response.error ??
+    response.execution?.error ??
+    'The subagent returned no terminal error details.';
+  const diagnostic = await readToolFailureDiagnostic(
+    response.sessionFile,
+    active.trustedSessionRoot,
+    response.runId !== undefined && response.childIndex !== undefined
+      ? { runId: response.runId, childIndex: response.childIndex }
+      : undefined,
+    failedToolName(error),
+    error,
+  );
+  const exitCode = response.exitCode ?? response.execution?.exitCode;
+  const reason = [
+    `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}.`,
+    ...(diagnostic ? formatToolFailureDiagnostic(diagnostic) : []),
+    ...(exitCode !== undefined ? [`Subagent exit code: ${exitCode}`] : []),
+    `Terminal error: ${boundedFailureField(error)}`,
+    ...(diagnostic && response.sessionFile
+      ? [
+          `Diagnostic session: ${boundedFailureField(response.sessionFile.replaceAll(/\s+/g, ' '))}`,
+        ]
+      : []),
+  ].join('\n');
+  return {
+    reason,
+    ...(diagnostic ? { diagnostic } : {}),
+  };
 }
 
 interface MainStepIdentity {
@@ -113,6 +387,12 @@ interface ActivePromptReview {
   stepId: string;
   sessionEpoch: number;
   abortController: AbortController;
+}
+
+interface WorkflowStartContext {
+  context: ExtensionContext;
+  skills: () => readonly { name: string }[] | undefined;
+  waitForIdle: () => Promise<void>;
 }
 
 function emptyCatalog(): WorkflowCatalog {
@@ -135,6 +415,30 @@ function formatDiagnostics(catalog: WorkflowCatalog): string {
   ].join('\n');
 }
 
+function skillNamesFromSystemPrompt(
+  systemPrompt: string,
+): Array<{ name: string }> {
+  const sections = [
+    ...systemPrompt.matchAll(
+      /<available_skills>([\s\S]*?)<\/available_skills>/g,
+    ),
+  ];
+  const section = sections.at(-1)?.[1] ?? '';
+  return [...section.matchAll(/<name>([^<]+)<\/name>/g)].map((match) => ({
+    name: match[1]!.trim(),
+  }));
+}
+
+async function waitForEventContextIdle(ctx: ExtensionContext): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (!ctx.isIdle()) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for the interrupted Pi turn to stop');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 export class WorkflowHarness implements WorkflowCommandController {
   private readonly pi: ExtensionAPI;
   private readonly subagents: SubagentDelegationClient;
@@ -150,12 +454,24 @@ export class WorkflowHarness implements WorkflowCommandController {
   private registeredWorkflowCommands = new Set<string>();
   private catalogLoadSequence = 0;
   private readonly mutationQueue = new SerialTaskQueue();
+  private readonly statusShortcut: KeyId;
+  private readonly statusShortcutLabel: string;
+  private statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+  private statusOverlayOpen = false;
+  private legacyProgressWidgetContext: ExtensionContext | undefined;
 
-  constructor(pi: ExtensionAPI) {
+  constructor(
+    pi: ExtensionAPI,
+    statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
+  ) {
     this.pi = pi;
+    this.statusShortcut = statusShortcut;
+    this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
     this.subagents = new SubagentDelegationClient(pi.events);
     this.mainSteps = new MainStepRuntime(pi);
     registerHarnessCommands(pi, this);
+    this.registerWorkflowStatusShortcut();
+    this.registerMultilineCommandInput();
     this.registerLifecycle();
     this.registerPolicy();
     this.registerPlannotatorResults();
@@ -163,6 +479,49 @@ export class WorkflowHarness implements WorkflowCommandController {
 
   workflowIds(): string[] {
     return [...this.catalog.workflows.keys()].sort();
+  }
+
+  private registerMultilineCommandInput(): void {
+    this.pi.on('input', async (event, ctx) => {
+      if (
+        event.source === 'extension' ||
+        event.images?.length ||
+        !event.text.startsWith('/')
+      ) {
+        return;
+      }
+      const newline = event.text.indexOf('\n');
+      if (newline === -1) return;
+      const command = event.text.slice(1, newline).replace(/\r$/, '');
+      if (!this.registeredWorkflowCommands.has(command)) return;
+      const workflow = [...this.catalog.workflows.values()].find(
+        (candidate) => candidate.definition.command === command,
+      );
+      if (!workflow) return;
+
+      const input = event.text.slice(newline + 1);
+      const skills = skillNamesFromSystemPrompt(ctx.getSystemPrompt());
+      try {
+        await this.enqueueMutation(ctx, (sessionEpoch) =>
+          this.startNow(
+            workflow.definition.id,
+            input,
+            {
+              context: ctx,
+              skills: () => skills,
+              waitForIdle: () => waitForEventContextIdle(ctx),
+            },
+            sessionEpoch,
+          ),
+        );
+      } catch (error) {
+        ctx.ui.notify(
+          `Cannot start workflow: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        );
+      }
+      return { action: 'handled' as const };
+    });
   }
 
   async list(ctx: ExtensionCommandContext): Promise<void> {
@@ -191,16 +550,26 @@ export class WorkflowHarness implements WorkflowCommandController {
     ctx: ExtensionCommandContext,
   ): Promise<void> {
     return this.enqueueMutation(ctx, (sessionEpoch) =>
-      this.startNow(workflowId, input, ctx, sessionEpoch),
+      this.startNow(
+        workflowId,
+        input,
+        {
+          context: ctx,
+          skills: () => ctx.getSystemPromptOptions().skills,
+          waitForIdle: () => ctx.waitForIdle(),
+        },
+        sessionEpoch,
+      ),
     );
   }
 
   private async startNow(
     workflowId: string,
     input: string,
-    ctx: ExtensionCommandContext,
+    startContext: WorkflowStartContext,
     sessionEpoch: number,
   ): Promise<void> {
+    const { context: ctx } = startContext;
     if (this.activeDelegation) {
       ctx.ui.notify(
         `Cannot start a workflow while subagent "${this.activeDelegation.agent}" is still cancelling`,
@@ -221,7 +590,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     }
     if (!ctx.isIdle()) {
       ctx.abort();
-      await ctx.waitForIdle();
+      await startContext.waitForIdle();
     }
     if (!this.sessionActive || this.sessionEpoch !== sessionEpoch) {
       ctx.ui.notify(
@@ -231,7 +600,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
 
-    this.captureSkills(ctx.getSystemPromptOptions().skills);
+    this.captureSkills(startContext.skills());
     if (!(await this.reloadCatalog(ctx, false))) {
       ctx.ui.notify(
         'Workflow start was superseded by a newer configuration load',
@@ -271,6 +640,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     this.persist();
     this.isolateMainSessionTools();
     this.updateStatus();
+    this.openWorkflowStatus(ctx);
     this.launchCurrentStep(workflow);
   }
 
@@ -510,7 +880,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
     const preflightErrors = this.preflight(workflow, this.run.currentStepId);
     if (preflightErrors.length > 0) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Step preflight failed: ${preflightErrors.join('; ')}`,
         Date.now(),
@@ -591,19 +961,6 @@ export class WorkflowHarness implements WorkflowCommandController {
     await this.reloadCatalog(ctx, true);
   }
 
-  async status(ctx: ExtensionCommandContext): Promise<void> {
-    const snapshot = this.workflowStatusSnapshot();
-    if (!snapshot) {
-      ctx.ui.notify('No workflow checkpoint in this session', 'info');
-      return;
-    }
-    if (ctx.hasUI && ctx.mode === 'tui') {
-      await showWorkflowStatus(ctx, () => this.workflowStatusSnapshot());
-      return;
-    }
-    ctx.ui.notify(formatWorkflowStatusText(snapshot), 'info');
-  }
-
   private workflowStatusSnapshot(): WorkflowStatusSnapshot | undefined {
     if (!this.run) return undefined;
     const workflow = this.catalog.workflows.get(this.run.workflowId);
@@ -662,6 +1019,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       if (this.run) this.restoreBaselineTools();
       this.run = undefined;
       this.latestContext = undefined;
+      this.stopStatusRefresh();
     });
   }
 
@@ -672,7 +1030,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       if (!this.run || this.run.status !== 'running') return;
       const workflow = this.catalog.workflows.get(this.run.workflowId);
       if (!workflow) {
-        this.run = pauseRun(
+        this.run = failRun(
           this.run,
           'Workflow configuration disappeared; reload or restore it',
           Date.now(),
@@ -683,12 +1041,15 @@ export class WorkflowHarness implements WorkflowCommandController {
         return;
       }
       return {
-        systemPrompt: `${event.systemPrompt}\n\n${buildMainWorkflowNotice(workflow, this.run)}`,
+        systemPrompt: `${event.systemPrompt}\n\n${buildMainWorkflowNotice(workflow, this.run, this.statusShortcutLabel)}`,
       };
     });
   }
 
-  private launchCurrentStep(workflow: LoadedWorkflow): void {
+  private launchCurrentStep(
+    workflow: LoadedWorkflow,
+    toolRetry?: { count: number; reason: string },
+  ): void {
     const run = this.run;
     if (
       !run ||
@@ -712,6 +1073,18 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
 
+    const reviewedRepository = resolveReviewedRepositoryCwd(
+      run.reviewedArtifact ?? '',
+    );
+    if (reviewedRepository.kind === 'invalid') {
+      this.pauseForExecutionFailure('Subagent step', reviewedRepository.reason);
+      return;
+    }
+    const delegationCwd =
+      reviewedRepository.kind === 'resolved'
+        ? reviewedRepository.cwd
+        : (this.latestContext?.cwd ?? process.cwd());
+    const runtimeAgent = subagent.agent;
     const requestId = `${run.runId}:${run.currentStepId}:${randomUUID()}`;
     const resultDirectory = mkdtempSync(join(tmpdir(), 'pi-workflows-step-'));
     const capabilityPath = join(resultDirectory, 'capability');
@@ -722,25 +1095,38 @@ export class WorkflowHarness implements WorkflowCommandController {
       flag: 'wx',
       mode: 0o600,
     });
-    const approvedBashCommands = extractApprovedBashCommands(
+    const outcomes = allowedOutcomes(workflow, run);
+    const outcomeSet = new Set(outcomes);
+    const approvedBashCommands = narrowApprovedBashCommands(
       run.reviewedArtifact ?? '',
+      run.stepHandoff ?? '',
       step.permissions.bash.approvedSources ?? [],
     );
+    const repositoryPolicy =
+      reviewedRepository.kind === 'resolved'
+        ? {
+            repositoryCwd: reviewedRepository.repositoryCwd,
+            ...(reviewedRepository.bootstrapping
+              ? { bootstrapCwd: reviewedRepository.cwd }
+              : {}),
+          }
+        : {};
     const policyDigest = digest({
       version: 1,
       requestId,
-      agent: subagent.agent,
+      agent: runtimeAgent,
       runId: run.runId,
       stepId: run.currentStepId,
       stepDigest: run.currentStepDigest,
       capabilityPath,
       resultPath,
       approvedBashCommands,
+      ...repositoryPolicy,
     });
     const policy: ChildStepPolicy = {
       version: 1,
       requestId,
-      agent: subagent.agent,
+      agent: runtimeAgent,
       workflowId: workflow.definition.id,
       runId: run.runId,
       stepId: run.currentStepId,
@@ -751,10 +1137,19 @@ export class WorkflowHarness implements WorkflowCommandController {
       resultPath,
       permissions: structuredClone(step.permissions),
       ...(approvedBashCommands.length > 0 ? { approvedBashCommands } : {}),
-      outcomes: allowedOutcomes(workflow, run),
+      ...repositoryPolicy,
+      outcomes,
+      pauseOutcomes: Object.entries(step.transitions)
+        .filter(
+          ([outcome, target]) => target === '$pause' && outcomeSet.has(outcome),
+        )
+        .map(([outcome]) => outcome),
       summaryMaxChars: workflow.definition.summaryMaxChars,
       ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     };
+    const trustedSessionRoot = deriveSubagentSessionRoot(
+      this.latestContext?.sessionManager.getSessionFile(),
+    );
     const active: ActiveDelegation = {
       requestId,
       runId: run.runId,
@@ -764,24 +1159,33 @@ export class WorkflowHarness implements WorkflowCommandController {
       resultDirectory,
       policy,
       agent: subagent.agent,
+      ...(trustedSessionRoot ? { trustedSessionRoot } : {}),
+      retryToolFailures: subagent.retryToolFailures,
+      toolFailureRetryCount: toolRetry?.count ?? 0,
     };
     const request: SubagentDelegationRequest = {
       version: 1,
       requestId,
-      agent: subagent.agent,
-      task: buildDelegatedStepTask(workflow, run, encodeChildPolicy(policy)),
-      context: subagent.context,
-      cwd: this.latestContext?.cwd ?? process.cwd(),
+      agent: runtimeAgent,
+      task: [
+        buildDelegatedStepTask(workflow, run, encodeChildPolicy(policy)),
+        ...(toolRetry ? [toolRetryTask(toolRetry.reason)] : []),
+      ].join('\n\n'),
+      // Workflow steps are isolation boundaries. Never fork the parent or a
+      // sibling step's transcript; pass only the explicit workflow handoff.
+      context: 'fresh',
+      cwd: delegationCwd,
       timeoutMs: subagent.timeoutMs,
       skill:
         step.permissions.skills.length > 0
           ? [...step.permissions.skills]
           : false,
-      acceptance: {
-        level: 'none',
-        reason:
-          'Pi Workflows owns correlated step completion and human-review gates',
-      },
+      output: false,
+      outputSchema: WORKFLOW_COMPLETION_PARAMETERS as unknown as Record<
+        string,
+        unknown
+      >,
+      agentContract: { version: 1 },
       artifacts: subagent.artifacts,
       ...(subagent.model ? { model: subagent.model } : {}),
       ...(subagent.turnBudget
@@ -819,8 +1223,9 @@ export class WorkflowHarness implements WorkflowCommandController {
     run: WorkflowRun,
     step: WorkflowStep,
   ): void {
-    const approvedBashCommands = extractApprovedBashCommands(
+    const approvedBashCommands = narrowApprovedBashCommands(
       run.reviewedArtifact ?? '',
+      run.stepHandoff ?? '',
       step.permissions.bash.approvedSources ?? [],
     );
     const identity: MainStepIdentity = {
@@ -1011,18 +1416,34 @@ export class WorkflowHarness implements WorkflowCommandController {
       ) {
         return;
       }
-      if (response.status !== 'completed') {
-        throw new Error(
-          `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}${
-            response.error ? `: ${response.error}` : ''
-          }`,
-        );
-      }
-
       const workflow = this.catalog.workflows.get(this.run.workflowId);
       const step = workflow?.definition.steps[this.run.currentStepId];
       if (!workflow || !step) {
         throw new Error('Active workflow configuration is unavailable');
+      }
+      let recoveredTerminalFailure: DelegationFailureDetails | undefined;
+      if (response.status !== 'completed') {
+        const failure = await delegationFailureDetails(active, response);
+        if (failure.diagnostic) {
+          active.retryDiagnostic = failure.diagnostic;
+        } else {
+          delete active.retryDiagnostic;
+        }
+        if (
+          response.status !== 'failed' ||
+          failure.diagnostic?.completionAfterFailure !== true
+        ) {
+          throw new Error(failure.reason);
+        }
+        const projectionError = recoveredProjectionError(
+          active,
+          response,
+          failure.diagnostic,
+        );
+        if (projectionError) {
+          throw new Error(rejectedRecoveryReason(failure, projectionError));
+        }
+        recoveredTerminalFailure = failure;
       }
       const requiredSkillWarning =
         step.requires.skills.length > 0
@@ -1034,10 +1455,65 @@ export class WorkflowHarness implements WorkflowCommandController {
         );
       }
 
-      const rawResult = JSON.parse(
-        await readFile(active.policy.resultPath, 'utf8'),
-      ) as unknown;
-      const result = parseDelegatedStepResult(rawResult, active.policy);
+      let serializedResult: string;
+      try {
+        serializedResult = await readStableDelegatedResult(active);
+      } catch (error) {
+        if (recoveredTerminalFailure) {
+          throw new Error(
+            rejectedRecoveryReason(recoveredTerminalFailure, error),
+            { cause: error },
+          );
+        }
+        if (
+          (error as { code?: unknown } | null | undefined)?.code === 'ENOENT'
+        ) {
+          throw new Error(
+            `Subagent "${active.agent}" completed without producing the required correlated structured_output result`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+      let result: WorkflowStepResult;
+      try {
+        const rawResult = JSON.parse(serializedResult) as unknown;
+        result = parseDelegatedStepResult(rawResult, active.policy);
+      } catch (error) {
+        if (recoveredTerminalFailure) {
+          throw new Error(
+            rejectedRecoveryReason(recoveredTerminalFailure, error),
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+      if (
+        recoveredTerminalFailure?.diagnostic &&
+        !completionMatchesResult(
+          recoveredTerminalFailure.diagnostic,
+          result,
+          active.policy,
+        )
+      ) {
+        throw new Error(
+          rejectedRecoveryReason(
+            recoveredTerminalFailure,
+            'structured_output transcript value does not match the correlated result',
+          ),
+        );
+      }
+      if (recoveredTerminalFailure) {
+        const falsePositive =
+          recoveredTerminalFailure.diagnostic?.correlation ===
+          'successful-output-before-completion';
+        this.latestContext?.ui.notify(
+          falsePositive
+            ? `Accepted "${active.stepId}" because the trusted child transcript proved the terminal tool error was a false positive and produced a matching structured result`
+            : `Accepted "${active.stepId}" because the child resolved an earlier tool failure and produced a valid structured result`,
+          'warning',
+        );
+      }
       if (step.gate?.submitOutcome === result.outcome) {
         await this.submitGate(
           workflow,
@@ -1057,9 +1533,10 @@ export class WorkflowHarness implements WorkflowCommandController {
       );
       this.settleAfterTransition(workflow);
     } catch (error) {
-      this.pauseForDelegationFailure(
-        error instanceof Error ? error.message : String(error),
-      );
+      const reason = error instanceof Error ? error.message : String(error);
+      if (!this.retryDelegationAfterToolFailure(active, reason)) {
+        this.pauseForDelegationFailure(reason);
+      }
     } finally {
       await this.cleanupDelegation(active);
       if (active.cancelling) this.releaseMainAfterCancellation(active);
@@ -1098,6 +1575,43 @@ export class WorkflowHarness implements WorkflowCommandController {
     await rm(active.resultDirectory, { recursive: true, force: true });
   }
 
+  private retryDelegationAfterToolFailure(
+    active: ActiveDelegation,
+    reason: string,
+  ): boolean {
+    if (
+      active.toolFailureRetryCount >= MAX_TOOL_FAILURE_RETRIES ||
+      !isRetryableToolFailure(reason) ||
+      !isSafeToRetryDelegation(
+        active.policy,
+        active.retryToolFailures,
+        active.retryDiagnostic,
+      ) ||
+      !this.sessionActive ||
+      this.sessionEpoch !== active.sessionEpoch ||
+      !this.run ||
+      this.run.status !== 'running' ||
+      this.run.runId !== active.runId ||
+      this.run.currentStepId !== active.stepId ||
+      this.run.currentStepDigest !== active.stepDigest ||
+      this.activeDelegation
+    ) {
+      return false;
+    }
+    const workflow = this.catalog.workflows.get(this.run.workflowId);
+    if (!workflow) return false;
+
+    this.latestContext?.ui.notify(
+      `Retrying "${active.stepId}" after a tool failure (${active.toolFailureRetryCount + 1}/${MAX_TOOL_FAILURE_RETRIES})`,
+      'warning',
+    );
+    this.launchCurrentStep(workflow, {
+      count: active.toolFailureRetryCount + 1,
+      reason,
+    });
+    return true;
+  }
+
   private pauseForDelegationFailure(reason: string): void {
     this.pauseForExecutionFailure('Subagent step', reason);
   }
@@ -1105,7 +1619,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   private pauseForExecutionFailure(label: string, reason: string): void {
     if (!this.run || this.run.status !== 'running') return;
     this.mainSteps.deactivate();
-    this.run = pauseRun(this.run, `${label} failed: ${reason}`, Date.now());
+    this.run = failRun(this.run, `${label} failed: ${reason}`, Date.now());
     this.persist();
     if (this.activeDelegation) {
       this.isolateMainSessionTools();
@@ -1126,7 +1640,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     active.cancelling = true;
     active.progress = 'cancellation unconfirmed';
     if (this.run?.status === 'running') {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Subagent step failed: ${reason}`,
         Date.now(),
@@ -1168,6 +1682,34 @@ export class WorkflowHarness implements WorkflowCommandController {
     const requestId = `${originalRun.runId}:${originalRun.currentStepId}:${randomUUID()}`;
     const step = workflow.definition.steps[originalRun.currentStepId];
     if (!step?.gate) throw new Error('Current step has no gate');
+
+    const commandShapeError = reviewedCommandShapeError(artifact);
+    if (commandShapeError) {
+      const awaitingReview = beginGate(
+        workflow,
+        originalRun,
+        outcome,
+        artifact,
+        requestId,
+        Date.now(),
+      );
+      this.run = resolveGate(
+        workflow,
+        awaitingReview,
+        {
+          approved: false,
+          feedback: commandShapeError,
+          resolvedAt: Date.now(),
+        },
+        Date.now(),
+      );
+      this.latestContext?.ui.notify(
+        `Plan contract needs repair before review: ${commandShapeError}`,
+        'warning',
+      );
+      this.settleAfterTransition(workflow);
+      return;
+    }
 
     this.run = beginGate(
       workflow,
@@ -1213,10 +1755,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (response.status !== 'handled') {
       const reason = response.error ?? 'Plannotator is unavailable';
       const gateFailed = failGate(this.run, reason, Date.now());
-      this.run =
-        this.run.status === 'paused'
-          ? pauseRun(gateFailed, reason, Date.now())
-          : gateFailed;
+      this.run = failRun(gateFailed, reason, Date.now());
       this.persist();
       if (this.run.status === 'running') {
         this.isolateMainSessionTools();
@@ -1250,6 +1789,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         pendingGate.requestId,
         'Built-in review requires Pi TUI or RPC mode; resume there to continue',
+        false,
       );
       return;
     }
@@ -1304,6 +1844,7 @@ export class WorkflowHarness implements WorkflowCommandController {
         this.pausePromptGate(
           active.requestId,
           `Built-in review failed: ${reason}`,
+          true,
         );
       })
       .catch((error: unknown) => {
@@ -1335,6 +1876,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         'Built-in review was dismissed; resume to reopen it',
+        false,
       );
       return;
     }
@@ -1360,6 +1902,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         'Built-in review finished, but workflow configuration is unavailable',
+        true,
       );
       return;
     }
@@ -1370,11 +1913,16 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         `Cannot apply built-in review: ${error instanceof Error ? error.message : String(error)}`,
+        true,
       );
     }
   }
 
-  private pausePromptGate(requestId: string, reason: string): void {
+  private pausePromptGate(
+    requestId: string,
+    reason: string,
+    failed: boolean,
+  ): void {
     if (
       !this.run ||
       this.run.pendingGate?.provider !== 'prompt' ||
@@ -1383,7 +1931,9 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
     if (this.run.status === 'awaiting-gate') {
-      this.run = pauseRun(this.run, reason, Date.now());
+      this.run = failed
+        ? failRun(this.run, reason, Date.now())
+        : pauseRun(this.run, reason, Date.now());
     }
     this.persist();
     this.restoreBaselineTools();
@@ -1445,7 +1995,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     if (!workflow) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         'Gate result arrived, but workflow configuration is unavailable',
         Date.now(),
@@ -1459,7 +2009,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.run = resolveGate(workflow, this.run, resolution, Date.now());
       this.settleAfterTransition(workflow);
     } catch (error) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Cannot apply gate result: ${error instanceof Error ? error.message : String(error)}`,
         Date.now(),
@@ -1475,7 +2025,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (this.run.status === 'running') {
       const preflightErrors = this.preflight(workflow, this.run.currentStepId);
       if (preflightErrors.length > 0) {
-        this.run = pauseRun(
+        this.run = failRun(
           this.run,
           `Step preflight failed: ${preflightErrors.join('; ')}`,
           Date.now(),
@@ -1610,6 +2160,15 @@ export class WorkflowHarness implements WorkflowCommandController {
       return false;
     }
     this.latestContext = ctx;
+    if (catalog.settings.statusShortcut !== this.statusShortcut) {
+      catalog.diagnostics.push({
+        level: 'warning',
+        path: join(catalog.userDirectory, 'settings.yaml'),
+        message:
+          `settings.statusShortcut is "${catalog.settings.statusShortcut}", ` +
+          `but the active shortcut is "${this.statusShortcut}"; run Pi /reload to apply shortcut changes`,
+      });
+    }
     const availableCommands = this.pi.getCommands();
     for (const [workflowId, workflow] of catalog.workflows) {
       const command = workflow.definition.command;
@@ -1658,19 +2217,87 @@ export class WorkflowHarness implements WorkflowCommandController {
   }
 
   private updateStatus(): void {
+    this.refreshStatusWhileRunning();
     if (!this.latestContext) return;
+    if (this.legacyProgressWidgetContext !== this.latestContext) {
+      this.latestContext.ui.setWidget(LEGACY_PROGRESS_WIDGET_KEY, undefined);
+      this.legacyProgressWidgetContext = this.latestContext;
+    }
     if (!this.run) {
       this.latestContext.ui.setStatus(STATUS_KEY, undefined);
       return;
     }
-    const delegation = this.activeDelegation
-      ? `; ${this.activeDelegation.agent}: ${this.activeDelegation.progress ?? 'starting'}`
-      : this.mainSteps.activeStepId
-        ? '; main agent: running'
-        : '';
+    const snapshot = this.workflowStatusSnapshot();
+    if (this.run.status !== 'running') {
+      this.latestContext.ui.setStatus(STATUS_KEY, undefined);
+      return;
+    }
     this.latestContext.ui.setStatus(
       STATUS_KEY,
-      `${this.run.workflowId}: ${this.run.currentStepId} (${this.run.status}${delegation})`,
+      `${workflowStatusIcon(this.run, snapshot?.now)} ${this.run.workflowId}: working · ${this.statusShortcutLabel}`,
     );
+  }
+
+  private refreshStatusWhileRunning(): void {
+    if (this.run?.status === 'running' && this.latestContext) {
+      if (this.statusRefreshTimer) return;
+      this.statusRefreshTimer = setInterval(
+        () => this.updateStatus(),
+        STATUS_REFRESH_INTERVAL_MS,
+      );
+      this.statusRefreshTimer.unref?.();
+      return;
+    }
+    this.stopStatusRefresh();
+  }
+
+  private stopStatusRefresh(): void {
+    if (this.statusRefreshTimer) clearInterval(this.statusRefreshTimer);
+    this.statusRefreshTimer = undefined;
+  }
+
+  private registerWorkflowStatusShortcut(): void {
+    this.pi.registerShortcut(this.statusShortcut, {
+      description: 'Toggle workflow status',
+      handler: async (ctx) => {
+        this.latestContext = ctx;
+        if (this.statusOverlayOpen) return;
+        if (!this.run) {
+          ctx.ui.notify('No workflow checkpoint in this session', 'info');
+          return;
+        }
+        await this.showWorkflowStatus(ctx);
+      },
+    });
+  }
+
+  private openWorkflowStatus(ctx: ExtensionContext): void {
+    void this.showWorkflowStatus(ctx).catch((error: unknown) => {
+      ctx.ui.notify(
+        `Cannot open workflow status: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
+    });
+  }
+
+  private async showWorkflowStatus(ctx: ExtensionContext): Promise<void> {
+    if (
+      this.statusOverlayOpen ||
+      !this.run ||
+      !ctx.hasUI ||
+      ctx.mode !== 'tui'
+    ) {
+      return;
+    }
+    this.statusOverlayOpen = true;
+    try {
+      await showWorkflowStatusOverlay(
+        ctx,
+        () => this.workflowStatusSnapshot(),
+        this.statusShortcut,
+      );
+    } finally {
+      this.statusOverlayOpen = false;
+    }
   }
 }

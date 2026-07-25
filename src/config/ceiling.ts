@@ -113,6 +113,14 @@ export function checkWorkflowAgainstCeiling(
         `${subagentPath}.artifacts: exceeds the user permission ceiling`,
       );
     }
+    if (
+      step.subagent.retryToolFailures &&
+      !ceiling.subagent.retryToolFailures
+    ) {
+      errors.push(
+        `${subagentPath}.retryToolFailures: exceeds the user permission ceiling`,
+      );
+    }
     if (!step.subagent.turnBudget) {
       errors.push(
         `${subagentPath}.turnBudget: required for a project workflow`,

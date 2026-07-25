@@ -60,6 +60,8 @@ export interface WorkflowRun {
   gateFeedback: string;
   pauseReason?: string | undefined;
   pausedFrom?: 'running' | 'awaiting-gate' | undefined;
+  /** Current step when execution failed and was paused for a resumable retry. */
+  failedStepId?: string | undefined;
   pendingGate?: PendingGate | undefined;
 }
 
@@ -141,6 +143,7 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
       typeof run.reviewedArtifact === 'string') &&
     (run.stepHandoff === undefined || typeof run.stepHandoff === 'string') &&
     (run.pauseReason === undefined || typeof run.pauseReason === 'string') &&
+    (run.failedStepId === undefined || typeof run.failedStepId === 'string') &&
     (run.pausedFrom === undefined ||
       run.pausedFrom === 'running' ||
       run.pausedFrom === 'awaiting-gate');
@@ -154,6 +157,9 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
     run.status === 'paused'
       ? run.pausedFrom === 'running' || run.pausedFrom === 'awaiting-gate'
       : run.pausedFrom === undefined;
+  const failureStateIsValid =
+    run.failedStepId === undefined ||
+    (run.status === 'paused' && run.failedStepId === run.currentStepId);
   const gateStateIsValid = !gateIsValid
     ? false
     : run.pendingGate === undefined
@@ -177,6 +183,7 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
     optionalsAreValid &&
     statusIsValid &&
     pauseStateIsValid &&
+    failureStateIsValid &&
     gateStateIsValid &&
     typeof run.startedAt === 'number' &&
     typeof run.updatedAt === 'number' &&
