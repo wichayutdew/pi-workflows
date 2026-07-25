@@ -35,6 +35,18 @@ const PRE_EXECUTION_BASH_FAILURES = [
   'unterminated bash quote',
   'unquoted pathname and tilde expansion are not allowed',
 ] as const;
+const HIDDEN_BASH_FATAL_PATTERNS = [
+  /command not found/i,
+  /permission denied/i,
+  /no such file or directory/i,
+  /segmentation fault/i,
+  /killed|terminated/i,
+  /out of memory/i,
+  /connection refused/i,
+  /timeout/i,
+] as const;
+const HIDDEN_BASH_EXIT_PATTERN =
+  /exit(?:ed)?\s*(?:with\s*)?(?:code|status)?\s*[:\s]?\s*(\d+)/i;
 
 export interface ToolFailureDiagnostic {
   tool: string;
@@ -43,7 +55,10 @@ export interface ToolFailureDiagnostic {
   replaySafe?: true;
   completionAfterFailure?: true;
   completionValue?: Record<string, unknown>;
-  correlation?: 'latest-before-completion';
+  transcriptToolCount?: number;
+  transcriptTurnCount?: number;
+  correlation?:
+    'latest-before-completion' | 'successful-output-before-completion';
 }
 
 export interface SubagentSessionIdentity {
@@ -64,7 +79,20 @@ interface RecordedToolFailure extends ToolFailureDiagnostic {
   order: number;
 }
 
+interface RecordedToolSuccess {
+  order: number;
+  tool: string;
+  call?: string;
+  output?: string;
+  detectorOutput?: string;
+}
+
 interface RecordedCompletion {
+  order: number;
+  value: Record<string, unknown>;
+}
+
+interface RecordedMessage {
   order: number;
   value: Record<string, unknown>;
 }
@@ -99,6 +127,17 @@ function textContent(value: unknown): string | undefined {
   return text ? bounded(text) : undefined;
 }
 
+function firstTextContent(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const text = value.find(
+    (item) =>
+      isRecord(item) && item.type === 'text' && typeof item.text === 'string',
+  );
+  return isRecord(text) && typeof text.text === 'string'
+    ? text.text
+    : undefined;
+}
+
 function toolCallText(
   tool: string,
   argumentsValue: unknown,
@@ -126,7 +165,11 @@ export function parseToolFailureDiagnostic(
   const calls = new Map<string, RecordedToolCall>();
   const recordedCalls: RecordedToolCall[] = [];
   const diagnostics: RecordedToolFailure[] = [];
+  const successfulResults: RecordedToolSuccess[] = [];
   const successfulCompletions: RecordedCompletion[] = [];
+  const recordedMessages: RecordedMessage[] = [];
+  const resultCallIds = new Set<string>();
+  let falsePositiveProofValid = true;
   let lastInteractionOrder = 0;
   let order = 0;
 
@@ -137,13 +180,31 @@ export function parseToolFailureDiagnostic(
     try {
       entry = JSON.parse(line);
     } catch {
+      falsePositiveProofValid = false;
       continue;
     }
     if (!isRecord(entry) || entry.type !== 'message') continue;
     const message = entry.message;
-    if (!isRecord(message)) continue;
+    if (!isRecord(message)) {
+      falsePositiveProofValid = false;
+      continue;
+    }
+    recordedMessages.push({ order, value: message });
+    if (
+      message.role === 'assistant' &&
+      ((typeof message.errorMessage === 'string' &&
+        message.errorMessage.trim().length > 0) ||
+        message.stopReason === 'error' ||
+        message.stopReason === 'aborted')
+    ) {
+      falsePositiveProofValid = false;
+    }
 
-    if (message.role === 'assistant' && Array.isArray(message.content)) {
+    if (message.role === 'assistant') {
+      if (!Array.isArray(message.content)) {
+        falsePositiveProofValid = false;
+        continue;
+      }
       lastInteractionOrder = order;
       const toolCalls = message.content.filter(
         (item): item is Record<string, unknown> =>
@@ -159,11 +220,23 @@ export function parseToolFailureDiagnostic(
           typeof item.id !== 'string' ||
           typeof item.name !== 'string'
         ) {
+          if (isRecord(item) && item.type === 'toolCall') {
+            falsePositiveProofValid = false;
+          }
           continue;
         }
+        if (calls.has(item.id)) falsePositiveProofValid = false;
         const call = toolCallText(item.name, item.arguments);
+        const completionIsExclusive =
+          toolCalls.length === 1 &&
+          message.content.every(
+            (contentItem) =>
+              isRecord(contentItem) &&
+              (contentItem.type === 'thinking' ||
+                contentItem.type === 'toolCall'),
+          );
         const completionValue =
-          item.name === 'structured_output' && toolCalls.length === 1
+          item.name === 'structured_output' && completionIsExclusive
             ? structuredCompletionValue(item.arguments)
             : undefined;
         const recordedCall: RecordedToolCall = {
@@ -180,14 +253,27 @@ export function parseToolFailureDiagnostic(
     }
 
     if (message.role !== 'toolResult' || typeof message.toolName !== 'string') {
+      if (message.role === 'toolResult') falsePositiveProofValid = false;
       continue;
     }
     lastInteractionOrder = order;
+    if (
+      typeof message.toolCallId !== 'string' ||
+      typeof message.isError !== 'boolean' ||
+      !Array.isArray(message.content) ||
+      resultCallIds.has(message.toolCallId)
+    ) {
+      falsePositiveProofValid = false;
+    }
+    if (typeof message.toolCallId === 'string') {
+      resultCallIds.add(message.toolCallId);
+    }
     const recorded =
       typeof message.toolCallId === 'string'
         ? calls.get(message.toolCallId)
         : undefined;
     const callMatchesResult = recorded?.tool === message.toolName;
+    if (!callMatchesResult) falsePositiveProofValid = false;
     if (
       message.toolName === 'structured_output' &&
       message.isError === false &&
@@ -197,6 +283,21 @@ export function parseToolFailureDiagnostic(
       successfulCompletions.push({
         order,
         value: recorded.completionValue,
+      });
+    }
+    if (
+      message.isError === false &&
+      message.toolName !== 'structured_output' &&
+      callMatchesResult
+    ) {
+      const output = textContent(message.content);
+      const detectorOutput = firstTextContent(message.content);
+      successfulResults.push({
+        order,
+        tool: message.toolName,
+        ...(recorded.call ? { call: recorded.call } : {}),
+        ...(output ? { output } : {}),
+        ...(detectorOutput !== undefined ? { detectorOutput } : {}),
       });
     }
     if (message.isError !== true) continue;
@@ -215,7 +316,7 @@ export function parseToolFailureDiagnostic(
     });
   }
 
-  const matchingTool = (diagnostic: RecordedToolFailure): boolean =>
+  const matchingTool = (diagnostic: { tool: string }): boolean =>
     expectedTool === undefined ||
     diagnostic.tool.toLowerCase() === expectedTool.toLowerCase();
   let selected: RecordedToolFailure | undefined;
@@ -250,6 +351,47 @@ export function parseToolFailureDiagnostic(
         );
       }
     }
+    if (!selected && diagnostics.length === 0) {
+      const falsePositive = reproduceHiddenBashFalsePositive(
+        recordedMessages,
+        successfulResults,
+      );
+      const completion = falsePositive
+        ? finalCompletion(
+            successfulCompletions,
+            falsePositive.result.order,
+            lastInteractionOrder,
+            allowCompletionProof,
+          )
+        : undefined;
+      if (
+        falsePositiveProofValid &&
+        recordedCalls.length === resultCallIds.size &&
+        recordedCalls.every((call) => resultCallIds.has(call.id)) &&
+        recordedCalls.filter((call) => call.tool === 'structured_output')
+          .length === 1 &&
+        expectedTool?.toLowerCase() === 'bash' &&
+        falsePositive &&
+        terminalError === falsePositive.terminalError &&
+        completion
+      ) {
+        const successfulOutput = falsePositive.result;
+        return {
+          tool: successfulOutput.tool,
+          ...(successfulOutput.call ? { call: successfulOutput.call } : {}),
+          ...(successfulOutput.output
+            ? { output: successfulOutput.output }
+            : {}),
+          completionAfterFailure: true,
+          completionValue: completion.value,
+          transcriptToolCount: recordedCalls.length,
+          transcriptTurnCount: recordedMessages.filter(
+            ({ value }) => value.role === 'assistant',
+          ).length,
+          correlation: 'successful-output-before-completion',
+        };
+      }
+    }
   } else {
     selected = latestMatching(diagnostics, matchingTool);
   }
@@ -263,6 +405,76 @@ export function parseToolFailureDiagnostic(
         allowCompletionProof,
       )
     : undefined;
+}
+
+function reproduceHiddenBashFalsePositive(
+  messages: RecordedMessage[],
+  successfulResults: RecordedToolSuccess[],
+):
+  | {
+      result: RecordedToolSuccess;
+      terminalError: string;
+    }
+  | undefined {
+  let lastAssistantTextIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.value;
+    if (
+      message?.role === 'assistant' &&
+      Array.isArray(message.content) &&
+      message.content.some(
+        (item) =>
+          isRecord(item) &&
+          item.type === 'text' &&
+          typeof item.text === 'string' &&
+          item.text.trim().length > 0,
+      )
+    ) {
+      lastAssistantTextIndex = index;
+      break;
+    }
+  }
+
+  const scanStart =
+    lastAssistantTextIndex >= 0 ? lastAssistantTextIndex + 1 : 0;
+  for (let index = messages.length - 1; index >= scanStart; index -= 1) {
+    const recordedMessage = messages[index];
+    const message = recordedMessage?.value;
+    if (
+      !recordedMessage ||
+      message?.role !== 'toolResult' ||
+      message.toolName !== 'bash' ||
+      message.isError !== false
+    ) {
+      continue;
+    }
+    const output = firstTextContent(message.content);
+    if (output === undefined) continue;
+
+    const exitMatch = output.match(HIDDEN_BASH_EXIT_PATTERN);
+    const exitCode = exitMatch ? Number.parseInt(exitMatch[1]!, 10) : undefined;
+    const detectedExitCode =
+      exitCode !== undefined && exitCode !== 0
+        ? exitCode
+        : HIDDEN_BASH_FATAL_PATTERNS.some((pattern) => pattern.test(output))
+          ? 1
+          : undefined;
+    if (detectedExitCode === undefined) continue;
+
+    const result = successfulResults.find(
+      (candidate) =>
+        candidate.order === recordedMessage.order &&
+        candidate.tool === 'bash' &&
+        candidate.detectorOutput === output,
+    );
+    if (!result) return undefined;
+    const details = output.slice(0, 200);
+    return {
+      result,
+      terminalError: `bash failed (exit ${detectedExitCode}): ${details}`,
+    };
+  }
+  return undefined;
 }
 
 function structuredCompletionValue(
@@ -370,7 +582,12 @@ function publicDiagnostic(
   allowCompletionProof: boolean,
   correlation?: ToolFailureDiagnostic['correlation'],
 ): ToolFailureDiagnostic {
-  const { order, callId: _callId, ...result } = diagnostic;
+  const result: ToolFailureDiagnostic = {
+    tool: diagnostic.tool,
+    ...(diagnostic.call ? { call: diagnostic.call } : {}),
+    ...(diagnostic.output ? { output: diagnostic.output } : {}),
+  };
+  const { order } = diagnostic;
   const latestFailureOrder = diagnostics.at(-1)?.order ?? order;
   const completion = finalCompletion(
     successfulCompletions,
@@ -471,6 +688,15 @@ async function readContainedSessionTail(
     const start = opened.size - bytesToRead;
     const buffer = Buffer.alloc(bytesToRead);
     const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+    const afterRead = await handle.stat();
+    if (
+      afterRead.dev !== opened.dev ||
+      afterRead.ino !== opened.ino ||
+      afterRead.size !== opened.size ||
+      afterRead.mtimeMs !== opened.mtimeMs
+    ) {
+      return undefined;
+    }
     let content = buffer.subarray(0, bytesRead).toString('utf8');
     if (start > 0) {
       const firstNewline = content.indexOf('\n');
@@ -545,17 +771,28 @@ export async function readToolFailureDiagnostic(
 export function formatToolFailureDiagnostic(
   diagnostic: ToolFailureDiagnostic,
 ): string[] {
+  const successfulOutputCorrelation =
+    diagnostic.correlation === 'successful-output-before-completion';
   return [
-    `Failed tool: ${diagnostic.tool}`,
+    `${successfulOutputCorrelation ? 'Terminal-reported tool' : 'Failed tool'}: ${diagnostic.tool}`,
     ...(diagnostic.call
       ? [
           `${diagnostic.tool === 'bash' ? 'Command' : 'Arguments'}: ${diagnostic.call}`,
         ]
       : []),
-    ...(diagnostic.output ? [`Tool error: ${diagnostic.output}`] : []),
+    ...(diagnostic.output
+      ? [
+          `${successfulOutputCorrelation ? 'Successful tool output' : 'Tool error'}: ${diagnostic.output}`,
+        ]
+      : []),
     ...(diagnostic.correlation === 'latest-before-completion'
       ? [
           'Correlation: latest failed tool call before successful structured_output; terminal text did not identify the call',
+        ]
+      : []),
+    ...(successfulOutputCorrelation
+      ? [
+          'Correlation: terminal error text came from a successful tool result before the final structured_output',
         ]
       : []),
   ];

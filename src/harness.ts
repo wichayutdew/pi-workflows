@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { constants, mkdtempSync, writeFileSync } from 'node:fs';
+import { lstat, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -143,6 +143,7 @@ interface ActiveDelegation {
 }
 
 const MAX_FAILURE_FIELD_CHARS = 1_600;
+const MAX_DELEGATED_RESULT_BYTES = 1024 * 1024;
 
 function boundedFailureField(value: string): string {
   if (value.length <= MAX_FAILURE_FIELD_CHARS) return value;
@@ -151,6 +152,44 @@ function boundedFailureField(value: string): string {
   const startLength = Math.ceil(available / 2);
   const endLength = Math.floor(available / 2);
   return `${value.slice(0, startLength)}\n${marker}\n${value.slice(-endLength)}`;
+}
+
+async function readStableDelegatedResult(
+  active: ActiveDelegation,
+): Promise<string> {
+  const expectedPath = join(active.resultDirectory, 'result.json');
+  if (active.policy.resultPath !== expectedPath) {
+    throw new Error(
+      'delegated result path does not match its private directory',
+    );
+  }
+  const inspected = await lstat(expectedPath);
+  if (inspected.isSymbolicLink() || !inspected.isFile()) {
+    throw new Error('delegated result is not a regular file');
+  }
+  const handle = await open(
+    expectedPath,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    const beforeRead = await handle.stat();
+    if (!beforeRead.isFile() || beforeRead.size > MAX_DELEGATED_RESULT_BYTES) {
+      throw new Error('delegated result is not a bounded regular file');
+    }
+    const value = await handle.readFile({ encoding: 'utf8' });
+    const afterRead = await handle.stat();
+    if (
+      afterRead.dev !== beforeRead.dev ||
+      afterRead.ino !== beforeRead.ino ||
+      afterRead.size !== beforeRead.size ||
+      afterRead.mtimeMs !== beforeRead.mtimeMs
+    ) {
+      throw new Error('delegated result changed while it was being read');
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
 }
 
 function rejectedRecoveryReason(
@@ -235,6 +274,30 @@ function recoveredProjectionError(
     execution.error !== response.error
   ) {
     return 'terminal and execution errors are missing or do not match exactly';
+  }
+  const warnings = response.warnings as unknown;
+  if (
+    warnings !== undefined &&
+    (!Array.isArray(warnings) ||
+      warnings.some(
+        (warning) => typeof warning !== 'string' || warning.trim().length > 0,
+      ))
+  ) {
+    return `terminal response contains warning evidence: ${JSON.stringify(warnings)}`;
+  }
+  if (
+    diagnostic.transcriptToolCount !== undefined &&
+    response.toolCount !== undefined &&
+    response.toolCount !== diagnostic.transcriptToolCount
+  ) {
+    return `terminal tool count ${response.toolCount} does not match transcript tool count ${diagnostic.transcriptToolCount}`;
+  }
+  if (
+    diagnostic.transcriptTurnCount !== undefined &&
+    response.turns !== undefined &&
+    response.turns !== diagnostic.transcriptTurnCount
+  ) {
+    return `terminal turn count ${response.turns} does not match transcript turn count ${diagnostic.transcriptTurnCount}`;
   }
   const toolFailure = response.error.match(
     /^\s*([a-z][\w-]*) failed\s*\(exit\s+(\d+)\)\s*:/i,
@@ -1385,7 +1448,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
       let serializedResult: string;
       try {
-        serializedResult = await readFile(active.policy.resultPath, 'utf8');
+        serializedResult = await readStableDelegatedResult(active);
       } catch (error) {
         if (recoveredTerminalFailure) {
           throw new Error(
@@ -1432,8 +1495,13 @@ export class WorkflowHarness implements WorkflowCommandController {
         );
       }
       if (recoveredTerminalFailure) {
+        const falsePositive =
+          recoveredTerminalFailure.diagnostic?.correlation ===
+          'successful-output-before-completion';
         this.latestContext?.ui.notify(
-          `Accepted "${active.stepId}" because the child resolved an earlier tool failure and produced a valid structured result`,
+          falsePositive
+            ? `Accepted "${active.stepId}" because the trusted child transcript proved the terminal tool error was a false positive and produced a matching structured result`
+            : `Accepted "${active.stepId}" because the child resolved an earlier tool failure and produced a valid structured result`,
           'warning',
         );
       }

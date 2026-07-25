@@ -1471,6 +1471,97 @@ describe('when testing harness subagent', () => {
       }
     });
 
+    test('continues an explicit retry outcome in a fresh child with its recovery handoff', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeFile(
+          join(directory, 'self-heal.workflow.yaml'),
+          JSON.stringify({
+            version: 1,
+            id: 'self-heal',
+            command: 'self-heal',
+            description: 'Continue a recoverable step',
+            start: 'inspect',
+            maxStepVisits: 3,
+            steps: {
+              inspect: {
+                subagent: { agent: 'scout' },
+                prompt: 'Inspect and recover.',
+                permissions: { tools: ['read'] },
+                transitions: {
+                  done: '$done',
+                  retry: 'inspect',
+                  blocked: '$pause',
+                },
+              },
+            },
+          }),
+        );
+        const fixture = createHarnessFixture(directory);
+        const requests: SubagentDelegationRequest[] = [];
+        const recoverySummary = [
+          'Failed tool: read',
+          'Arguments: {"path":"missing.md"}',
+          'Tool error: file not found',
+          'Observed state: no mutation occurred',
+          'Next alternative: inspect README.md',
+        ].join('\n');
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: requests.length === 1 ? 'retry' : 'done',
+              summary:
+                requests.length === 1
+                  ? recoverySummary
+                  : 'Recovered through the alternative',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('self-heal');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+        expect(requests).toHaveLength(2);
+        expect(requests.every(({ context }) => context === 'fresh')).toBe(true);
+        expect(requests[1]?.task).toContain(recoverySummary);
+        expect(latestRun(fixture).history).toMatchObject([
+          { stepId: 'inspect', outcome: 'retry' },
+          { stepId: 'inspect', outcome: 'done' },
+        ]);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     test('retries a replay-safe step once after an ordinary tool failure', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
@@ -1766,6 +1857,157 @@ describe('when testing harness subagent', () => {
           fixture.notifications.some(({ message }) =>
             message.startsWith(
               'Accepted "inspect" because the child resolved an earlier tool failure',
+            ),
+          ),
+        ).toBe(true);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('accepts a matching result when upstream mistakes successful output for a failure', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(
+          directory,
+          'Delegate one read-only inspection',
+          { agent: 'scout' },
+          [],
+          'unrestricted',
+        );
+        const runId = 'successful-output-false-positive';
+        const sessionDirectory = join(directory, 'sessions', runId, 'run-0');
+        const sessionFile = join(sessionDirectory, 'session.jsonl');
+        const successfulOutput = [
+          "650  if (status === 'failed') return 'exit 1';",
+          "651  return 'ready';",
+        ].join('\n');
+        const terminalError = `bash failed (exit 1): ${successfulOutput}`;
+        const fixture = createHarnessFixture(directory);
+        let requests = 0;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests += 1;
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await mkdir(sessionDirectory, { recursive: true });
+          await writeFile(
+            sessionFile,
+            [
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'toolCall',
+                      id: 'successful-bash',
+                      name: 'bash',
+                      arguments: {
+                        command: "sed -n '650,700p' src/workflow-status.ts",
+                      },
+                    },
+                  ],
+                },
+              }),
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'toolResult',
+                  toolCallId: 'successful-bash',
+                  toolName: 'bash',
+                  isError: false,
+                  content: [{ type: 'text', text: successfulOutput }],
+                },
+              }),
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'toolCall',
+                      id: 'completed-result',
+                      name: 'structured_output',
+                      arguments: {
+                        value: {
+                          outcome: 'done',
+                          summary: 'Inspected source',
+                        },
+                      },
+                    },
+                  ],
+                },
+              }),
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'toolResult',
+                  toolCallId: 'completed-result',
+                  toolName: 'structured_output',
+                  isError: false,
+                  content: [
+                    { type: 'text', text: 'Structured output captured.' },
+                  ],
+                },
+              }),
+            ].join('\n'),
+          );
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'done',
+              summary: 'Inspected source',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'failed',
+            error: terminalError,
+            exitCode: 1,
+            agent: 'scout',
+            execution: {
+              status: 'failed',
+              success: false,
+              exitCode: 1,
+              error: terminalError,
+            },
+            toolCount: 2,
+            turns: 2,
+            runId,
+            childIndex: 0,
+            sessionFile,
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+        expect(requests).toBe(1);
+        expect(
+          fixture.notifications.some(({ message }) =>
+            message.startsWith(
+              'Accepted "inspect" because the trusted child transcript proved the terminal tool error was a false positive',
             ),
           ),
         ).toBe(true);

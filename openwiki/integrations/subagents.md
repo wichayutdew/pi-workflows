@@ -94,9 +94,10 @@ that step.
 
 `subagent.retryToolFailures: true` explicitly authorizes the harness to launch
 one fresh retry with the actionable terminal diagnostic. Validation rejects
-the option when the step exposes `edit` or `write`. Because unrestricted Bash
-can still mutate state, the workflow author must use it only when every
-possible earlier effect is safe to repeat.
+the option when the step exposes `edit` or `write`. Runtime also requires a
+complete trusted transcript proving every recorded call was read-only or
+rejected before execution; an unknown-effect Bash call or incomplete
+transcript pauses instead.
 
 Ordinary tool failures remain inside the same child whenever its runtime can
 continue. The delegated completion contract tells the child to inspect the
@@ -161,8 +162,9 @@ tool call. A failed process status is accepted when the contained transcript
 proves a matching successful `structured_output` after every failed tool result
 and the correlated capability-bound result validates. This consumes the same
 finalized child result and does not replay its effects. Without that proof,
-replay-safe delegated steps get at most one retry with the diagnostic.
-Mutation-capable steps pause without automatic replay.
+a delegated step gets at most one retry only when the complete transcript
+proves all recorded calls replay-safe. Mutation-capable or unknown-effect
+attempts pause without automatic replay.
 
 ## Planning And Questions
 

@@ -95,6 +95,71 @@ function transcriptWithCompletion(): string {
   ].join('\n');
 }
 
+function transcriptWithSuccessfulOutputCompletion(): string {
+  return [
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'bash-source',
+            name: 'bash',
+            arguments: {
+              command: "sed -n '650,700p' src/workflow-status.ts",
+            },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'bash-source',
+        toolName: 'bash',
+        isError: false,
+        content: [
+          {
+            type: 'text',
+            text: [
+              "650  if (status === 'failed') return 'exit 1';",
+              "651  return 'ready';",
+            ].join('\n'),
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'complete-after-source',
+            name: 'structured_output',
+            arguments: {
+              value: { outcome: 'done', summary: 'Inspected source' },
+            },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'complete-after-source',
+        toolName: 'structured_output',
+        isError: false,
+        content: [{ type: 'text', text: 'Structured output captured.' }],
+      },
+    }),
+  ].join('\n');
+}
+
 describe('when testing subagent failure diagnostics', () => {
   test('correlates an exact failed Bash command from a child session', () => {
     const terminalError =
@@ -221,6 +286,146 @@ describe('when testing subagent failure diagnostics', () => {
       call: command,
       output: 'install failed after extraction',
     });
+  });
+
+  test('proves a terminal false positive from successful tool output', () => {
+    const candidate = transcriptWithSuccessfulOutputCompletion();
+    const successfulOutput = [
+      "650  if (status === 'failed') return 'exit 1';",
+      "651  return 'ready';",
+    ].join('\n');
+    const terminalError = `bash failed (exit 1): ${successfulOutput}`;
+
+    expect(
+      parseToolFailureDiagnostic(candidate, 'bash', terminalError),
+    ).toEqual({
+      tool: 'bash',
+      call: "sed -n '650,700p' src/workflow-status.ts",
+      output: successfulOutput,
+      completionAfterFailure: true,
+      completionValue: { outcome: 'done', summary: 'Inspected source' },
+      transcriptToolCount: 2,
+      transcriptTurnCount: 2,
+      correlation: 'successful-output-before-completion',
+    });
+
+    const actualFailure = [
+      candidate.split('\n').slice(0, 2).join('\n'),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'failed-read',
+              name: 'read',
+              arguments: { path: 'missing.md' },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'failed-read',
+          toolName: 'read',
+          isError: true,
+          content: [{ type: 'text', text: 'File not found' }],
+        },
+      }),
+      candidate.split('\n').slice(2).join('\n'),
+    ].join('\n');
+    const candidateLines = candidate.split('\n');
+    const unresolvedCall = [
+      ...candidateLines.slice(0, 2),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'unresolved-read',
+              name: 'read',
+              arguments: { path: 'README.md' },
+            },
+          ],
+        },
+      }),
+      ...candidateLines.slice(2),
+    ].join('\n');
+    const assistantTextAfterOutput = [
+      ...candidateLines.slice(0, 2),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Successful source inspection' }],
+        },
+      }),
+      ...candidateLines.slice(2),
+    ].join('\n');
+    const actualBashFailure = candidate.replace(
+      '"isError":false',
+      '"isError":true',
+    );
+    expect(
+      parseToolFailureDiagnostic(actualBashFailure, 'bash', terminalError)
+        ?.correlation,
+    ).not.toBe('successful-output-before-completion');
+    for (const invalid of [
+      `{not-json}\n${candidate}`,
+      candidate.replace('"isError":false,', ''),
+      candidate.replace(
+        '"toolCallId":"bash-source"',
+        '"toolCallId":"unmatched-call"',
+      ),
+      candidate.replace('"id":"complete-after-source"', '"id":"bash-source"'),
+      [
+        ...candidateLines.slice(0, 2),
+        candidateLines[1],
+        ...candidateLines.slice(2),
+      ].join('\n'),
+      `${candidate}\n${candidateLines.slice(-2).join('\n')}`,
+      unresolvedCall,
+      assistantTextAfterOutput,
+      candidate.replace(
+        '"role":"assistant","content"',
+        '"role":"assistant","errorMessage":"provider retry failed","content"',
+      ),
+      candidate
+        .replace(
+          "650  if (status === 'failed') return 'exit 1';",
+          'unrelated successful output',
+        )
+        .replace("651  return 'ready';", 'another unrelated line'),
+      `${candidate}\n${JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'continued after completion' }],
+        },
+      })}`,
+      actualFailure,
+    ]) {
+      expect(parseToolFailureDiagnostic(invalid, 'bash', terminalError)).toBe(
+        undefined,
+      );
+    }
+    expect(
+      parseToolFailureDiagnostic(candidate, 'bash', terminalError, false),
+    ).toBe(undefined);
+    for (const mismatchedTerminal of [
+      terminalError.replace('exit 1', 'exit 2'),
+      terminalError.replace("return 'ready'", "RETURN 'READY'"),
+      `read failed (exit 1): ${successfulOutput}`,
+    ]) {
+      expect(
+        parseToolFailureDiagnostic(candidate, 'bash', mismatchedTerminal),
+      ).toBe(undefined);
+    }
   });
 
   test('reads only child sessions contained by the parent session root', async () => {
@@ -459,6 +664,19 @@ describe('when testing subagent failure diagnostics', () => {
     ).toContain(
       'Correlation: latest failed tool call before successful structured_output; terminal text did not identify the call',
     );
+    expect(
+      formatToolFailureDiagnostic({
+        tool: 'bash',
+        call: 'sed -n 1,20p src/example.ts',
+        output: 'const example = "exit 1";',
+        correlation: 'successful-output-before-completion',
+      }),
+    ).toEqual([
+      'Terminal-reported tool: bash',
+      'Command: sed -n 1,20p src/example.ts',
+      'Successful tool output: const example = "exit 1";',
+      'Correlation: terminal error text came from a successful tool result before the final structured_output',
+    ]);
     expect(deriveSubagentSessionRoot(undefined)).toBe(undefined);
     expect(deriveSubagentSessionRoot('relative.jsonl')).toBe(undefined);
     expect(deriveSubagentSessionRoot(join(tmpdir(), 'not-a-session.txt'))).toBe(

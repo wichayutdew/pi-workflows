@@ -66,9 +66,10 @@ child; the selected profile still determines which extension providers were
 loaded and therefore available to activate.
 
 `retryToolFailures` authorizes one full fresh-context replay after a retryable
-tool failure. It is rejected for steps with `edit` or `write`; unrestricted
-Bash still means the workflow author must attest that every possible command
-and earlier effect is safe to repeat. Project workflows may enable it only when
+tool failure. It is rejected for steps with `edit` or `write`, and runtime
+retry additionally requires a complete trusted child transcript proving every
+recorded call was read-only or rejected before execution. Unknown-effect Bash
+or a truncated transcript pauses. Project workflows may enable it only when
 the user ceiling also sets `subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules

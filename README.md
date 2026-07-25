@@ -601,9 +601,10 @@ failed process status is treated as resolved when the retained session proves
 a successful `structured_output` occurred after every failed tool result and
 the correlated result validates. This accepts the same finalized child result;
 it never replays mutation-capable work. Without a valid finalized result, a
-replay-safe delegated step may receive the actionable detail in one bounded
-retry prompt. Otherwise the detail is preserved in the pause reason for repair
-and resume.
+delegated step may receive the actionable detail in one bounded retry prompt
+only when a complete trusted transcript proves every recorded call was
+read-only or rejected before execution. An unknown-effect Bash call, a
+truncated transcript, or missing correlation pauses instead.
 
 Inside a live child, recovery is not tied to a list of known error strings. The
 completion contract requires the agent to inspect the exact error and current
@@ -643,6 +644,7 @@ clears it when execution stops. All step, progress, history, failure, and review
 detail stays in the overlay. There, `✓` marks a completed step, `✕` a failed or
 aborted run, and `◆` a paused step or pending review. Long reasons are clamped
 to the available display width; the durable checkpoint retains the full text.
+On short terminals, use `↑`/`↓`, PgUp/PgDn, or Home/End to scroll the overlay.
 
 | Command                         | Purpose                                              |
 | ------------------------------- | ---------------------------------------------------- |

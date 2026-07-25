@@ -46,6 +46,9 @@ export interface WorkflowStatusSnapshot {
 
 type SnapshotProvider = () => WorkflowStatusSnapshot | undefined;
 type StepDisplayStatus = WorkflowRunStatus | 'completed' | 'failed';
+type StatusViewTui = Pick<TUI, 'requestRender'> & {
+  terminal?: { rows: number };
+};
 
 interface PathEntry {
   stepId: string;
@@ -83,7 +86,7 @@ export function formatWorkflowStatusText(
 }
 
 /** Format the full workflow status board. */
-export function formatWorkflowStatusWidget(
+export function formatWorkflowStatusBoard(
   snapshot: WorkflowStatusSnapshot,
   width = 88,
   theme: Theme = unstyledTheme,
@@ -122,10 +125,13 @@ export async function showWorkflowStatus(
 export class WorkflowStatusView implements Component {
   private timer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  private scrollOffset = 0;
+  private viewportRows = 0;
+  private contentRows = 0;
 
   constructor(
     private readonly getSnapshot: SnapshotProvider,
-    private readonly tui: Pick<TUI, 'requestRender'>,
+    private readonly tui: StatusViewTui,
     private readonly theme: Theme,
     private readonly done: () => void,
   ) {}
@@ -155,6 +161,21 @@ export class WorkflowStatusView implements Component {
       matchesKey(data, Key.ctrlAlt('w'))
     ) {
       this.close();
+      return;
+    }
+    const pageSize = Math.max(1, this.viewportRows - 2);
+    if (matchesKey(data, Key.down) || data === 'j') {
+      this.scrollBy(1);
+    } else if (matchesKey(data, Key.up) || data === 'k') {
+      this.scrollBy(-1);
+    } else if (matchesKey(data, Key.pageDown)) {
+      this.scrollBy(pageSize);
+    } else if (matchesKey(data, Key.pageUp)) {
+      this.scrollBy(-pageSize);
+    } else if (matchesKey(data, Key.home)) {
+      this.setScrollOffset(0);
+    } else if (matchesKey(data, Key.end)) {
+      this.setScrollOffset(Number.MAX_SAFE_INTEGER);
     }
   }
 
@@ -170,11 +191,52 @@ export class WorkflowStatusView implements Component {
 
     const contentWidth = viewportWidth - 2;
     const lines = snapshot
-      ? renderBoard(this.theme, snapshot, contentWidth)
+      ? renderBoard(this.theme, snapshot, contentWidth, false)
       : renderEmptyBoard(this.theme, contentWidth);
-    return lines.map((line) =>
+    const rendered = lines.map((line) =>
       padAnsi(truncateToWidth(line, contentWidth, '…'), viewportWidth),
     );
+    return this.paginate(rendered, viewportWidth);
+  }
+
+  private paginate(lines: string[], width: number): string[] {
+    this.contentRows = lines.length;
+    const terminalRows = this.tui.terminal?.rows;
+    const maximumRows =
+      terminalRows === undefined
+        ? lines.length + 1
+        : Math.max(4, Math.floor(terminalRows * 0.95));
+    this.viewportRows = maximumRows;
+    const contentHeight = Math.max(1, maximumRows - 1);
+    const maximumOffset = Math.max(0, lines.length - contentHeight);
+    this.scrollOffset = Math.min(this.scrollOffset, maximumOffset);
+    const visible = lines.slice(
+      this.scrollOffset,
+      this.scrollOffset + contentHeight,
+    );
+    const first = lines.length === 0 ? 0 : this.scrollOffset + 1;
+    const last = Math.min(lines.length, this.scrollOffset + contentHeight);
+    const hint =
+      maximumOffset > 0
+        ? `↑/↓ PgUp/PgDn Home/End · rows ${first}-${last}/${lines.length} · Ctrl+Alt+W / q / Esc hide`
+        : 'Ctrl+Alt+W / q / Esc hide · live refresh';
+    return [
+      ...visible,
+      padAnsi(truncateToWidth(this.theme.fg('dim', hint), width, '…'), width),
+    ];
+  }
+
+  private scrollBy(delta: number): void {
+    this.setScrollOffset(this.scrollOffset + delta);
+  }
+
+  private setScrollOffset(value: number): void {
+    const contentHeight = Math.max(1, this.viewportRows - 1);
+    const maximumOffset = Math.max(0, this.contentRows - contentHeight);
+    const next = Math.max(0, Math.min(value, maximumOffset));
+    if (next === this.scrollOffset) return;
+    this.scrollOffset = next;
+    this.tui.requestRender(true);
   }
 
   private close(): void {

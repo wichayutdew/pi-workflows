@@ -4,7 +4,7 @@ import { visibleWidth } from '@earendil-works/pi-tui';
 import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
 import {
-  formatWorkflowStatusWidget,
+  formatWorkflowStatusBoard,
   formatWorkflowStatusText,
   WorkflowStatusView,
   type WorkflowStatusSnapshot,
@@ -266,7 +266,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/Progress: starting/);
     });
 
-    test('the persistent widget renders the status board', () => {
+    test('the overlay board renders the full workflow status', () => {
       // given
       const raw = baseWorkflow();
       (raw.steps as Record<string, unknown>).verify = {
@@ -293,7 +293,7 @@ describe('when testing workflow status', () => {
       };
 
       // when
-      const lines = formatWorkflowStatusWidget({
+      const lines = formatWorkflowStatusBoard({
         run,
         workflow,
         now: 3_000,
@@ -306,7 +306,7 @@ describe('when testing workflow status', () => {
       expect(lines.join('\n')).toMatch(/◐ implement/);
     });
 
-    test('the compact widget distinguishes paused, failed, aborted, and completed current steps', () => {
+    test('the overlay board distinguishes paused, failed, aborted, and completed current steps', () => {
       // given
       const workflow = loadedWorkflow();
       const running = createRun(workflow, '', [], 'run-progress-states', 1_000);
@@ -328,35 +328,35 @@ describe('when testing workflow status', () => {
 
       // when / then
       expect(
-        formatWorkflowStatusWidget({
+        formatWorkflowStatusBoard({
           run: paused,
           workflow,
           now: 3_000,
         }).join('\n'),
       ).toMatch(/◆ inspect/);
       expect(
-        formatWorkflowStatusWidget({
+        formatWorkflowStatusBoard({
           run: failed,
           workflow,
           now: 3_000,
         }).join('\n'),
       ).toMatch(/✕ inspect/);
       expect(
-        formatWorkflowStatusWidget({
+        formatWorkflowStatusBoard({
           run: awaitingReview,
           workflow,
           now: 3_000,
         }).join('\n'),
       ).toMatch(/◆ inspect/);
       expect(
-        formatWorkflowStatusWidget({
+        formatWorkflowStatusBoard({
           run: aborted,
           workflow,
           now: 3_000,
         }).join('\n'),
       ).toMatch(/✕ inspect/);
       expect(
-        formatWorkflowStatusWidget({
+        formatWorkflowStatusBoard({
           run: completed,
           workflow,
           now: 3_000,
@@ -364,7 +364,7 @@ describe('when testing workflow status', () => {
       ).toMatch(/✓ inspect/);
     });
 
-    test('the compact widget falls back to known checkpoint steps when config is unavailable', () => {
+    test('the overlay board falls back to known checkpoint steps when config is unavailable', () => {
       // given
       const workflow = loadedWorkflow();
       const initial = createRun(
@@ -390,7 +390,7 @@ describe('when testing workflow status', () => {
       };
 
       // when
-      const lines = formatWorkflowStatusWidget({ run, now: 3_000 });
+      const lines = formatWorkflowStatusBoard({ run, now: 3_000 });
 
       // then
       expect(lines.join('\n')).toMatch(/✓ inspect/);
@@ -404,11 +404,42 @@ describe('when testing workflow status', () => {
 
       // when / then
       expect(
-        formatWorkflowStatusWidget({ run, workflow, now: 0 }).join('\n'),
+        formatWorkflowStatusBoard({ run, workflow, now: 0 }).join('\n'),
       ).toMatch(/◐ inspect/);
       expect(
-        formatWorkflowStatusWidget({ run, workflow, now: 250 }).join('\n'),
+        formatWorkflowStatusBoard({ run, workflow, now: 250 }).join('\n'),
       ).toMatch(/◓ inspect/);
+    });
+
+    test('a short terminal can scroll the entire overlay instead of clipping it', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const run = createRun(workflow, '', [], 'run-scroll-status', 1_000);
+      const repaintRequests: Array<boolean | undefined> = [];
+      const view = new WorkflowStatusView(
+        () => ({ run, workflow, now: 2_000 }),
+        {
+          requestRender: (force) => repaintRequests.push(force),
+          terminal: { rows: 10 },
+        },
+        plainTheme,
+        () => undefined,
+      );
+
+      // when
+      const firstPage = view.render(120);
+      view.handleInput('j');
+      const secondPage = view.render(120);
+
+      // then
+      expect(firstPage).toHaveLength(9);
+      expect(firstPage.at(-1)).toMatch(/rows 1-8\//);
+      expect(secondPage.at(-1)).toMatch(/rows 2-9\//);
+      expect(firstPage).not.toEqual(secondPage);
+      expect(repaintRequests).toEqual([true]);
+      expect(
+        secondPage.every((line) => visibleWidth(line) <= 120),
+      ).toBeTruthy();
     });
 
     test('q and Escape close the board once and force a repaint', () => {
