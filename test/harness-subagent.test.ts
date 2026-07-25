@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -400,6 +400,26 @@ describe('when testing harness subagent', () => {
       ].join('\n'),
     );
     return sessionFile;
+  }
+
+  async function bindSessionToRequest(
+    sessionFile: string,
+    request: SubagentDelegationRequest,
+  ): Promise<void> {
+    const body = await readFile(sessionFile, 'utf8');
+    const extracted = extractChildPolicy(request.task);
+    expectTruthy(extracted);
+    const initialPrompt = JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: extracted.task }],
+      },
+    });
+    await writeFile(
+      sessionFile,
+      [initialPrompt, body].filter(Boolean).join('\n'),
+    );
   }
 
   async function writeGatedWorkflow(directory: string): Promise<void> {
@@ -1669,6 +1689,7 @@ describe('when testing harness subagent', () => {
             requestId: request.requestId,
           });
           if (requests.length === 1) {
+            await bindSessionToRequest(sessionFile, request);
             fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
               version: 1,
               requestId: request.requestId,
@@ -1709,21 +1730,333 @@ describe('when testing harness subagent', () => {
           expect(latestRun(fixture).status).toBe('completed');
         });
         expect(requests).toHaveLength(2);
-        expect(requests[1]?.task).toContain('## Retry after tool failure');
         expect(requests[1]?.task).toContain(
-          `> Arguments: {"path":"${missingPath}"}`,
+          '## Reinforcement retry after subagent failure',
         );
         expect(requests[1]?.task).toContain(
-          '> Subagent exit code: 1\n> Terminal error: read failed (exit 1)',
+          JSON.stringify(`Arguments: {"path":"${missingPath}"}`).slice(1, -1),
         );
         expect(requests[1]?.task).toContain(
-          `> Diagnostic session: ${sessionFile}`,
+          'Subagent exit code: 1\\nTerminal error: read failed (exit 1)',
+        );
+        expect(requests[1]?.task).toContain(
+          `Diagnostic session: ${sessionFile}`,
         );
         expect(
           fixture.notifications.some(({ message }) =>
-            message.startsWith('Retrying "inspect" after a tool failure'),
+            message.startsWith(
+              'Reinforcement retry for "inspect" after a subagent failure',
+            ),
           ),
         ).toBe(true);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('reinforces replay-safe terminal errors and nonzero exits in one fresh child', async () => {
+      const failures = [
+        {
+          label: 'terminal error',
+          response: {
+            status: 'failed' as const,
+            error: 'provider connection closed before completion',
+            toolCount: 0,
+          },
+          expectedDiagnostic:
+            'Terminal error: provider connection closed before completion',
+        },
+        {
+          label: 'nonzero exit',
+          response: {
+            status: 'failed' as const,
+            execution: {
+              status: 'failed' as const,
+              success: false,
+              exitCode: 17,
+            },
+            toolCount: 0,
+          },
+          expectedDiagnostic: 'Subagent exit code: 17',
+        },
+        {
+          label: 'structured output error',
+          response: {
+            status: 'structured_output_failed' as const,
+            error: 'structured output did not match the required schema',
+            exitCode: 1,
+            toolCount: 0,
+          },
+          expectedDiagnostic:
+            'Terminal error: structured output did not match the required schema',
+        },
+      ];
+
+      for (const failure of failures) {
+        // given
+        const directory = await mkdtemp(
+          join(tmpdir(), 'pi-workflows-reinforcement-'),
+        );
+        const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+        process.env.PI_WORKFLOWS_DIR = directory;
+
+        try {
+          await writeWorkflow(directory);
+          const subagentRunId = `reinforcement-${failure.label.replaceAll(' ', '-')}`;
+          const sessionDirectory = join(
+            directory,
+            'sessions',
+            subagentRunId,
+            'run-0',
+          );
+          const sessionFile = join(sessionDirectory, 'session.jsonl');
+          await mkdir(sessionDirectory, { recursive: true });
+          await writeFile(sessionFile, '');
+          const fixture = createHarnessFixture(directory);
+          const requests: SubagentDelegationRequest[] = [];
+          fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+            const request = data as SubagentDelegationRequest;
+            requests.push(request);
+            fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+              version: 1,
+              requestId: request.requestId,
+            });
+            if (requests.length === 1) {
+              await bindSessionToRequest(sessionFile, request);
+              fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+                version: 1,
+                requestId: request.requestId,
+                ...failure.response,
+                runId: subagentRunId,
+                childIndex: 0,
+                sessionFile,
+              });
+              return;
+            }
+
+            const extracted = extractChildPolicy(request.task);
+            expectTruthy(extracted);
+            await writeFile(
+              extracted.policy.resultPath,
+              JSON.stringify({
+                version: 1,
+                policyDigest: extracted.policy.policyDigest,
+                outcome: 'done',
+                summary: `Recovered from ${failure.label}`,
+              }),
+            );
+            fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+              version: 1,
+              requestId: request.requestId,
+              status: 'completed',
+            });
+          });
+
+          await initialize(fixture);
+          const start = fixture.commands.get('delegate');
+          expectTruthy(start);
+          await start('the repository', fixture.context);
+
+          // then
+          await eventually(() => {
+            expect(latestRun(fixture).status).toBe('completed');
+          });
+          expect(requests).toHaveLength(2);
+          expect(requests.every(({ context }) => context === 'fresh')).toBe(
+            true,
+          );
+          expect(requests[1]?.task).toContain(
+            '## Reinforcement retry after subagent failure',
+          );
+          expect(requests[1]?.task).toContain(failure.expectedDiagnostic);
+          expect(
+            fixture.notifications.filter(({ message }) =>
+              message.startsWith(
+                'Reinforcement retry for "inspect" after a subagent failure',
+              ),
+            ),
+          ).toHaveLength(1);
+        } finally {
+          if (previousDirectory === undefined)
+            delete process.env.PI_WORKFLOWS_DIR;
+          else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    });
+
+    test('pauses on a contradictory completed response instead of replaying it', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        const requests: SubagentDelegationRequest[] = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+            error: 'child reported an impossible completed error',
+            exitCode: 9,
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('paused');
+        });
+        expect(requests).toHaveLength(1);
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'reported terminal failure signals with completed status',
+        );
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'Subagent exit code: 9',
+        );
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'Terminal error: child reported an impossible completed error',
+        );
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('pauses when the terminal tool count contradicts the replay audit', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(directory);
+        const runId = 'mismatched-replay-audit';
+        const sessionDirectory = join(directory, 'sessions', runId, 'run-0');
+        const sessionFile = join(sessionDirectory, 'session.jsonl');
+        await mkdir(sessionDirectory, { recursive: true });
+        await writeFile(sessionFile, '');
+        const fixture = createHarnessFixture(directory);
+        const requests: SubagentDelegationRequest[] = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          await bindSessionToRequest(sessionFile, request);
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'failed',
+            error: 'provider process exited',
+            exitCode: 1,
+            toolCount: 1,
+            runId,
+            childIndex: 0,
+            sessionFile,
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('paused');
+        });
+        expect(requests).toHaveLength(1);
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'Terminal error: provider process exited',
+        );
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('does not authorize replay from a sibling delegation transcript', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(directory);
+        const runId = 'sibling-replay-audit';
+        const sessionDirectory = join(directory, 'sessions', runId, 'run-0');
+        const sessionFile = join(sessionDirectory, 'session.jsonl');
+        await mkdir(sessionDirectory, { recursive: true });
+        const fixture = createHarnessFixture(directory);
+        const requests: SubagentDelegationRequest[] = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          const siblingRequestId = `${request.requestId}-sibling`;
+          const siblingTask = extracted.task.replace(
+            request.requestId,
+            siblingRequestId,
+          );
+          expect(siblingTask).not.toBe(extracted.task);
+          await writeFile(
+            sessionFile,
+            JSON.stringify({
+              type: 'message',
+              message: {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: siblingTask,
+                  },
+                ],
+              },
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'failed',
+            error: 'provider process exited',
+            exitCode: 1,
+            toolCount: 0,
+            runId,
+            childIndex: 0,
+            agent: 'scout',
+            sessionFile,
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('paused');
+        });
+        expect(requests).toHaveLength(1);
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'Terminal error: provider process exited',
+        );
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1840,6 +2173,7 @@ describe('when testing harness subagent', () => {
             requestId: request.requestId,
           });
           if (requests.length === 1) {
+            await bindSessionToRequest(firstSession, request);
             fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
               version: 1,
               requestId: request.requestId,
@@ -2154,6 +2488,9 @@ describe('when testing harness subagent', () => {
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
           const request = data as SubagentDelegationRequest;
           requests += 1;
+          if (requests === 1) {
+            await bindSessionToRequest(firstSession, request);
+          }
           if (requests === 2) {
             const extracted = extractChildPolicy(request.task);
             expectTruthy(extracted);
@@ -2359,6 +2696,7 @@ describe('when testing harness subagent', () => {
               requestId: request.requestId,
             });
             if (requests.length === 1) {
+              await bindSessionToRequest(firstSession, request);
               fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
                 version: 1,
                 requestId: request.requestId,
@@ -2441,9 +2779,12 @@ describe('when testing harness subagent', () => {
         );
         const fixture = createHarnessFixture(directory);
         const requests: SubagentDelegationRequest[] = [];
-        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
           const request = data as SubagentDelegationRequest;
           requests.push(request);
+          if (requests.length === 1) {
+            await bindSessionToRequest(firstSession, request);
+          }
           fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
             version: 1,
             requestId: request.requestId,
@@ -2479,7 +2820,9 @@ describe('when testing harness subagent', () => {
         );
         expect(
           fixture.notifications.filter(({ message }) =>
-            message.startsWith('Retrying "inspect" after a tool failure'),
+            message.startsWith(
+              'Reinforcement retry for "inspect" after a subagent failure',
+            ),
           ),
         ).toHaveLength(1);
       } finally {
@@ -2588,7 +2931,7 @@ describe('when testing harness subagent', () => {
         expect(requests).toHaveLength(1);
         expect(
           fixture.notifications.some(({ message }) =>
-            message.startsWith('Retrying "implement"'),
+            message.startsWith('Reinforcement retry for "implement"'),
           ),
         ).toBe(false);
         expect(String(latestRun(fixture).pauseReason)).toContain(
@@ -2755,7 +3098,7 @@ describe('when testing harness subagent', () => {
         expect(requests).toHaveLength(1);
         expect(
           fixture.notifications.some(({ message }) =>
-            message.startsWith('Retrying "implement"'),
+            message.startsWith('Reinforcement retry for "implement"'),
           ),
         ).toBe(false);
         expect(

@@ -70,8 +70,8 @@ export interface StepSubagent {
   toolBudget?: SubagentToolBudget;
   artifacts: boolean;
   /**
-   * Authorizes one fresh-context continuation after a tool failure when the
-   * trusted complete transcript proves every recorded call was replay-safe.
+   * Authorizes one fresh reinforcement retry in Bash modes broader than
+   * read-only when the complete trusted attempt is replay-safe.
    */
   retryToolFailures: boolean;
 }

@@ -66,7 +66,7 @@ flowchart TD
   Timeout --> Turns{turnBudget present and within ceiling?}
   Turns --> ToolBudget{toolBudget present, hard <= maxToolCalls, block = *?}
   ToolBudget --> Artifacts{artifacts allowed?}
-  Artifacts --> Retry{tool-failure retry allowed?}
+  Artifacts --> Retry{reinforcement retry allowed?}
   Retry --> Accept
 ```
 
@@ -79,12 +79,15 @@ is verified, the workflow policy is the sole active-tool allow-list inside the
 child; the selected profile still determines which extension providers were
 loaded and therefore available to activate.
 
-`retryToolFailures` authorizes one full fresh-context replay after a retryable
-tool failure. It is rejected for steps with `edit` or `write`, and runtime
-retry additionally requires a complete trusted child transcript proving every
-recorded call was read-only or rejected before execution. Unknown-effect Bash
-or a truncated transcript pauses. Project workflows may enable it only when
-the user ceiling also sets `subagent.retryToolFailures: true`.
+`retryToolFailures` authorizes one fresh reinforcement retry in allow-list or
+unrestricted Bash mode after a terminal error or nonzero exit. It is rejected
+for steps with `edit` or `write`, and runtime retry additionally requires a
+complete trusted child transcript proving every recorded call was read-only or
+rejected by the active step policy before execution, using the same approved
+exact-command inputs as child execution. The persisted policy-stripped task and
+its per-request binding must also match the active delegation. Unknown-effect
+Bash or an incomplete transcript pauses. Project workflows may enable it only
+when the user ceiling also sets `subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules
 

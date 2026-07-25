@@ -92,12 +92,16 @@ cross-step handoff. Parent and sibling transcripts are never inherited. The
 request's skill selection replaces the selected profile's normal skills for
 that step.
 
-`subagent.retryToolFailures: true` explicitly authorizes the harness to launch
-one fresh retry with the actionable terminal diagnostic. Validation rejects
-the option when the step exposes `edit` or `write`. Runtime also requires a
-complete trusted transcript proving every recorded call was read-only or
-rejected before execution; an unknown-effect Bash call or incomplete
-transcript pauses instead.
+On a `failed` or `structured_output_failed` terminal response with an error or
+nonzero exit code, the harness may launch one fresh reinforcement retry with
+the bounded terminal evidence. Runtime first requires a complete trusted
+transcript proving every recorded call was read-only or rejected before
+execution by the active step policy, using the same approved exact commands as
+the child. Its persisted policy-stripped task and per-request binding must also
+match the active delegation. Denied and read-only Bash modes need no additional
+opt-in; `subagent.retryToolFailures: true` explicitly authorizes the same retry
+in allow-list or unrestricted Bash mode. Validation still rejects the option
+when the step exposes `edit` or `write`.
 
 Ordinary tool failures remain inside the same child whenever its runtime can
 continue. The delegated completion contract tells the child to inspect the
@@ -151,20 +155,29 @@ stateDiagram-v2
 
 While blocked, the harness keeps main tools isolated and refuses resume because a child may still be alive.
 
-For a terminal tool failure, Pi Workflows reads only the correlated failed-tool
-records from a bounded tail of the retained Pi child session. It accepts only
-regular, non-symlink files contained by the current parent session's child-run
-root and requires the tool output to match the terminal failure. Retry and
-pause diagnostics include the exact tool call, tool error, subagent exit code,
-terminal error, and validated session path. If safe correlation is unavailable,
-the terminal error remains actionable without attributing an unrelated earlier
-tool call. A failed process status is accepted when the contained transcript
-proves a matching successful `structured_output` after every failed tool result
-and the correlated capability-bound result validates. This consumes the same
-finalized child result and does not replay its effects. Without that proof,
-a delegated step gets at most one retry only when the complete transcript
-proves all recorded calls replay-safe. Mutation-capable or unknown-effect
-attempts pause without automatic replay.
+For a terminal error or nonzero exit, Pi Workflows audits a bounded tail of the
+retained Pi child session. It accepts only regular, non-symlink files contained
+by the current parent session's child-run root and requires its persisted
+policy-stripped task and per-request binding to match the active delegation.
+Every recorded call must be read-only or rejected by that step's actual Bash
+policy before execution, including its approved exact-command inputs;
+denial-like tool output alone is not replay proof. A complete zero-tool
+transcript is also replay-safe. When the terminal error identifies a tool, the
+diagnostic additionally requires its output to match and includes the exact
+call, tool error, exit code, terminal error, and validated session path.
+Otherwise the generic terminal evidence remains actionable without attributing
+an unrelated earlier call.
+
+A failed process status is accepted without replay when the contained
+transcript proves a matching successful `structured_output` after every failed
+tool result and the correlated capability-bound result validates. Without that
+proof, a replay-safe attempt gets at most one fresh reinforcement retry. The
+next child receives terminal evidence in an escaped JSON data boundary,
+inspects current state, diagnoses the evidence, changes its approach, and
+completes the original step. A second failure, a mutation-capable or
+unknown-effect call, incomplete, malformed, or incorrectly bound evidence,
+cancellation, interruption, timeout, or budget exhaustion pauses without
+automatic replay.
 
 ## Planning And Questions
 

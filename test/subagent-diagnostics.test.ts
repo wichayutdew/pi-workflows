@@ -6,9 +6,90 @@ import {
   deriveSubagentSessionRoot,
   failedToolName,
   formatToolFailureDiagnostic,
+  parseDelegationReplayAudit,
   parseToolFailureDiagnostic,
+  readDelegationReplayAudit,
   readToolFailureDiagnostic,
+  type DelegationReplayExpectation,
 } from '../src/integrations/subagents/diagnostics.ts';
+import {
+  encodeChildPolicy,
+  extractChildPolicy,
+  type ChildStepPolicy,
+} from '../src/integrations/subagents/protocol.ts';
+
+function replayPolicy(
+  bash: ChildStepPolicy['permissions']['bash'] = {
+    mode: 'unrestricted',
+    allow: [],
+  },
+): ChildStepPolicy {
+  const directory = join(tmpdir(), 'pi-workflows-step-diagnostics');
+  return {
+    version: 1,
+    requestId: 'diagnostic-request',
+    agent: 'scout',
+    workflowId: 'diagnostic-workflow',
+    runId: 'diagnostic-run',
+    stepId: 'inspect',
+    stepTitle: 'Inspect',
+    policyDigest: 'a'.repeat(64),
+    capabilityPath: join(directory, 'capability'),
+    capabilityToken: 'b'.repeat(64),
+    resultPath: join(directory, 'result.json'),
+    permissions: {
+      tools: ['bash', 'read'],
+      mcp: [],
+      extensions: [],
+      skills: [],
+      bash,
+    },
+    outcomes: ['done', 'blocked'],
+    pauseOutcomes: ['blocked'],
+    summaryMaxChars: 1_000,
+  };
+}
+
+function persistedDelegationTask(policy: ChildStepPolicy): string {
+  const requestTask = [
+    encodeChildPolicy(policy),
+    'Inspect the repository.',
+    `<pi-workflows-delegation-binding-v1>${policy.requestId}:${policy.policyDigest}</pi-workflows-delegation-binding-v1>`,
+  ].join('\n\n');
+  const extracted = extractChildPolicy(requestTask);
+  if (!extracted) throw new Error('test delegation policy was not extracted');
+  return extracted.task;
+}
+
+function replayExpectation(
+  policy: ChildStepPolicy,
+): DelegationReplayExpectation {
+  return {
+    task: persistedDelegationTask(policy),
+    bashPermission: policy.permissions.bash,
+    approvedBashCommands: policy.approvedBashCommands ?? [],
+  };
+}
+
+function boundTranscript(policy: ChildStepPolicy, body = ''): string {
+  return [
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: persistedDelegationTask(policy),
+          },
+        ],
+      },
+    }),
+    body,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 function transcript(): string {
   return [
@@ -170,13 +251,11 @@ describe('when testing subagent failure diagnostics', () => {
       tool: 'bash',
       call: 'rg -n "class WorkflowHarness|constructor\\(" src/harness.ts',
       output: 'substitutions and escapes are not allowed inside double quotes',
-      replaySafe: true,
     });
     expect(parseToolFailureDiagnostic(transcript())).toEqual({
       tool: 'read',
       call: '{"path":"src/harness.ts"}',
       output: 'file was not found',
-      replaySafe: true,
     });
     expect(parseToolFailureDiagnostic('')).toBe(undefined);
     expect(
@@ -196,7 +275,6 @@ describe('when testing subagent failure diagnostics', () => {
       tool: 'bash',
       call: 'rg -n "class WorkflowHarness|constructor\\(" src/harness.ts',
       output: 'substitutions and escapes are not allowed inside double quotes',
-      replaySafe: true,
       completionAfterFailure: true,
       completionValue: { outcome: 'done', summary: 'Recovered' },
       correlation: 'latest-before-completion',
@@ -242,7 +320,6 @@ describe('when testing subagent failure diagnostics', () => {
       tool: 'bash',
       call: 'rg -n "class WorkflowHarness|constructor\\(" src/harness.ts',
       output: 'substitutions and escapes are not allowed inside double quotes',
-      replaySafe: true,
     });
   });
 
@@ -285,6 +362,149 @@ describe('when testing subagent failure diagnostics', () => {
       tool: 'bash',
       call: command,
       output: 'install failed after extraction',
+    });
+  });
+
+  test('audits the whole attempt before authorizing a reinforcement retry', () => {
+    const policy = replayPolicy({ mode: 'read-only', allow: [] });
+    const validReadAttempt = transcript().split('\n').slice(1).join('\n');
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(policy, validReadAttempt),
+        replayExpectation(policy),
+      ),
+    ).toEqual({
+      replaySafe: true,
+      toolCount: 2,
+    });
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(policy),
+        replayExpectation(policy),
+      ),
+    ).toEqual({
+      replaySafe: true,
+      toolCount: 0,
+    });
+    expect(
+      parseDelegationReplayAudit(validReadAttempt, replayExpectation(policy)),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 2,
+    });
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(policy, transcript()),
+        replayExpectation(policy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 2,
+    });
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(policy, validReadAttempt),
+        replayExpectation(policy),
+        false,
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 2,
+    });
+
+    const siblingPolicy = { ...policy, requestId: 'sibling-request' };
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(siblingPolicy, validReadAttempt),
+        replayExpectation(policy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 2,
+    });
+
+    const unknownEffect = [
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'install',
+              name: 'bash',
+              arguments: { command: 'bun install' },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'install',
+          toolName: 'bash',
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: 'command does not match this step',
+            },
+          ],
+        },
+      }),
+    ].join('\n');
+    const unrestrictedPolicy = replayPolicy();
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(unrestrictedPolicy, unknownEffect),
+        replayExpectation(unrestrictedPolicy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 1,
+    });
+
+    const deniedPolicy = replayPolicy({ mode: 'deny', allow: [] });
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(deniedPolicy, unknownEffect),
+        replayExpectation(deniedPolicy),
+      ),
+    ).toEqual({
+      replaySafe: true,
+      toolCount: 1,
+    });
+
+    const approvedPolicy = {
+      ...replayPolicy({
+        mode: 'allow-list',
+        allow: [],
+        approvedSources: ['verification-worker'],
+      }),
+      approvedBashCommands: ['bun install'],
+    } satisfies ChildStepPolicy;
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(approvedPolicy, unknownEffect),
+        replayExpectation(approvedPolicy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 1,
+    });
+
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(
+          unrestrictedPolicy,
+          unknownEffect.replace('"toolName":"bash"', '"toolName":"read"'),
+        ),
+        replayExpectation(unrestrictedPolicy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 1,
     });
   });
 
@@ -475,6 +695,33 @@ describe('when testing subagent failure diagnostics', () => {
         tool: 'bash',
         call: expect.stringContaining('WorkflowHarness'),
       });
+      expect(
+        await readDelegationReplayAudit(
+          sessionFile,
+          trustedRoot,
+          identity,
+          replayExpectation(replayPolicy()),
+        ),
+      ).toEqual({
+        replaySafe: false,
+        toolCount: 2,
+      });
+      expect(
+        await readDelegationReplayAudit(
+          undefined,
+          trustedRoot,
+          identity,
+          replayExpectation(replayPolicy()),
+        ),
+      ).toBe(undefined);
+      expect(
+        await readDelegationReplayAudit(
+          join(trustedRoot!, 'missing', 'run-2', 'session.jsonl'),
+          trustedRoot,
+          { runId: 'missing', childIndex: 2 },
+          replayExpectation(replayPolicy()),
+        ),
+      ).toBe(undefined);
       expect(
         await readToolFailureDiagnostic(undefined, trustedRoot, identity),
       ).toBe(undefined);

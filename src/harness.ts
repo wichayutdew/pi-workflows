@@ -64,21 +64,23 @@ import {
   type ChildStepPolicy,
   type SubagentDelegationRequest,
   type SubagentDelegationResponse,
+  type SubagentDelegationStatus,
   type SubagentDelegationUpdate,
 } from './integrations/subagents/protocol.ts';
 import {
   deriveSubagentSessionRoot,
   failedToolName,
   formatToolFailureDiagnostic,
+  readDelegationReplayAudit,
   readToolFailureDiagnostic,
-  type ToolFailureDiagnostic,
+  type DelegationReplayAudit,
 } from './integrations/subagents/diagnostics.ts';
 import { preflightStep } from './preflight.ts';
 import {
   buildDelegatedStepTask,
   buildMainStepTask,
   buildMainWorkflowNotice,
-  toolRetryTask,
+  reinforcementRetryTask,
 } from './prompt.ts';
 import {
   narrowApprovedBashCommands,
@@ -105,20 +107,78 @@ const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const STATUS_KEY = 'pi-workflows';
 const LEGACY_PROGRESS_WIDGET_KEY = 'pi-workflows-progress';
 const STATUS_REFRESH_INTERVAL_MS = 250;
-const MAX_TOOL_FAILURE_RETRIES = 1;
+const MAX_REINFORCEMENT_RETRIES = 1;
 
-function isRetryableToolFailure(reason: string): boolean {
-  return failedToolName(reason) !== undefined;
+function delegationTranscriptBinding(
+  requestId: string,
+  policyDigest: string,
+): string {
+  return `<pi-workflows-delegation-binding-v1>${requestId}:${policyDigest}</pi-workflows-delegation-binding-v1>`;
+}
+
+function nonEmptyTerminalError(
+  response: SubagentDelegationResponse,
+): string | undefined {
+  return [response.error, response.execution?.error].find(
+    (error): error is string =>
+      typeof error === 'string' && error.trim().length > 0,
+  );
+}
+
+function nonzeroTerminalExitCode(
+  response: SubagentDelegationResponse,
+): number | undefined {
+  return [response.exitCode, response.execution?.exitCode].find(
+    (exitCode): exitCode is number =>
+      typeof exitCode === 'number' &&
+      Number.isSafeInteger(exitCode) &&
+      exitCode !== 0,
+  );
+}
+
+function hasContradictoryCompletion(
+  response: SubagentDelegationResponse,
+): boolean {
+  return (
+    response.status === 'completed' &&
+    (nonEmptyTerminalError(response) !== undefined ||
+      nonzeroTerminalExitCode(response) !== undefined)
+  );
+}
+
+function isRetryableTerminalFailure(
+  failure: DelegationFailureDetails,
+): boolean {
+  return (
+    (failure.status === 'failed' ||
+      failure.status === 'structured_output_failed') &&
+    (failure.error !== undefined ||
+      (Number.isSafeInteger(failure.exitCode) && failure.exitCode !== 0))
+  );
+}
+
+function validateReplayAudit(
+  response: SubagentDelegationResponse,
+  replayAudit: DelegationReplayAudit | undefined,
+): DelegationReplayAudit | undefined {
+  if (!replayAudit) return undefined;
+  if (
+    response.toolCount !== undefined &&
+    response.toolCount !== replayAudit.toolCount
+  ) {
+    return { ...replayAudit, replaySafe: false };
+  }
+  return replayAudit;
 }
 
 function isSafeToRetryDelegation(
   policy: ChildStepPolicy,
   replayExplicitlyAuthorized: boolean,
-  diagnostic: ToolFailureDiagnostic | undefined,
+  replayAudit: DelegationReplayAudit | undefined,
 ): boolean {
   const tools = new Set(policy.permissions.tools);
   return (
-    diagnostic?.replaySafe === true &&
+    replayAudit?.replaySafe === true &&
     !tools.has('edit') &&
     !tools.has('write') &&
     (replayExplicitlyAuthorized ||
@@ -135,11 +195,11 @@ interface ActiveDelegation {
   sessionEpoch: number;
   resultDirectory: string;
   policy: ChildStepPolicy;
+  transcriptTask: string;
   agent: string;
   trustedSessionRoot?: string;
-  retryToolFailures: boolean;
-  toolFailureRetryCount: number;
-  retryDiagnostic?: ToolFailureDiagnostic;
+  reinforcementReplayAuthorized: boolean;
+  reinforcementRetryCount: number;
   progress?: string;
   cancelling?: boolean;
 }
@@ -336,29 +396,55 @@ function recoveredProjectionError(
 
 interface DelegationFailureDetails {
   reason: string;
+  status: SubagentDelegationStatus;
+  error?: string;
+  exitCode?: number;
   diagnostic?: Awaited<ReturnType<typeof readToolFailureDiagnostic>>;
+  replayAudit?: DelegationReplayAudit;
 }
 
 async function delegationFailureDetails(
   active: ActiveDelegation,
   response: SubagentDelegationResponse,
 ): Promise<DelegationFailureDetails> {
+  const terminalError = nonEmptyTerminalError(response);
   const error =
-    response.error ??
-    response.execution?.error ??
-    'The subagent returned no terminal error details.';
-  const diagnostic = await readToolFailureDiagnostic(
-    response.sessionFile,
-    active.trustedSessionRoot,
-    response.runId !== undefined && response.childIndex !== undefined
-      ? { runId: response.runId, childIndex: response.childIndex }
-      : undefined,
-    failedToolName(error),
-    error,
-  );
-  const exitCode = response.exitCode ?? response.execution?.exitCode;
+    terminalError ?? 'The subagent returned no terminal error details.';
+  const responseIdentityMatches =
+    response.childIndex === 0 &&
+    (response.agent === undefined || response.agent === active.agent);
+  const identity =
+    responseIdentityMatches && response.runId !== undefined
+      ? { runId: response.runId, childIndex: 0 }
+      : undefined;
+  const [diagnostic, replayAudit] = await Promise.all([
+    readToolFailureDiagnostic(
+      response.sessionFile,
+      active.trustedSessionRoot,
+      identity,
+      failedToolName(terminalError),
+      terminalError,
+    ),
+    readDelegationReplayAudit(
+      response.sessionFile,
+      active.trustedSessionRoot,
+      identity,
+      {
+        task: active.transcriptTask,
+        bashPermission: active.policy.permissions.bash,
+        approvedBashCommands: active.policy.approvedBashCommands ?? [],
+      },
+    ),
+  ]);
+  const validatedReplayAudit = validateReplayAudit(response, replayAudit);
+  const exitCode =
+    nonzeroTerminalExitCode(response) ??
+    response.exitCode ??
+    response.execution?.exitCode;
   const reason = [
-    `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}.`,
+    hasContradictoryCompletion(response)
+      ? `Subagent "${active.agent}" reported terminal failure signals with completed status.`
+      : `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}.`,
     ...(diagnostic ? formatToolFailureDiagnostic(diagnostic) : []),
     ...(exitCode !== undefined ? [`Subagent exit code: ${exitCode}`] : []),
     `Terminal error: ${boundedFailureField(error)}`,
@@ -370,7 +456,11 @@ async function delegationFailureDetails(
   ].join('\n');
   return {
     reason,
+    status: response.status,
+    ...(terminalError ? { error: terminalError } : {}),
+    ...(exitCode !== undefined ? { exitCode } : {}),
     ...(diagnostic ? { diagnostic } : {}),
+    ...(validatedReplayAudit ? { replayAudit: validatedReplayAudit } : {}),
   };
 }
 
@@ -1048,7 +1138,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
   private launchCurrentStep(
     workflow: LoadedWorkflow,
-    toolRetry?: { count: number; reason: string },
+    reinforcementRetry?: { count: number; reason: string },
   ): void {
     const run = this.run;
     if (
@@ -1150,6 +1240,19 @@ export class WorkflowHarness implements WorkflowCommandController {
     const trustedSessionRoot = deriveSubagentSessionRoot(
       this.latestContext?.sessionManager.getSessionFile(),
     );
+    const transcriptTask = [
+      buildDelegatedStepTask(workflow, run, ''),
+      delegationTranscriptBinding(requestId, policyDigest),
+      ...(reinforcementRetry
+        ? [
+            reinforcementRetryTask(
+              reinforcementRetry.reason,
+              reinforcementRetry.count,
+              MAX_REINFORCEMENT_RETRIES,
+            ),
+          ]
+        : []),
+    ].join('\n\n');
     const active: ActiveDelegation = {
       requestId,
       runId: run.runId,
@@ -1158,19 +1261,17 @@ export class WorkflowHarness implements WorkflowCommandController {
       sessionEpoch: this.sessionEpoch,
       resultDirectory,
       policy,
+      transcriptTask,
       agent: subagent.agent,
       ...(trustedSessionRoot ? { trustedSessionRoot } : {}),
-      retryToolFailures: subagent.retryToolFailures,
-      toolFailureRetryCount: toolRetry?.count ?? 0,
+      reinforcementReplayAuthorized: subagent.retryToolFailures,
+      reinforcementRetryCount: reinforcementRetry?.count ?? 0,
     };
     const request: SubagentDelegationRequest = {
       version: 1,
       requestId,
       agent: runtimeAgent,
-      task: [
-        buildDelegatedStepTask(workflow, run, encodeChildPolicy(policy)),
-        ...(toolRetry ? [toolRetryTask(toolRetry.reason)] : []),
-      ].join('\n\n'),
+      task: `${encodeChildPolicy(policy)}\n\n${transcriptTask}`,
       // Workflow steps are isolation boundaries. Never fork the parent or a
       // sibling step's transcript; pass only the explicit workflow handoff.
       context: 'fresh',
@@ -1403,6 +1504,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
     this.activeDelegation = undefined;
+    let terminalFailure: DelegationFailureDetails | undefined;
 
     try {
       if (
@@ -1422,13 +1524,12 @@ export class WorkflowHarness implements WorkflowCommandController {
         throw new Error('Active workflow configuration is unavailable');
       }
       let recoveredTerminalFailure: DelegationFailureDetails | undefined;
-      if (response.status !== 'completed') {
+      if (
+        response.status !== 'completed' ||
+        hasContradictoryCompletion(response)
+      ) {
         const failure = await delegationFailureDetails(active, response);
-        if (failure.diagnostic) {
-          active.retryDiagnostic = failure.diagnostic;
-        } else {
-          delete active.retryDiagnostic;
-        }
+        terminalFailure = failure;
         if (
           response.status !== 'failed' ||
           failure.diagnostic?.completionAfterFailure !== true
@@ -1534,7 +1635,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.settleAfterTransition(workflow);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      if (!this.retryDelegationAfterToolFailure(active, reason)) {
+      if (!this.retryDelegationAfterFailure(active, terminalFailure, reason)) {
         this.pauseForDelegationFailure(reason);
       }
     } finally {
@@ -1575,17 +1676,19 @@ export class WorkflowHarness implements WorkflowCommandController {
     await rm(active.resultDirectory, { recursive: true, force: true });
   }
 
-  private retryDelegationAfterToolFailure(
+  private retryDelegationAfterFailure(
     active: ActiveDelegation,
+    failure: DelegationFailureDetails | undefined,
     reason: string,
   ): boolean {
     if (
-      active.toolFailureRetryCount >= MAX_TOOL_FAILURE_RETRIES ||
-      !isRetryableToolFailure(reason) ||
+      !failure ||
+      active.reinforcementRetryCount >= MAX_REINFORCEMENT_RETRIES ||
+      !isRetryableTerminalFailure(failure) ||
       !isSafeToRetryDelegation(
         active.policy,
-        active.retryToolFailures,
-        active.retryDiagnostic,
+        active.reinforcementReplayAuthorized,
+        failure.replayAudit,
       ) ||
       !this.sessionActive ||
       this.sessionEpoch !== active.sessionEpoch ||
@@ -1602,11 +1705,11 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (!workflow) return false;
 
     this.latestContext?.ui.notify(
-      `Retrying "${active.stepId}" after a tool failure (${active.toolFailureRetryCount + 1}/${MAX_TOOL_FAILURE_RETRIES})`,
+      `Reinforcement retry for "${active.stepId}" after a subagent failure (${active.reinforcementRetryCount + 1}/${MAX_REINFORCEMENT_RETRIES})`,
       'warning',
     );
     this.launchCurrentStep(workflow, {
-      count: active.toolFailureRetryCount + 1,
+      count: active.reinforcementRetryCount + 1,
       reason,
     });
     return true;
