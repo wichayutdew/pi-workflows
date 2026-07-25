@@ -4,7 +4,11 @@
  * an individual command rejects.
  */
 export class SerialTaskQueue {
-  private tail: Promise<void> = Promise.resolve();
+  private tail: Promise<void>;
+
+  constructor() {
+    this.tail = Promise.resolve();
+  }
 
   run<T>(task: () => Promise<T>): Promise<T> {
     const result = this.tail.then(task, task);

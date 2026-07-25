@@ -1,7 +1,11 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   extractApprovedBashCommands,
   narrowApprovedBashCommands,
+  resolveReviewedRepositoryCwd,
 } from '../src/policy/approved-commands.ts';
 
 describe('when testing approved commands', () => {
@@ -169,6 +173,244 @@ describe('when testing approved commands', () => {
       expect(
         narrowApprovedBashCommands(artifact, '', ['remote-actions']),
       ).toEqual([]);
+    });
+
+    describe('reviewed repository cwd recovery', () => {
+      let directory: string;
+      let secondDirectory: string;
+      let filePath: string;
+
+      beforeAll(() => {
+        directory = mkdtempSync(join(tmpdir(), 'pi-workflows-reviewed-cwd-'));
+        secondDirectory = join(directory, 'second');
+        filePath = join(directory, 'file.txt');
+        mkdirSync(secondDirectory);
+        writeFileSync(filePath, 'not a directory');
+      });
+
+      afterAll(() => {
+        rmSync(directory, { recursive: true, force: true });
+      });
+
+      test('distinguishes artifacts without a repository contract', () => {
+        expect(resolveReviewedRepositoryCwd('')).toEqual({ kind: 'none' });
+        expect(resolveReviewedRepositoryCwd('Reviewed prose only')).toEqual({
+          kind: 'none',
+        });
+        expect(
+          resolveReviewedRepositoryCwd(
+            ['```', '', '```', '```json', '{"actions":[]}', '```'].join('\n'),
+          ),
+        ).toEqual({ kind: 'none' });
+      });
+
+      test('resolves one absolute existing repository directory', () => {
+        const artifact = [
+          '# Reviewed contract',
+          '```json',
+          JSON.stringify({ repositories: [{ cwd: directory }] }),
+          '```',
+        ].join('\n');
+
+        expect(resolveReviewedRepositoryCwd(artifact)).toEqual({
+          kind: 'resolved',
+          cwd: directory,
+          repositoryCwd: directory,
+          bootstrapping: false,
+        });
+      });
+
+      test('accepts duplicate references to the same directory', () => {
+        const artifact = [
+          '```json',
+          JSON.stringify({
+            repositories: [{ cwd: directory }, { cwd: directory }],
+          }),
+          '```',
+          '```json',
+          JSON.stringify({ repositories: [{ cwd: directory }] }),
+          '```',
+        ].join('\n');
+
+        expect(resolveReviewedRepositoryCwd(artifact)).toEqual({
+          kind: 'resolved',
+          cwd: directory,
+          repositoryCwd: directory,
+          bootstrapping: false,
+        });
+      });
+
+      test('bootstraps a missing target only from one reviewed existing source', () => {
+        const repositoryCwd = join(directory, 'missing-target');
+        const artifact = JSON.stringify({
+          repositories: [{ cwd: repositoryCwd, sourceCwd: directory }],
+        });
+
+        expect(resolveReviewedRepositoryCwd(artifact)).toEqual({
+          kind: 'resolved',
+          cwd: directory,
+          repositoryCwd,
+          bootstrapping: true,
+        });
+      });
+
+      test('rejects ambiguous and relative repository directories', () => {
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({
+              repositories: [{ cwd: directory }, { cwd: secondDirectory }],
+            }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract is ambiguous: expected exactly one repository cwd',
+        });
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({ repositories: [{ cwd: 'relative/path' }] }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract repository cwd must be an absolute path',
+        });
+      });
+
+      test('rejects unusable existing targets and missing bootstrap sources', () => {
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({ repositories: [{ cwd: filePath }] }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason: `Reviewed repository cwd is not an accessible directory: ${filePath}`,
+        });
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({
+              repositories: [{ cwd: join(directory, 'missing') }],
+            }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository target is missing and requires exactly one absolute sourceCwd',
+        });
+      });
+
+      test('rejects invalid or ambiguous bootstrap sources', () => {
+        const repositoryCwd = join(directory, 'missing-target');
+        const missingSource = join(directory, 'missing-source');
+
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({
+              repositories: [
+                { cwd: repositoryCwd, sourceCwd: 'relative/source' },
+              ],
+            }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract sourceCwd must be an absolute path',
+        });
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({
+              repositories: [
+                { cwd: repositoryCwd, sourceCwd: directory },
+                { cwd: repositoryCwd, sourceCwd: secondDirectory },
+              ],
+            }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract is ambiguous: expected at most one sourceCwd',
+        });
+        for (const sourceCwd of [missingSource, filePath]) {
+          expect(
+            resolveReviewedRepositoryCwd(
+              JSON.stringify({
+                repositories: [{ cwd: repositoryCwd, sourceCwd }],
+              }),
+            ),
+          ).toEqual({
+            kind: 'invalid',
+            reason: `Reviewed repository sourceCwd is not an existing directory: ${sourceCwd}`,
+          });
+        }
+      });
+
+      test('rejects malformed or incomplete repository contracts', () => {
+        expect(resolveReviewedRepositoryCwd('{not-json')).toEqual({
+          kind: 'invalid',
+          reason: 'Reviewed repository contract contains malformed JSON',
+        });
+        expect(resolveReviewedRepositoryCwd('```json\nnot JSON\n```')).toEqual({
+          kind: 'invalid',
+          reason: 'Reviewed repository contract contains malformed JSON',
+        });
+        expect(
+          resolveReviewedRepositoryCwd(
+            [
+              '# Reviewed contract',
+              '```json',
+              JSON.stringify({ repositories: [{ cwd: directory }] }),
+              '```',
+              '```json',
+              'not JSON',
+              '```',
+            ].join('\n'),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason: 'Reviewed repository contract contains malformed JSON',
+        });
+
+        for (const repositories of [[], 'invalid']) {
+          expect(
+            resolveReviewedRepositoryCwd(JSON.stringify({ repositories })),
+          ).toEqual({
+            kind: 'invalid',
+            reason:
+              'Reviewed repository contract must contain a non-empty repositories array',
+          });
+        }
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({ repositories: [null] }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract contains a malformed repository entry',
+        });
+        for (const repository of [{}, { cwd: 42 }, { cwd: '/tmp/\0bad' }]) {
+          expect(
+            resolveReviewedRepositoryCwd(
+              JSON.stringify({ repositories: [repository] }),
+            ),
+          ).toEqual({
+            kind: 'invalid',
+            reason:
+              'Reviewed repository contract repository cwd must be an absolute path',
+          });
+        }
+        expect(
+          resolveReviewedRepositoryCwd(
+            JSON.stringify({
+              repositories: [{ cwd: directory, sourceCwd: '/tmp/\0bad' }],
+            }),
+          ),
+        ).toEqual({
+          kind: 'invalid',
+          reason:
+            'Reviewed repository contract sourceCwd must be an absolute path',
+        });
+      });
     });
   });
 });

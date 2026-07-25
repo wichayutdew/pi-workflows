@@ -5,13 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import { RpcClient, type SessionEntry } from '@earendil-works/pi-coding-agent';
 import {
-  E2E_EXECUTE_MARKER,
   E2E_FINAL_SUMMARY,
-  E2E_HANDOFF,
+  E2E_IMPLEMENT_HANDOFF,
+  E2E_IMPLEMENT_MARKER,
   E2E_INPUT_MARKER,
   E2E_MODEL_ID,
+  E2E_PLAN_HANDOFF,
   E2E_PLAN_MARKER,
   E2E_PROVIDER_ID,
+  E2E_VERIFY_MARKER,
 } from '../fixtures/e2e-values.ts';
 
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
@@ -35,15 +37,17 @@ interface WorkflowCheckpoint {
 }
 
 interface Observation {
-  step: 'plan' | 'execute' | 'unknown';
+  step: 'plan' | 'implement' | 'verify' | 'unknown';
+  runtimeAgent: string;
   promptLength: number;
   userMessageCount: number;
   hasPlanMarker: boolean;
-  hasExecuteMarker: boolean;
-  hasHandoff: boolean;
+  hasImplementMarker: boolean;
+  hasVerifyMarker: boolean;
+  hasPlanHandoff: boolean;
+  hasImplementHandoff: boolean;
   hasWorkflowInput: boolean;
-  hasScoutSpecialty: boolean;
-  hasReviewerSpecialty: boolean;
+  hasExpectedProfile: boolean;
   violations: string[];
 }
 
@@ -179,13 +183,22 @@ describe('when running a workflow through real Pi subprocesses', () => {
             prompt: planPrompt,
             subagent: 'scout',
             transitions: {
-              planned: 'execute',
+              planned: 'implement',
               blocked: '$pause',
             },
           },
-          execute: {
-            title: 'Execute',
-            prompt: `${E2E_EXECUTE_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+          implement: {
+            title: 'Implement',
+            prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+            subagent: 'worker',
+            transitions: {
+              implemented: 'verify',
+              blocked: '$pause',
+            },
+          },
+          verify: {
+            title: 'Verify',
+            prompt: `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
             subagent: 'reviewer',
             transitions: {
               done: '$done',
@@ -264,12 +277,19 @@ describe('when running a workflow through real Pi subprocesses', () => {
           {
             stepId: 'plan',
             outcome: 'planned',
-            summary: E2E_HANDOFF,
+            summary: E2E_PLAN_HANDOFF,
             stepDigest: expect.any(String),
             completedAt: expect.any(Number),
           },
           {
-            stepId: 'execute',
+            stepId: 'implement',
+            outcome: 'implemented',
+            summary: E2E_IMPLEMENT_HANDOFF,
+            stepDigest: expect.any(String),
+            completedAt: expect.any(Number),
+          },
+          {
+            stepId: 'verify',
             outcome: 'done',
             summary: E2E_FINAL_SUMMARY,
             stepDigest: expect.any(String),
@@ -284,31 +304,50 @@ describe('when running a workflow through real Pi subprocesses', () => {
         expect(observations).toEqual([
           {
             step: 'plan',
+            runtimeAgent: 'scout',
             promptLength: expect.any(Number),
             userMessageCount: 1,
             hasPlanMarker: true,
-            hasExecuteMarker: false,
-            hasHandoff: false,
+            hasImplementMarker: false,
+            hasVerifyMarker: false,
+            hasPlanHandoff: false,
+            hasImplementHandoff: false,
             hasWorkflowInput: true,
-            hasScoutSpecialty: true,
-            hasReviewerSpecialty: false,
+            hasExpectedProfile: true,
             violations: [],
           },
           {
-            step: 'execute',
+            step: 'implement',
+            runtimeAgent: 'worker',
             promptLength: expect.any(Number),
             userMessageCount: 1,
             hasPlanMarker: false,
-            hasExecuteMarker: true,
-            hasHandoff: true,
+            hasImplementMarker: true,
+            hasVerifyMarker: false,
+            hasPlanHandoff: true,
+            hasImplementHandoff: false,
             hasWorkflowInput: false,
-            hasScoutSpecialty: false,
-            hasReviewerSpecialty: true,
+            hasExpectedProfile: true,
+            violations: [],
+          },
+          {
+            step: 'verify',
+            runtimeAgent: 'reviewer',
+            promptLength: expect.any(Number),
+            userMessageCount: 1,
+            hasPlanMarker: false,
+            hasImplementMarker: false,
+            hasVerifyMarker: true,
+            hasPlanHandoff: false,
+            hasImplementHandoff: true,
+            hasWorkflowInput: false,
+            hasExpectedProfile: true,
             violations: [],
           },
         ]);
         expect(observations[0]?.promptLength).toBeGreaterThan(8_000);
         expect(observations[1]?.promptLength).toBeLessThan(8_000);
+        expect(observations[2]?.promptLength).toBeLessThan(8_000);
       } finally {
         await client?.stop();
         await rm(root, { recursive: true, force: true });

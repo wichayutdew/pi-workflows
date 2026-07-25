@@ -142,7 +142,15 @@ without reviewed-artifact provenance grant nothing.
 `approvedSources` selects provenance, not an executable family. For example,
 `verification-worker` extracts only exact
 `repositories[].worker[].command` strings from the latest approved artifact.
-Changing even one argument produces a different, unauthorized command.
+Each cwd-dependent command must encode the exact absolute
+`repositories[].cwd` from the same object. Changing an argument or directory
+produces a different, unauthorized execution. A delegated step currently
+accepts one distinct reviewed directory; repeated identical values are allowed,
+while missing, relative, or multiple different directories fail closed. A
+missing target worktree may bootstrap only from the same contract's one
+existing absolute `sourceCwd`. The child confines edits and writes to the
+reviewed target, and every setup or later Bash command still requires an exact
+reviewed string.
 
 ## Compact Bash Rules
 
@@ -163,16 +171,17 @@ that executable.
 
 Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
 into pi-subagents with the defaults shown below. A name such as
-`subagent: worker` assigns the step's specialty identity; put the specialty's
-concrete instructions in that step's prompt. Use the object form for model,
-timeout, budget, or artifact overrides.
+`subagent: worker` launches the actual Pi Subagents `worker` profile. Its
+profile prompt supplies the specialty, while the workflow prompt supplies the
+exact step contract. Use the object form for model, timeout, budget, or artifact
+overrides.
 
-Every delegated step uses the bundled `pi-workflows.step` runtime. The fixed
-runtime keeps `workflow_complete_step` available even when general-purpose Pi
-Subagents profiles declare tool allow-lists that would hide a dynamically
-registered completion tool. The `agent` field is therefore a workflow prompt
-identity, not an upstream profile selector. Delegation still requires the
-optional pi-subagents integration.
+Delegation requires pi-subagents 0.36.0 or newer. Requests disable any
+profile-default output file, provide the workflow result schema, and opt into
+agent contract v1. The upstream `structured_output` tool completes delegated steps;
+`workflow_complete_step` remains the main-agent completion tool. Profile tool
+and extension allow-lists are an outer boundary that workflow permissions can
+only narrow.
 
 Each child receives the original workflow input plus only the previous step's
 self-contained compact `summary` or approved review artifact. It never inherits
@@ -180,8 +189,7 @@ the parent or sibling transcript.
 
 ```mermaid
 flowchart TD
-  Subagent[subagent] --> Specialty[agent specialty<br/>default pi-workflows.step]
-  Subagent --> Runtime[fixed runtime<br/>pi-workflows.step]
+  Subagent[subagent] --> Profile[actual agent profile<br/>default pi-workflows.step]
   Subagent --> Context[context<br/>fresh only]
   Subagent --> Model[model override]
   Subagent --> Timeout[timeoutMs<br/>1000 to 86400000]

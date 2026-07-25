@@ -88,6 +88,9 @@ function buildStepTask(
     ? `- ${step.gate.submitOutcome}: submit the artifact to ${step.gate.provider}; include the full artifact argument`
     : '';
   const delegated = execution === 'delegated';
+  const completionTool = delegated
+    ? 'structured_output'
+    : 'workflow_complete_step';
 
   return [
     ...(policyEnvelope ? [policyEnvelope, ''] : []),
@@ -98,7 +101,7 @@ function buildStepTask(
     `Step: ${run.currentStepId} (${step.title})`,
     ...(delegated
       ? [
-          `Step specialty: ${step.subagent?.agent ?? 'generalist'}`,
+          `Agent profile: ${step.subagent?.agent ?? 'generalist'}`,
           'Context: fresh workflow-step context; no parent or sibling transcript is inherited.',
         ]
       : []),
@@ -127,7 +130,7 @@ function buildStepTask(
     '',
     '## Completion contract',
     '',
-    `Call \`workflow_complete_step\` exactly once, after all work for this ${delegated ? 'delegated' : 'main-agent'} step is complete.`,
+    `Call \`${completionTool}\` exactly once, after all work for this ${delegated ? 'delegated' : 'main-agent'} step is complete.`,
     `Valid outcomes: ${outcomes.join(', ')}`,
     transitionLines,
     gateLine,

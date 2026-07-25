@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -16,17 +23,6 @@ import { expectTruthy } from './helpers.ts';
 
 describe('when testing subagent child runtime', () => {
   type Handler = (event: Record<string, unknown>) => unknown;
-
-  interface RegisteredToolLike {
-    name: string;
-    execute: (
-      toolCallId: string,
-      params: { outcome: string; summary: string; artifact?: string },
-    ) => Promise<{
-      terminate?: boolean;
-      content: Array<{ type: string; text: string }>;
-    }>;
-  }
 
   function childPolicy(
     directory: string,
@@ -60,16 +56,24 @@ describe('when testing subagent child runtime', () => {
 
   function runtime(
     childAgent: string | undefined,
-    profileTools = ['read', 'bash'],
+    profileTools = ['read', 'bash', CHILD_COMPLETION_TOOL],
   ) {
     const handlers = new Map<string, Handler[]>();
     const activeTools: string[][] = [];
     let currentActiveTools = [...profileTools];
-    let completionTool: RegisteredToolLike | undefined;
+    const registeredTools: unknown[] = [];
     const inventory = [
       { name: 'read', sourceInfo: { source: 'builtin' } },
+      { name: 'edit', sourceInfo: { source: 'builtin' } },
       { name: 'write', sourceInfo: { source: 'builtin' } },
       { name: 'bash', sourceInfo: { source: 'builtin' } },
+      {
+        name: CHILD_COMPLETION_TOOL,
+        sourceInfo: {
+          source: 'extension',
+          path: '/packages/pi-subagents/structured-output.ts',
+        },
+      },
       {
         name: 'contact_supervisor',
         sourceInfo: {
@@ -97,14 +101,7 @@ describe('when testing subagent child runtime', () => {
         handlers.set(event, [...(handlers.get(event) ?? []), handler]);
       },
       registerTool(tool: unknown) {
-        completionTool = tool as RegisteredToolLike;
-        inventory.push({
-          name: completionTool.name,
-          sourceInfo: {
-            source: 'extension',
-            path: '/packages/pi-workflows/index.ts',
-          },
-        });
+        registeredTools.push(tool);
       },
       getAllTools() {
         return inventory;
@@ -123,7 +120,7 @@ describe('when testing subagent child runtime', () => {
     return {
       handlers,
       activeTools,
-      completionTool: () => completionTool,
+      registeredTools,
     };
   }
 
@@ -131,83 +128,19 @@ describe('when testing subagent child runtime', () => {
     test('child runtime narrows tools, enforces Bash, and writes a correlated result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
-      const policy: ChildStepPolicy = {
-        version: 1,
-        requestId: 'request-child',
-        agent: 'worker',
-        workflowId: 'example',
-        runId: 'run-child',
-        stepId: 'inspect',
-        stepTitle: 'Inspect',
-        policyDigest: 'c'.repeat(64),
-        capabilityPath: join(directory, 'capability'),
-        capabilityToken: 'd'.repeat(64),
-        resultPath: join(directory, 'result.json'),
-        permissions: {
-          tools: ['read', 'bash'],
-          mcp: ['gitlab/get_merge_request'],
-          extensions: [],
-          skills: [],
-          bash: { mode: 'read-only', allow: [] },
-        },
-        outcomes: ['ready', 'blocked'],
-        pauseOutcomes: ['blocked'],
-        summaryMaxChars: 500,
-      };
-      const handlers = new Map<string, Handler[]>();
-      const activeTools: string[][] = [];
-      let currentActiveTools = ['read', 'bash'];
-      let completionTool: RegisteredToolLike | undefined;
-      const inventory = [
-        { name: 'read', sourceInfo: { source: 'builtin' } },
-        { name: 'write', sourceInfo: { source: 'builtin' } },
-        { name: 'bash', sourceInfo: { source: 'builtin' } },
-        {
-          name: 'mcp',
-          sourceInfo: {
-            source: 'extension',
-            path: '/packages/pi-mcp-adapter/index.ts',
-          },
-        },
-      ];
-      // when
-      const pi = {
-        on(event: string, handler: Handler) {
-          handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-        },
-        registerTool(tool: unknown) {
-          completionTool = tool as RegisteredToolLike;
-          inventory.push({
-            name: completionTool.name,
-            sourceInfo: {
-              source: 'extension',
-              path: '/packages/pi-workflows/index.ts',
-            },
-          });
-        },
-        getAllTools() {
-          return inventory;
-        },
-        getActiveTools() {
-          return [...currentActiveTools];
-        },
-        setActiveTools(tools: string[]) {
-          currentActiveTools = [...tools];
-          activeTools.push(tools);
-        },
-      } as unknown as ExtensionAPI;
+      const policy = childPolicy(directory, { repositoryCwd: directory });
+      const rig = runtime(policy.agent);
 
-      // then
+      // when
       try {
         await writeFile(policy.capabilityPath, policy.capabilityToken, {
           encoding: 'utf8',
           mode: 0o600,
         });
-        registerSubagentChildRuntime(pi, { childAgent: policy.agent });
-        expect(activeTools).toEqual([]);
-        expect(completionTool).toBe(undefined);
+        expect(rig.activeTools).toEqual([]);
+        expect(rig.registeredTools).toEqual([]);
 
-        const toolCall = handlers.get('tool_call')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
         expectTruthy(toolCall);
         expect(
           toolCall({
@@ -218,8 +151,10 @@ describe('when testing subagent child runtime', () => {
           }),
         ).toBe(undefined);
 
-        const input = handlers.get('input')?.[0];
+        const input = rig.handlers.get('input')?.[0];
+        const beforeAgentStart = rig.handlers.get('before_agent_start')?.[0];
         expectTruthy(input);
+        expectTruthy(beforeAgentStart);
         expect(
           input({
             type: 'input',
@@ -227,8 +162,8 @@ describe('when testing subagent child runtime', () => {
             text: 'Review this ordinary subagent task.',
           }),
         ).toBe(undefined);
-        expect(activeTools).toEqual([]);
-        expect(completionTool).toBe(undefined);
+        expect(rig.activeTools).toEqual([]);
+        expect(rig.registeredTools).toEqual([]);
 
         const transformed = input({
           type: 'input',
@@ -239,11 +174,20 @@ describe('when testing subagent child runtime', () => {
           action: 'transform',
           text: 'Inspect now.',
         });
-        expect(activeTools.at(-1)).toEqual([
+        expect(rig.activeTools.at(-1)).toEqual([
           'read',
           'bash',
           CHILD_COMPLETION_TOOL,
         ]);
+        const started = beforeAgentStart({
+          systemPrompt: 'Base child prompt',
+        }) as { systemPrompt: string };
+        expect(started.systemPrompt).toContain(
+          'finish with a pause outcome and describe the unresolved contract',
+        );
+        expect(started.systemPrompt).toContain(
+          'Keep every edit and write inside the reviewed repository root.',
+        );
         await expect(readFile(policy.capabilityPath, 'utf8')).rejects.toThrow(
           /ENOENT/,
         );
@@ -280,14 +224,66 @@ describe('when testing subagent child runtime', () => {
           }),
         ).toBe(undefined);
 
-        const activeCompletionTool = completionTool as
-          RegisteredToolLike | undefined;
-        expectTruthy(activeCompletionTool);
-        const completion = await activeCompletionTool.execute('complete', {
-          outcome: 'ready',
-          summary: 'Inspection complete',
-        });
-        expect(completion.terminate).toBe(true);
+        const invalidStructuredInputs = [
+          {
+            input: null,
+            reason: /input must be an object/,
+          },
+          {
+            input: {},
+            reason: /input must contain only value/,
+          },
+          {
+            input: { value: 'not-an-object' },
+            reason: /value must be an object/,
+          },
+          {
+            input: {
+              value: {
+                outcome: 'ready',
+                summary: 'Inspection complete',
+                extra: true,
+              },
+            },
+            reason: /unknown property "extra"/,
+          },
+          {
+            input: {
+              value: {
+                outcome: 'unknown',
+                summary: 'Inspection complete',
+              },
+            },
+            reason: /invalid outcome/,
+          },
+        ];
+        for (const [index, scenario] of invalidStructuredInputs.entries()) {
+          const rejected = toolCall({
+            type: 'tool_call',
+            toolCallId: `invalid-structured-${index}`,
+            toolName: CHILD_COMPLETION_TOOL,
+            input: scenario.input,
+          }) as { block: boolean; reason: string };
+          expect(rejected.block).toBe(true);
+          expect(rejected.reason).toMatch(scenario.reason);
+        }
+
+        const completionInput = {
+          value: {
+            outcome: 'ready',
+            summary: 'Inspection complete',
+          },
+        };
+        expect(
+          toolCall({
+            type: 'tool_call',
+            toolCallId: 'complete',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: completionInput,
+          }),
+        ).toBe(undefined);
+        expect(Object.isFrozen(completionInput)).toBe(true);
+        expect(Object.isFrozen(completionInput.value)).toBe(true);
         const stored = JSON.parse(
           await readFile(policy.resultPath, 'utf8'),
         ) as unknown;
@@ -297,12 +293,22 @@ describe('when testing subagent child runtime', () => {
           outcome: 'ready',
           summary: 'Inspection complete',
         });
-        await expect(
-          activeCompletionTool.execute('complete-again', {
-            outcome: 'ready',
-            summary: 'Duplicate',
+        expect(
+          toolCall({
+            type: 'tool_call',
+            toolCallId: 'complete-again',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: {
+              value: {
+                outcome: 'ready',
+                summary: 'Duplicate',
+              },
+            },
           }),
-        ).rejects.toThrow(/already produced a result/);
+        ).toEqual({
+          block: true,
+          reason: 'Delegated workflow step already produced a result',
+        });
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
@@ -359,7 +365,13 @@ describe('when testing subagent child runtime', () => {
           input: {},
         }) as { block: boolean; reason: string };
         turnStart({});
-        const completionInput = { outcome: 'ready' };
+        const completionInput = {
+          value: {
+            outcome: 'ready',
+            summary: 'Ready for review',
+            artifact: '# Complete plan',
+          },
+        };
         const isolated = toolCall({
           toolCallId: 'complete-isolated',
           toolName: CHILD_COMPLETION_TOOL,
@@ -372,11 +384,12 @@ describe('when testing subagent child runtime', () => {
           text: `${encodeChildPolicy(policy)}\n\nInspect twice.`,
           images: ['diagram'],
         }) as { text: string };
-        const completion = rig.completionTool();
-        expectTruthy(completion);
 
         // then
         expect(started.systemPrompt).toContain('# Pi Workflows delegated step');
+        expect(started.systemPrompt).toContain(
+          'call `structured_output` exactly once',
+        );
         expect(started.systemPrompt).toContain(
           'Outcome "ready" requires the complete gate artifact.',
         );
@@ -396,12 +409,13 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'workflow children are non-interactive; use workflow_complete_step with a pause outcome and describe the unresolved contract in summary',
+            'workflow children are non-interactive; use structured_output with a pause outcome and describe the unresolved contract in summary',
         });
         expect(mixed.block).toBe(true);
         expect(mixed.reason).toMatch(/must be the only tool call/);
         expect(isolated).toBe(undefined);
         expect(Object.isFrozen(completionInput)).toBe(true);
+        expect(Object.isFrozen(completionInput.value)).toBe(true);
         expect(duplicate.text).toMatch(/more than one workflow policy/);
         expect(
           toolCall({
@@ -413,12 +427,138 @@ describe('when testing subagent child runtime', () => {
           block: true,
           reason: 'child received more than one workflow policy',
         });
-        await expect(
-          completion.execute('completion-after-error', {
-            outcome: 'ready',
-            summary: 'Done',
-          }),
-        ).rejects.toThrow(/more than one workflow policy/);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('confines bootstrap file mutations to the reviewed repository root', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const repositoryCwd = join(directory, 'reviewed-repository');
+      const outsideDirectory = join(directory, 'outside-repository');
+      const policy = childPolicy(directory, {
+        repositoryCwd,
+        bootstrapCwd: process.cwd(),
+        permissions: {
+          tools: ['edit', 'write'],
+          mcp: [],
+          extensions: [],
+          skills: [],
+          bash: { mode: 'deny', allow: [] },
+        },
+      });
+      const rig = runtime(policy.agent, [
+        'edit',
+        'write',
+        CHILD_COMPLETION_TOOL,
+      ]);
+
+      // when
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const beforeAgentStart = rig.handlers.get('before_agent_start')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        expectTruthy(input);
+        expectTruthy(beforeAgentStart);
+        expectTruthy(toolCall);
+        input({ text: `${encodeChildPolicy(policy)}\n\nBootstrap worktree.` });
+        const started = beforeAgentStart({
+          systemPrompt: 'Base child prompt',
+        }) as { systemPrompt: string };
+        const missingPath = toolCall({
+          toolCallId: 'missing-path',
+          toolName: 'write',
+          input: {},
+        });
+        const relativePath = toolCall({
+          toolCallId: 'relative-path',
+          toolName: 'edit',
+          input: { path: 'src/outside.ts' },
+        });
+        const missingRoot = toolCall({
+          toolCallId: 'missing-root',
+          toolName: 'write',
+          input: { path: join(repositoryCwd, 'src', 'before-setup.ts') },
+        });
+        await mkdir(repositoryCwd);
+        await mkdir(outsideDirectory);
+        await symlink(
+          outsideDirectory,
+          join(repositoryCwd, 'outside-link'),
+          'dir',
+        );
+        await symlink(
+          join(outsideDirectory, 'missing-target'),
+          join(repositoryCwd, 'broken-link'),
+          'dir',
+        );
+        const parentPath = toolCall({
+          toolCallId: 'parent-path',
+          toolName: 'write',
+          input: { path: directory },
+        });
+        const symlinkPath = toolCall({
+          toolCallId: 'symlink-path',
+          toolName: 'write',
+          input: {
+            path: join(repositoryCwd, 'outside-link', 'escaped.ts'),
+          },
+        });
+        const brokenSymlinkPath = toolCall({
+          toolCallId: 'broken-symlink-path',
+          toolName: 'write',
+          input: {
+            path: join(repositoryCwd, 'broken-link', 'escaped.ts'),
+          },
+        });
+        const approvedInput = {
+          path: join(repositoryCwd, 'src', 'inside.ts'),
+          content: 'approved',
+        };
+        const approvedPath = toolCall({
+          toolCallId: 'approved-path',
+          toolName: 'write',
+          input: approvedInput,
+        });
+
+        // then
+        expect(started.systemPrompt).toContain(
+          `Reviewed repository root: ${repositoryCwd}`,
+        );
+        expect(started.systemPrompt).toContain(
+          `Bootstrap directory: ${process.cwd()}`,
+        );
+        expect(started.systemPrompt).toMatch(
+          /use absolute paths under the reviewed repository root/i,
+        );
+        expect(missingPath).toEqual({
+          block: true,
+          reason: 'write must name a path inside the reviewed repository root',
+        });
+        expect(relativePath).toEqual({
+          block: true,
+          reason: `edit path is outside the reviewed repository root "${repositoryCwd}"`,
+        });
+        expect(missingRoot).toEqual({
+          block: true,
+          reason: `reviewed repository root is not an existing directory: ${repositoryCwd}`,
+        });
+        expect(parentPath).toEqual({
+          block: true,
+          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
+        });
+        expect(symlinkPath).toEqual({
+          block: true,
+          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
+        });
+        expect(brokenSymlinkPath).toEqual({
+          block: true,
+          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
+        });
+        expect(approvedPath).toBe(undefined);
+        expect(Object.isFrozen(approvedInput)).toBe(true);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
@@ -498,17 +638,43 @@ describe('when testing subagent child runtime', () => {
           capabilityErrors.push(result.text);
         }
 
+        const unavailableDirectory = await mkdtemp(
+          join(tmpdir(), 'pi-workflows-step-'),
+        );
+        directories.push(unavailableDirectory);
+        const unavailablePolicy = childPolicy(unavailableDirectory);
+        await writeFile(
+          unavailablePolicy.capabilityPath,
+          unavailablePolicy.capabilityToken,
+        );
+        const unavailable = runtime(unavailablePolicy.agent, ['read', 'bash']);
+        const unavailableInput = unavailable.handlers.get('input')?.[0];
+        expectTruthy(unavailableInput);
+        const unavailableResult = unavailableInput({
+          text: `${encodeChildPolicy(unavailablePolicy)}\n\nInspect.`,
+        }) as { text: string };
+
         const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
         directories.push(directory);
         const policy = childPolicy(directory);
         await writeFile(policy.capabilityPath, policy.capabilityToken);
         const rig = runtime(policy.agent);
         const input = rig.handlers.get('input')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
         expectTruthy(input);
+        expectTruthy(toolCall);
         input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
         await rm(directory, { recursive: true, force: true });
-        const completion = rig.completionTool();
-        expectTruthy(completion);
+        const missingResultDirectory = toolCall({
+          toolCallId: 'missing-result-directory',
+          toolName: CHILD_COMPLETION_TOOL,
+          input: {
+            value: {
+              outcome: 'ready',
+              summary: 'Done',
+            },
+          },
+        }) as { block: boolean; reason: string };
 
         // then
         expect(malformedResult.images).toEqual(['evidence']);
@@ -523,12 +689,12 @@ describe('when testing subagent child runtime', () => {
         );
         expect(capabilityErrors.join('\n')).toMatch(/capability is missing/);
         expect(capabilityErrors.join('\n')).toMatch(/capability is invalid/);
-        await expect(
-          completion.execute('missing-result-directory', {
-            outcome: 'ready',
-            summary: 'Done',
-          }),
-        ).rejects.toThrow();
+        expect(unavailableResult.text).toMatch(
+          /structured_output completion is unavailable/,
+        );
+        expect(unavailable.activeTools.at(-1)).toEqual([]);
+        expect(missingResultDirectory.block).toBe(true);
+        expect(missingResultDirectory.reason).toMatch(/ENOENT/);
       } finally {
         await Promise.all(
           directories.map((directory) =>

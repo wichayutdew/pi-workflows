@@ -500,7 +500,7 @@ function parseStepSubagent(
     return { ...DEFAULT_STEP_SUBAGENT, agent };
   }
   if (!isObject(value)) {
-    errors.push(`${path}: expected a workflow step specialty or object`);
+    errors.push(`${path}: expected an agent profile name or object`);
     return undefined;
   }
   rejectUnknownKeys(

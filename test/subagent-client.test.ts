@@ -35,12 +35,23 @@ describe('when testing subagent client', () => {
     return {
       version: 1,
       requestId,
-      agent: 'pi-workflows.step',
+      agent: 'scout',
       task: 'Run one workflow step',
       context: 'fresh',
       cwd: '/tmp/project',
       timeoutMs: 5_000,
       skill: false,
+      output: false,
+      outputSchema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string' },
+          summary: { type: 'string' },
+        },
+        required: ['outcome', 'summary'],
+        additionalProperties: false,
+      },
+      agentContract: { version: 1 },
       artifacts: false,
     };
   }
@@ -64,7 +75,7 @@ describe('when testing subagent client', () => {
           version: 1,
           requestId,
           status: 'completed',
-          agent: 'pi-workflows.step',
+          agent: 'scout',
         });
       });
 
@@ -74,6 +85,28 @@ describe('when testing subagent client', () => {
       // then
       expect(response.status).toBe('completed');
       expect(response.requestId).toBe('request-1');
+      expect(client.activeRequestId).toBe(undefined);
+    });
+
+    test('settles the new structured-output failure terminal status', async () => {
+      // given
+      const events = new FakeEventBus();
+      const client = new SubagentDelegationClient(events);
+      const pending = client.delegate(request('structured-failure'));
+
+      // when
+      events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+        version: 1,
+        requestId: 'structured-failure',
+        status: 'structured_output_failed',
+        error: 'Structured output validation failed',
+      });
+
+      // then
+      expect(await pending).toMatchObject({
+        requestId: 'structured-failure',
+        status: 'structured_output_failed',
+      });
       expect(client.activeRequestId).toBe(undefined);
     });
 

@@ -21,6 +21,7 @@ import type {
 const REFRESH_INTERVAL_MS = 1_000;
 const WIDE_LAYOUT_MIN_COLUMNS = 92;
 const MAX_PATH_ROWS = 16;
+const MAX_REASON_ROWS = 5;
 
 export type WorkflowStatusExecution =
   | {
@@ -76,6 +77,33 @@ export function formatWorkflowStatusText(
   }
   if (run.pauseReason) lines.push(`Reason: ${run.pauseReason}`);
   return lines.join('\n');
+}
+
+/**
+ * Format the persistent, compact workflow widget shown beside the editor.
+ *
+ * Each workflow step is rendered exactly once in definition order. The current
+ * step takes precedence over an earlier completed visit so loops still show
+ * what the workflow is doing now.
+ */
+export function formatWorkflowProgressWidget(
+  snapshot: WorkflowStatusSnapshot,
+): string[] {
+  const { run, workflow } = snapshot;
+  const stepIds = workflow
+    ? Object.keys(workflow.definition.steps)
+    : knownStepIds(run);
+  const completedSteps = new Set(run.history.map((entry) => entry.stepId));
+
+  return stepIds.map((stepId) => {
+    const glyph =
+      stepId === run.currentStepId
+        ? workflowStatusIcon(run)
+        : completedSteps.has(stepId)
+          ? '✓'
+          : '•';
+    return `${glyph} ${formatStepName(stepTitle(workflow, stepId), stepId)}`;
+  });
 }
 
 export async function showWorkflowStatus(
@@ -336,16 +364,36 @@ function renderSummaryLines(
   }
   if (run.pauseReason) {
     lines.push(
-      ...keyValueLines(
-        theme,
-        'reason',
-        run.pauseReason,
+      ...clampRows(
+        keyValueLines(
+          theme,
+          'reason',
+          run.pauseReason,
+          width,
+          run.status === 'aborted' ? 'error' : 'warning',
+        ),
+        MAX_REASON_ROWS,
         width,
-        run.status === 'aborted' ? 'error' : 'warning',
+        theme,
       ),
     );
   }
   return lines;
+}
+
+function clampRows(
+  lines: string[],
+  maximum: number,
+  width: number,
+  theme: Theme,
+): string[] {
+  if (lines.length <= maximum) return lines;
+  const visible = lines.slice(0, maximum);
+  const last = visible.at(-1) ?? '';
+  visible[maximum - 1] =
+    truncateToWidth(last, Math.max(1, width - 1), '', true) +
+    theme.fg('dim', '…');
+  return visible;
 }
 
 function renderPathLines(
@@ -559,6 +607,15 @@ function runDisplayStatus(run: WorkflowRun): StepDisplayStatus {
   return run.status === 'paused' && run.failedStepId === run.currentStepId
     ? 'failed'
     : run.status;
+}
+
+function knownStepIds(run: WorkflowRun): string[] {
+  return [
+    ...new Set([
+      ...run.history.map((entry) => entry.stepId),
+      run.currentStepId,
+    ]),
+  ];
 }
 
 export function workflowStatusIcon(run: WorkflowRun): string {

@@ -350,6 +350,31 @@ function retainedReviewedArtifact(
   return sourceRetained ? reviewedArtifact : '';
 }
 
+function refreshApprovedGateHistory(
+  run: WorkflowRun,
+  workflow: LoadedWorkflow,
+): WorkflowRun {
+  const reviewedArtifact = run.reviewedArtifact ?? '';
+  if (!reviewedArtifact) return run;
+  let changed = false;
+  const history = run.history.map((entry) => {
+    const gate = workflow.definition.steps[entry.stepId]?.gate;
+    const currentDigest = workflow.stepDigests[entry.stepId];
+    if (
+      gate &&
+      currentDigest &&
+      entry.outcome === gate.approvedOutcome &&
+      entry.summary === reviewedArtifact &&
+      entry.stepDigest !== currentDigest
+    ) {
+      changed = true;
+      return { ...entry, stepDigest: currentDigest };
+    }
+    return entry;
+  });
+  return changed ? { ...run, history } : run;
+}
+
 export function reconcileRun(
   run: WorkflowRun,
   workflow: LoadedWorkflow,
@@ -370,12 +395,13 @@ export function reconcileRun(
       error: `current step "${run.currentStepId}" was removed; abort or restore the configuration`,
     };
   }
+  const reconciledRun = refreshApprovedGateHistory(run, workflow);
 
-  const changedHistoryIndex = run.history.findIndex(
+  const changedHistoryIndex = reconciledRun.history.findIndex(
     (entry) => workflow.stepDigests[entry.stepId] !== entry.stepDigest,
   );
   if (changedHistoryIndex >= 0) {
-    const changedEntry = run.history[changedHistoryIndex];
+    const changedEntry = reconciledRun.history[changedHistoryIndex];
     if (!changedEntry || !workflow.definition.steps[changedEntry.stepId]) {
       return {
         changed: true,
@@ -383,19 +409,19 @@ export function reconcileRun(
           'a completed step was removed; abort or restore the configuration',
       };
     }
-    const retainedHistory = run.history.slice(0, changedHistoryIndex);
+    const retainedHistory = reconciledRun.history.slice(0, changedHistoryIndex);
     const restartedStep = changedEntry.stepId;
     const stepHandoff = retainedHistory.at(-1)?.summary ?? '';
     const reviewedArtifact = retainedReviewedArtifact(
       workflow,
-      run,
+      reconciledRun,
       retainedHistory,
     );
     return {
       changed: true,
       restartedStep,
       run: withUpdate(
-        run,
+        reconciledRun,
         {
           workflowDigest: workflow.digest,
           status: 'paused',
@@ -418,12 +444,12 @@ export function reconcileRun(
   }
 
   const currentDigest = workflow.stepDigests[run.currentStepId] ?? '';
-  const currentChanged = currentDigest !== run.currentStepDigest;
+  const currentChanged = currentDigest !== reconciledRun.currentStepDigest;
   return {
     changed: true,
     ...(currentChanged ? { restartedStep: run.currentStepId } : {}),
     run: withUpdate(
-      run,
+      reconciledRun,
       {
         workflowDigest: workflow.digest,
         currentStepDigest: currentDigest,

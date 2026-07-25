@@ -7,25 +7,29 @@ import {
   type Context,
 } from '@earendil-works/pi-ai';
 import {
-  E2E_EXECUTE_MARKER,
   E2E_FINAL_SUMMARY,
-  E2E_HANDOFF,
+  E2E_IMPLEMENT_HANDOFF,
+  E2E_IMPLEMENT_MARKER,
   E2E_INPUT_MARKER,
   E2E_MODEL_ID,
+  E2E_PLAN_HANDOFF,
   E2E_PLAN_MARKER,
   E2E_PROVIDER_ID,
+  E2E_VERIFY_MARKER,
 } from './e2e-values.ts';
 
 interface Observation {
-  step: 'plan' | 'execute' | 'unknown';
+  step: 'plan' | 'implement' | 'verify' | 'unknown';
+  runtimeAgent: string;
   promptLength: number;
   userMessageCount: number;
   hasPlanMarker: boolean;
-  hasExecuteMarker: boolean;
-  hasHandoff: boolean;
+  hasImplementMarker: boolean;
+  hasVerifyMarker: boolean;
+  hasPlanHandoff: boolean;
+  hasImplementHandoff: boolean;
   hasWorkflowInput: boolean;
-  hasScoutSpecialty: boolean;
-  hasReviewerSpecialty: boolean;
+  hasExpectedProfile: boolean;
   violations: string[];
 }
 
@@ -52,19 +56,39 @@ function userMessageText(context: Context): {
 
 function observe(context: Context): Observation {
   const user = userMessageText(context);
-  const isPlan = user.text.includes('Step: plan (');
-  const isExecute = user.text.includes('Step: execute (');
-  const step = isPlan === isExecute ? 'unknown' : isPlan ? 'plan' : 'execute';
+  const matchedSteps = (
+    [
+      ['plan', 'Step: plan ('],
+      ['implement', 'Step: implement ('],
+      ['verify', 'Step: verify ('],
+    ] as const
+  )
+    .filter(([, marker]) => user.text.includes(marker))
+    .map(([step]) => step);
+  const step =
+    matchedSteps.length === 1 ? (matchedSteps[0] ?? 'unknown') : 'unknown';
+  const expectedAgent =
+    step === 'plan'
+      ? 'scout'
+      : step === 'implement'
+        ? 'worker'
+        : step === 'verify'
+          ? 'reviewer'
+          : '';
   const observation: Observation = {
     step,
+    runtimeAgent: process.env.PI_SUBAGENT_CHILD_AGENT?.trim() ?? '',
     promptLength: user.text.length,
     userMessageCount: user.count,
     hasPlanMarker: user.text.includes(E2E_PLAN_MARKER),
-    hasExecuteMarker: user.text.includes(E2E_EXECUTE_MARKER),
-    hasHandoff: user.text.includes(E2E_HANDOFF),
+    hasImplementMarker: user.text.includes(E2E_IMPLEMENT_MARKER),
+    hasVerifyMarker: user.text.includes(E2E_VERIFY_MARKER),
+    hasPlanHandoff: user.text.includes(E2E_PLAN_HANDOFF),
+    hasImplementHandoff: user.text.includes(E2E_IMPLEMENT_HANDOFF),
     hasWorkflowInput: user.text.includes(E2E_INPUT_MARKER),
-    hasScoutSpecialty: user.text.includes('Step specialty: scout'),
-    hasReviewerSpecialty: user.text.includes('Step specialty: reviewer'),
+    hasExpectedProfile:
+      expectedAgent.length > 0 &&
+      user.text.includes(`Agent profile: ${expectedAgent}`),
     violations: [],
   };
 
@@ -73,32 +97,61 @@ function observe(context: Context): Observation {
       `expected one fresh user message, received ${user.count}`,
     );
   }
+  if (step !== 'unknown') {
+    if (observation.runtimeAgent !== expectedAgent) {
+      observation.violations.push(
+        `expected ${expectedAgent} runtime, received ${observation.runtimeAgent || '(empty)'}`,
+      );
+    }
+    if (!observation.hasExpectedProfile) {
+      observation.violations.push(`${expectedAgent} profile is missing`);
+    }
+  }
   if (step === 'plan') {
     if (user.text.length <= 8_000)
       observation.violations.push('plan task did not cross 8K transport limit');
     if (!observation.hasPlanMarker)
       observation.violations.push('plan marker is missing');
-    if (!observation.hasScoutSpecialty)
-      observation.violations.push('scout specialty is missing');
     if (!observation.hasWorkflowInput)
       observation.violations.push('multiline workflow input is missing');
-    if (observation.hasExecuteMarker)
-      observation.violations.push('execute prompt leaked into plan context');
-    if (observation.hasHandoff)
+    if (observation.hasImplementMarker || observation.hasVerifyMarker)
+      observation.violations.push('future prompt leaked into plan context');
+    if (observation.hasPlanHandoff || observation.hasImplementHandoff)
       observation.violations.push('future handoff leaked into plan context');
-  } else if (step === 'execute') {
-    if (!observation.hasExecuteMarker)
-      observation.violations.push('execute marker is missing');
-    if (!observation.hasReviewerSpecialty)
-      observation.violations.push('reviewer specialty is missing');
-    if (!observation.hasHandoff)
+  } else if (step === 'implement') {
+    if (!observation.hasImplementMarker)
+      observation.violations.push('implement marker is missing');
+    if (!observation.hasPlanHandoff)
       observation.violations.push('compact plan handoff is missing');
-    if (observation.hasPlanMarker)
+    if (
+      observation.hasPlanMarker ||
+      observation.hasVerifyMarker ||
+      observation.hasImplementHandoff
+    ) {
       observation.violations.push(
-        'raw plan context leaked into execute context',
+        'unrelated context leaked into implement context',
       );
+    }
     if (observation.hasWorkflowInput)
-      observation.violations.push('workflow input leaked into execute context');
+      observation.violations.push(
+        'workflow input leaked into implement context',
+      );
+  } else if (step === 'verify') {
+    if (!observation.hasVerifyMarker)
+      observation.violations.push('verify marker is missing');
+    if (!observation.hasImplementHandoff)
+      observation.violations.push('compact implementation handoff is missing');
+    if (
+      observation.hasPlanMarker ||
+      observation.hasImplementMarker ||
+      observation.hasPlanHandoff
+    ) {
+      observation.violations.push(
+        'prior raw context leaked into verify context',
+      );
+    }
+    if (observation.hasWorkflowInput)
+      observation.violations.push('workflow input leaked into verify context');
   } else {
     observation.violations.push('could not identify delegated workflow step');
   }
@@ -131,12 +184,18 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
 
       const result =
         observation.step === 'plan'
-          ? { outcome: 'planned', summary: E2E_HANDOFF }
-          : { outcome: 'done', summary: E2E_FINAL_SUMMARY };
+          ? { outcome: 'planned', summary: E2E_PLAN_HANDOFF }
+          : observation.step === 'implement'
+            ? { outcome: 'implemented', summary: E2E_IMPLEMENT_HANDOFF }
+            : { outcome: 'done', summary: E2E_FINAL_SUMMARY };
       return fauxAssistantMessage(
-        fauxToolCall('workflow_complete_step', result, {
-          id: `e2e-complete-${observation.step}`,
-        }),
+        fauxToolCall(
+          'structured_output',
+          { value: result },
+          {
+            id: `e2e-complete-${observation.step}`,
+          },
+        ),
         { stopReason: 'toolUse' },
       );
     },

@@ -18,8 +18,10 @@ invalid, use a configured pause outcome when one exists. Otherwise, end with a
 concise declarative error without calling the completion tool so the parent
 harness pauses the step.
 
-Each step is an isolated, non-interactive child with its own configured agent
-specialty and step prompt. Never call `contact_supervisor`,
+Each step is an isolated, non-interactive child using its configured Pi
+Subagents profile and workflow prompt. Complete delegated work through
+pi-subagents' `structured_output`; `workflow_complete_step` belongs to
+main-agent workflow steps. Never call `contact_supervisor`,
 `subagent_supervisor`, or `intercom`. Gated planning puts unresolved decisions
 in its review artifact with evidence, options, and an adopted default. Other
 steps treat their instructions and incoming handoff as final; if that contract

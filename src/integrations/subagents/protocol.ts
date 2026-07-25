@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import type {
   SubagentDelegationRequest as UpstreamDelegationRequest,
   SubagentDelegationResponse as UpstreamDelegationResponse,
@@ -16,7 +16,7 @@ import {
 } from '../../runtime/step-result.ts';
 
 // These released v1 transport values are duplicated as literals because
-// pi-subagents 0.35.1 exports TypeScript source. Node's native type stripping
+// pi-subagents 0.36.0 exports TypeScript source. Node's native type stripping
 // cannot execute TypeScript below node_modules; the public types above remain
 // the compile-time compatibility check.
 export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
@@ -64,6 +64,10 @@ export interface ChildStepPolicy {
   permissions: StepPermissions;
   /** Exact Bash command strings extracted from a reviewed gate artifact. */
   approvedBashCommands?: string[];
+  /** Reviewed repository root that file mutations must remain inside. */
+  repositoryCwd?: string;
+  /** Existing reviewed source directory used only to bootstrap repositoryCwd. */
+  bootstrapCwd?: string;
   outcomes: string[];
   /** Outcomes that pause instead of advancing to another workflow step. */
   pauseOutcomes: string[];
@@ -174,6 +178,8 @@ function parseChildPolicy(value: unknown): ChildStepPolicy {
     'resultPath',
     'permissions',
     'approvedBashCommands',
+    'repositoryCwd',
+    'bootstrapCwd',
     'outcomes',
     'pauseOutcomes',
     'summaryMaxChars',
@@ -236,6 +242,24 @@ function parseChildPolicy(value: unknown): ChildStepPolicy {
         value.approvedBashCommands.length)
   ) {
     throw new Error('child policy approved Bash commands are invalid');
+  }
+  if (
+    value.repositoryCwd !== undefined &&
+    (typeof value.repositoryCwd !== 'string' ||
+      !isAbsolute(value.repositoryCwd) ||
+      value.repositoryCwd.includes('\0'))
+  ) {
+    throw new Error('child policy repository cwd is invalid');
+  }
+  if (
+    value.bootstrapCwd !== undefined &&
+    (typeof value.bootstrapCwd !== 'string' ||
+      !isAbsolute(value.bootstrapCwd) ||
+      value.bootstrapCwd.includes('\0') ||
+      typeof value.repositoryCwd !== 'string' ||
+      resolve(value.bootstrapCwd) === resolve(value.repositoryCwd))
+  ) {
+    throw new Error('child policy bootstrap cwd is invalid');
   }
   if (
     !isStringArray(value.outcomes) ||

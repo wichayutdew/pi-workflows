@@ -9,7 +9,7 @@ permissionCeiling:
   bash:
     mode: read-only
   subagent:
-    agents: [pi-workflows.step, scout, worker, reviewer]
+    agents: [scout, planner, worker, reviewer]
     contexts: [fresh]
     models: []
     maxTimeoutMs: 900000

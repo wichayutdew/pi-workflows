@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { statSync } from 'node:fs';
+import { basename, isAbsolute } from 'node:path';
 import type { BashApprovalSource } from '../config/types.ts';
 import {
   parseRestrictedGitCommand,
@@ -65,14 +66,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function parseJsonDocuments(text: string): unknown[] {
+interface ParsedJsonDocuments {
+  documents: unknown[];
+  malformedCandidate: boolean;
+}
+
+function parseJsonDocumentsWithValidity(text: string): ParsedJsonDocuments {
   const documents: unknown[] = [];
+  let malformedCandidate = false;
   const trimmed = text.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       documents.push(JSON.parse(trimmed));
     } catch {
-      // Markdown artifacts are normally handled by fenced JSON below.
+      malformedCandidate = true;
     }
   }
 
@@ -83,10 +90,14 @@ function parseJsonDocuments(text: string): unknown[] {
     try {
       documents.push(JSON.parse(candidate));
     } catch {
-      // Other fenced examples are not approval contracts.
+      malformedCandidate = true;
     }
   }
-  return documents;
+  return { documents, malformedCandidate };
+}
+
+function parseJsonDocuments(text: string): unknown[] {
+  return parseJsonDocumentsWithValidity(text).documents;
 }
 
 function verificationCommands(
@@ -120,6 +131,142 @@ function remoteActionCommands(value: unknown): string[] {
     }
   }
   return commands;
+}
+
+export type ReviewedRepositoryCwdResolution =
+  | { kind: 'none' }
+  | { kind: 'invalid'; reason: string }
+  | {
+      kind: 'resolved';
+      cwd: string;
+      repositoryCwd: string;
+      bootstrapping: boolean;
+    };
+
+type DirectoryState = 'directory' | 'missing' | 'invalid';
+
+function directoryState(path: string): DirectoryState {
+  try {
+    return statSync(path).isDirectory() ? 'directory' : 'invalid';
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'invalid';
+  }
+}
+
+function invalidRepositoryCwd(reason: string): ReviewedRepositoryCwdResolution {
+  return { kind: 'invalid', reason };
+}
+
+/**
+ * Resolve a reviewed repository launch directory without silently falling
+ * back when a repository contract is malformed, ambiguous, or incomplete.
+ */
+export function resolveReviewedRepositoryCwd(
+  artifact: string,
+): ReviewedRepositoryCwdResolution {
+  const parsed = parseJsonDocumentsWithValidity(artifact);
+  const directories = new Set<string>();
+  const sourceDirectories = new Set<string>();
+  let hasRepositoryContract = false;
+  for (const document of parsed.documents) {
+    if (!isObject(document) || !('repositories' in document)) continue;
+    hasRepositoryContract = true;
+    if (
+      !Array.isArray(document.repositories) ||
+      document.repositories.length === 0
+    ) {
+      return invalidRepositoryCwd(
+        'Reviewed repository contract must contain a non-empty repositories array',
+      );
+    }
+    for (const repository of document.repositories) {
+      if (!isObject(repository)) {
+        return invalidRepositoryCwd(
+          'Reviewed repository contract contains a malformed repository entry',
+        );
+      }
+      if (
+        typeof repository.cwd !== 'string' ||
+        !isAbsolute(repository.cwd) ||
+        repository.cwd.includes('\0')
+      ) {
+        return invalidRepositoryCwd(
+          'Reviewed repository contract repository cwd must be an absolute path',
+        );
+      }
+      directories.add(repository.cwd);
+      if ('sourceCwd' in repository) {
+        if (
+          typeof repository.sourceCwd !== 'string' ||
+          !isAbsolute(repository.sourceCwd) ||
+          repository.sourceCwd.includes('\0')
+        ) {
+          return invalidRepositoryCwd(
+            'Reviewed repository contract sourceCwd must be an absolute path',
+          );
+        }
+        sourceDirectories.add(repository.sourceCwd);
+      }
+    }
+  }
+
+  if (!hasRepositoryContract) {
+    return parsed.malformedCandidate
+      ? invalidRepositoryCwd(
+          'Reviewed repository contract contains malformed JSON',
+        )
+      : { kind: 'none' };
+  }
+  if (parsed.malformedCandidate) {
+    return invalidRepositoryCwd(
+      'Reviewed repository contract contains malformed JSON',
+    );
+  }
+  if (directories.size !== 1) {
+    return invalidRepositoryCwd(
+      'Reviewed repository contract is ambiguous: expected exactly one repository cwd',
+    );
+  }
+  if (sourceDirectories.size > 1) {
+    return invalidRepositoryCwd(
+      'Reviewed repository contract is ambiguous: expected at most one sourceCwd',
+    );
+  }
+
+  const repositoryCwd = directories.values().next().value as string;
+  const repositoryState = directoryState(repositoryCwd);
+  if (repositoryState === 'directory') {
+    return {
+      kind: 'resolved',
+      cwd: repositoryCwd,
+      repositoryCwd,
+      bootstrapping: false,
+    };
+  }
+  if (repositoryState === 'invalid') {
+    return invalidRepositoryCwd(
+      `Reviewed repository cwd is not an accessible directory: ${repositoryCwd}`,
+    );
+  }
+  if (sourceDirectories.size !== 1) {
+    return invalidRepositoryCwd(
+      'Reviewed repository target is missing and requires exactly one absolute sourceCwd',
+    );
+  }
+
+  const sourceCwd = sourceDirectories.values().next().value as string;
+  if (directoryState(sourceCwd) !== 'directory') {
+    return invalidRepositoryCwd(
+      `Reviewed repository sourceCwd is not an existing directory: ${sourceCwd}`,
+    );
+  }
+  return {
+    kind: 'resolved',
+    cwd: sourceCwd,
+    repositoryCwd,
+    bootstrapping: true,
+  };
 }
 
 function containsPublishOperation(tokens: readonly string[]): boolean {

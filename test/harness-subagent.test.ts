@@ -89,6 +89,11 @@ describe('when testing harness subagent', () => {
     customRenders: string[][];
     repaintRequests: Array<boolean | undefined>;
     statusUpdates: Array<{ key: string; value: string | undefined }>;
+    widgetUpdates: Array<{
+      key: string;
+      lines: string[] | undefined;
+      options?: { placement?: string };
+    }>;
     selectResponses: Array<string | undefined>;
     inputResponses: Array<string | undefined>;
     activeTools: () => string[];
@@ -117,6 +122,7 @@ describe('when testing harness subagent', () => {
     const customRenders: string[][] = [];
     const repaintRequests: Array<boolean | undefined> = [];
     const statusUpdates: HarnessFixture['statusUpdates'] = [];
+    const widgetUpdates: HarnessFixture['widgetUpdates'] = [];
     const selectResponses: Array<string | undefined> = [];
     const inputResponses: Array<string | undefined> = [];
     let activeTools = ['read', 'bash'];
@@ -140,6 +146,17 @@ describe('when testing harness subagent', () => {
       },
       setStatus(key: string, value: string | undefined) {
         statusUpdates.push({ key, value });
+      },
+      setWidget(
+        key: string,
+        lines: string[] | undefined,
+        options?: { placement?: string },
+      ) {
+        widgetUpdates.push({
+          key,
+          lines: lines ? [...lines] : undefined,
+          ...(options ? { options } : {}),
+        });
       },
       select: async () => selectResponses.shift(),
       input: async () => inputResponses.shift(),
@@ -261,6 +278,7 @@ describe('when testing harness subagent', () => {
       customRenders,
       repaintRequests,
       statusUpdates,
+      widgetUpdates,
       selectResponses,
       inputResponses,
       activeTools: () => [...activeTools],
@@ -279,6 +297,7 @@ describe('when testing harness subagent', () => {
     directory: string,
     description = 'Delegate one step',
     subagent: unknown = {},
+    skills: string[] = [],
   ): Promise<void> {
     await writeFile(
       join(directory, 'delegate.workflow.yaml'),
@@ -294,9 +313,11 @@ describe('when testing harness subagent', () => {
             prompt: 'Inspect {{workflow.input}}.',
             permissions: {
               tools: ['read'],
+              ...(skills.length > 0 ? { skills } : {}),
             },
             requires: {
               tools: ['read'],
+              ...(skills.length > 0 ? { skills } : {}),
             },
             transitions: {
               done: '$done',
@@ -508,10 +529,12 @@ describe('when testing harness subagent', () => {
 
       // when
       try {
-        await writeWorkflow(directory);
+        await writeWorkflow(directory, 'Delegate one step', {}, ['planning']);
         const fixture = createHarnessFixture(directory);
         let delegatedRequest: SubagentDelegationRequest | undefined;
+        let delegationRequests = 0;
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          delegationRequests += 1;
           delegatedRequest = data as SubagentDelegationRequest;
           const extracted = extractChildPolicy(delegatedRequest.task);
           expectTruthy(extracted);
@@ -532,14 +555,28 @@ describe('when testing harness subagent', () => {
             version: 1,
             requestId: delegatedRequest.requestId,
             status: 'completed',
+            warnings: ['Provider emitted a benign notice'],
           });
         });
         await initialize(fixture);
         const input = fixture.lifecycle.get('input')?.[0];
         expectTruthy(input);
+        let eventIdle = false;
+        let eventAborts = 0;
+        const systemPrompt = [
+          '<available_skills><name>obsolete</name></available_skills>',
+          '<available_skills><skill><name> planning </name></skill></available_skills>',
+        ].join('\n');
         const eventContext = {
           ...fixture.context,
-          getSystemPrompt: () => '',
+          isIdle: () => eventIdle,
+          abort() {
+            eventAborts += 1;
+            setTimeout(() => {
+              eventIdle = true;
+            }, 0);
+          },
+          getSystemPrompt: () => systemPrompt,
         } as unknown as Record<string, unknown>;
         delete eventContext.getSystemPromptOptions;
         delete eventContext.waitForIdle;
@@ -561,6 +598,12 @@ describe('when testing harness subagent', () => {
         expect(delegatedRequest?.task).toContain(
           '"""inspect the repository"""',
         );
+        expect(
+          extractChildPolicy(delegatedRequest?.task ?? '')?.policy.permissions
+            .skills,
+        ).toEqual(['planning']);
+        expect(eventAborts).toBe(1);
+        expect(delegationRequests).toBe(1);
         expect(fixture.sentUserMessages).toEqual([]);
         expect(
           await input(
@@ -572,6 +615,34 @@ describe('when testing harness subagent', () => {
             eventContext as unknown as ExtensionContext,
           ),
         ).toBe(undefined);
+
+        const originalDateNow = Date.now;
+        let timeoutResult: unknown;
+        try {
+          Date.now = () => Number.POSITIVE_INFINITY;
+          timeoutResult = await input(
+            {
+              type: 'input',
+              source: 'interactive',
+              text: '/delegate\nthis start must time out',
+            },
+            {
+              ...fixture.context,
+              isIdle: () => false,
+              abort() {},
+              getSystemPrompt: () => systemPrompt,
+            } as ExtensionContext,
+          );
+        } finally {
+          Date.now = originalDateNow;
+        }
+        expect(timeoutResult).toEqual({ action: 'handled' });
+        expect(delegationRequests).toBe(1);
+        expect(fixture.notifications.at(-1)).toEqual({
+          message:
+            'Cannot start workflow: Timed out waiting for the interrupted Pi turn to stop',
+          type: 'error',
+        });
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -967,6 +1038,10 @@ describe('when testing harness subagent', () => {
           message: 'No workflow checkpoint in this session',
           type: 'info',
         });
+        expect(fixture.widgetUpdates.at(-1)).toEqual({
+          key: 'pi-workflows-progress',
+          lines: undefined,
+        });
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1237,7 +1312,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('the harness advances from a correlated result despite an upstream no-output classification', async () => {
+    test('the harness launches the configured agent and advances from its correlated structured result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -1280,32 +1355,46 @@ describe('when testing harness subagent', () => {
           fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
             version: 1,
             requestId: delegatedRequest.requestId,
-            status: 'failed',
-            error: 'Subagent produced no output',
+            status: 'completed',
           });
         });
 
         await initialize(fixture);
         const start = fixture.commands.get('delegate');
         expectTruthy(start);
+        fixture.setIdle(false);
         await start('the repository', fixture.context);
 
         await eventually(() => {
           expect(latestRun(fixture).status).toBe('completed');
         });
-        expect(delegatedRequest?.agent).toBe('pi-workflows.step');
-        expect(delegatedRequest?.task).toMatch(/Step specialty: scout/);
+        expect(fixture.abortCount()).toBe(1);
+        expect(fixture.waitForIdleCount()).toBe(1);
+        expect(delegatedRequest?.agent).toBe('scout');
+        expect(delegatedRequest?.task).toMatch(/Agent profile: scout/);
         expect(
           extractChildPolicy(delegatedRequest?.task ?? '')?.policy.agent,
-        ).toBe('pi-workflows.step');
+        ).toBe('scout');
         expect(delegatedRequest?.context).toBe('fresh');
         expect(delegatedRequest?.skill).toBe(false);
-        expect(delegatedRequest?.acceptance).toEqual({
-          level: 'none',
-          reason:
-            'Pi Workflows owns correlated step completion and human-review gates',
+        expect(delegatedRequest?.output).toBe(false);
+        expect(delegatedRequest?.outputSchema).toMatchObject({
+          type: 'object',
+          required: ['outcome', 'summary'],
         });
+        expect(delegatedRequest?.agentContract).toEqual({ version: 1 });
+        expect(delegatedRequest?.acceptance).toBe(undefined);
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
+        expect(
+          fixture.widgetUpdates.some(({ lines }) =>
+            lines?.includes('↻ inspect'),
+          ),
+        ).toBe(true);
+        expect(fixture.widgetUpdates.at(-1)).toEqual({
+          key: 'pi-workflows-progress',
+          lines: ['✓ inspect'],
+          options: { placement: 'belowEditor' },
+        });
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1343,13 +1432,18 @@ describe('when testing harness subagent', () => {
           expect(latestRun(fixture).status).toBe('paused');
         });
         expect(String(latestRun(fixture).pauseReason)).toMatch(
-          /without producing the required correlated workflow_complete_step result/,
+          /without producing the required correlated structured_output result/,
         );
         expect(String(latestRun(fixture).pauseReason)).not.toMatch(/ENOENT/);
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
         expect(
           fixture.statusUpdates.some(({ value }) => value?.startsWith('✕ ')),
         ).toBe(true);
+        expect(fixture.widgetUpdates.at(-1)).toEqual({
+          key: 'pi-workflows-progress',
+          lines: ['✕ inspect'],
+          options: { placement: 'belowEditor' },
+        });
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1607,6 +1701,158 @@ describe('when testing harness subagent', () => {
       }
     });
 
+    test('resume bootstraps a missing reviewed target from its reviewed source cwd', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const sourceDirectory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-reviewed-source-'),
+      );
+      const repositoryCwd = join(directory, 'not-created-target');
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      // when
+      try {
+        await writeWorkflow(directory);
+        const catalog = await loadCatalog({
+          cwd: directory,
+          projectTrusted: true,
+          userDirectory: directory,
+        });
+        const workflow = catalog.workflows.get('delegate');
+        expectTruthy(workflow);
+        const paused = pauseRun(
+          createRun(workflow, 'request', ['read', 'bash'], 'bootstrap-run', 1),
+          'restored',
+          2,
+        );
+        const fixture = createHarnessFixture(directory, [
+          {
+            type: 'custom',
+            customType: 'pi-workflows-state-v1',
+            data: {
+              ...paused,
+              reviewedArtifact: JSON.stringify({
+                repositories: [
+                  { cwd: repositoryCwd, sourceCwd: sourceDirectory },
+                ],
+              }),
+            },
+          },
+        ]);
+        let delegatedRequest: SubagentDelegationRequest | undefined;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          delegatedRequest = data as SubagentDelegationRequest;
+          const extracted = extractChildPolicy(delegatedRequest.task);
+          expectTruthy(extracted);
+          expect(extracted.policy.repositoryCwd).toBe(repositoryCwd);
+          expect(extracted.policy.bootstrapCwd).toBe(sourceDirectory);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'done',
+              summary: 'Bootstrapped the reviewed target',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: delegatedRequest.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: delegatedRequest.requestId,
+            status: 'completed',
+          });
+        });
+
+        await initialize(fixture);
+        const resume = fixture.commands.get('workflow-resume');
+        expectTruthy(resume);
+        await resume('', fixture.context);
+        await eventually(() => {
+          expect(delegatedRequest?.cwd).toBe(sourceDirectory);
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(sourceDirectory, { recursive: true, force: true });
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('resume pauses an invalid reviewed repository contract before delegation', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const secondDirectory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-reviewed-target-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      // when
+      try {
+        await writeWorkflow(directory);
+        const catalog = await loadCatalog({
+          cwd: directory,
+          projectTrusted: true,
+          userDirectory: directory,
+        });
+        const workflow = catalog.workflows.get('delegate');
+        expectTruthy(workflow);
+        const paused = pauseRun(
+          createRun(
+            workflow,
+            'request',
+            ['read', 'bash'],
+            'invalid-cwd-run',
+            1,
+          ),
+          'restored',
+          2,
+        );
+        const fixture = createHarnessFixture(directory, [
+          {
+            type: 'custom',
+            customType: 'pi-workflows-state-v1',
+            data: {
+              ...paused,
+              reviewedArtifact: JSON.stringify({
+                repositories: [{ cwd: directory }, { cwd: secondDirectory }],
+              }),
+            },
+          },
+        ]);
+        let delegationRequests = 0;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, () => {
+          delegationRequests += 1;
+        });
+
+        await initialize(fixture);
+        const resume = fixture.commands.get('workflow-resume');
+        expectTruthy(resume);
+        await resume('', fixture.context);
+
+        expect(delegationRequests).toBe(0);
+        expect(latestRun(fixture).status).toBe('paused');
+        expect(String(latestRun(fixture).pauseReason)).toContain(
+          'expected exactly one repository cwd',
+        );
+        expect(fixture.notifications.at(-1)?.message).toContain(
+          'expected exactly one repository cwd',
+        );
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(secondDirectory, { recursive: true, force: true });
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     test('legacy checkpoints do not derive approved Bash commands from lastSummary', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
@@ -1706,6 +1952,9 @@ describe('when testing harness subagent', () => {
       // when
       process.env.PI_WORKFLOWS_DIR = directory;
       // then
+      const approvedDirectory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-approved-cwd-'),
+      );
       try {
         await writeGatedPublishWorkflow(directory);
         const fixture = createHarnessFixture(directory);
@@ -1734,6 +1983,7 @@ describe('when testing harness subagent', () => {
                   'Unreviewed handoff',
                   '```json',
                   JSON.stringify({
+                    repositories: [{ cwd: approvedDirectory }],
                     actions: [
                       {
                         toolName: 'bash',
@@ -1747,6 +1997,7 @@ describe('when testing harness subagent', () => {
                   '# Reviewed actions',
                   '```json',
                   JSON.stringify({
+                    repositories: [{ cwd: approvedDirectory }],
                     actions: [
                       {
                         toolName: 'bash',
@@ -1846,15 +2097,19 @@ describe('when testing harness subagent', () => {
           policies[2]?.approvedBashCommands?.includes(unreviewedCommand),
         ).toBe(false);
         expect(requests[1]?.context).toBe('fresh');
+        expect(requests[0]?.cwd).toBe(directory);
+        expect(requests[1]?.cwd).toBe(approvedDirectory);
         expect(requests[1]?.task.match(/# Reviewed actions/g)).toHaveLength(1);
         expect(requests[1]?.task).not.toContain('Unreviewed handoff');
         expect(requests[2]?.context).toBe('fresh');
+        expect(requests[2]?.cwd).toBe(approvedDirectory);
         expect(requests[2]?.task.match(/# Narrowed actions/g)).toHaveLength(1);
         expect(requests[2]?.task).not.toContain('# Reviewed actions');
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(approvedDirectory, { recursive: true, force: true });
         await rm(directory, { recursive: true, force: true });
       }
     });

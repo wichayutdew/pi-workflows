@@ -715,6 +715,14 @@ describe('when testing config', () => {
       expect(errors.join('\n')).toMatch(/subagent\.toolBudget\.hard/);
       expect(errors.join('\n')).toMatch(/subagent\.toolBudget\.block/);
       expect(errors.join('\n')).toMatch(/subagent\.artifacts/);
+
+      const contextCeiling = structuredClone(
+        settings.value!.permissionCeiling!,
+      );
+      contextCeiling.subagent!.contexts = [];
+      expect(
+        checkWorkflowAgainstCeiling(workflow.value!, contextCeiling).join('\n'),
+      ).toMatch(/subagent\.context/);
     });
 
     test('project permission ceiling constrains reviewed Bash sources', () => {

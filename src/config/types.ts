@@ -57,7 +57,7 @@ export interface SubagentToolBudget {
 }
 
 export interface StepSubagent {
-  /** Step specialty label embedded in the isolated child task. */
+  /** Pi Subagents agent profile launched for this isolated step. */
   agent: string;
   /** Workflow steps always use a fresh context. */
   context: SubagentContext;

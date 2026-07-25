@@ -45,8 +45,8 @@ flowchart TD
   Delegated -- no --> Accept[accept project step]
   Delegated -- yes --> SubCeiling{subagent ceiling present?}
   SubCeiling -- no --> Reject[reject project step]
-  SubCeiling -- yes --> Specialty{specialty allowed?}
-  Specialty --> Context{fresh context allowed?}
+  SubCeiling -- yes --> Profile{agent profile allowed?}
+  Profile --> Context{fresh context allowed?}
   Context --> Model{model absent or allowed?}
   Model --> Timeout{timeout <= maxTimeoutMs?}
   Timeout --> Turns{turnBudget present and within ceiling?}
@@ -58,8 +58,9 @@ flowchart TD
 If any decision is false, the project workflow is diagnosed and skipped.
 Main-only project workflows do not need a `subagent` ceiling. Delegated project
 steps require that ceiling plus explicit turn and tool budgets. The ceiling's
-`agents` list contains permitted workflow specialty identities; delegated
-execution still uses the bundled `pi-workflows.step` runtime.
+`agents` list contains the actual Pi Subagents profiles a project workflow may
+launch. Each delegated request still uses a fresh context and the workflow
+policy can only narrow the selected profile's visible tools and extensions.
 
 ## Duplicate And Command Conflict Rules
 

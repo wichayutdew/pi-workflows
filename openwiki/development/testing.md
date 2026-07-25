@@ -6,9 +6,10 @@
 flowchart LR
   Install[bun install] --> Check[bun run check]
   Check --> Typecheck[tsc --noEmit]
-  Typecheck --> Tests[bun test]
-  Tests --> Build[bun run build]
-  Build --> PiSmoke[optional Pi smoke test]
+  Typecheck --> Tests[bun run test:coverage]
+  Tests --> Coverage[100% lines, functions, statements<br/>plus src manifest check]
+  Coverage --> E2E[bun run test:e2e<br/>real Pi RPC /work]
+  E2E --> Build[bun run build]
 ```
 
 ## Test Coverage Map
@@ -24,8 +25,15 @@ flowchart TD
   Tests --> Client[test/subagent-client.test.ts<br/>events, timeout, cancellation]
   Tests --> Child[test/subagent-child-runtime.test.ts<br/>runtime enforcement]
   Tests --> Harness[test/harness-subagent.test.ts<br/>main, delegation, pause/resume, gates]
+  Tests --> E2E[test/e2e/workflow-runtime.test.ts<br/>real Pi RPC /work flow and actual profiles]
   Tests --> Misc[checkpoint, completion batch, immutable input, queue, examples, extension, preflight, Plannotator]
 ```
+
+Reviewed command fixtures include an absolute `repositories[].cwd`. Harness
+tests verify existing-target launch, reviewed-source bootstrap for a missing
+target, and fail-closed malformed or ambiguous paths. Child-runtime tests
+confine edits and writes to the reviewed target while exact command tests reject
+any unreviewed Bash string.
 
 ## Where To Change Code
 

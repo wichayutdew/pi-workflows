@@ -71,6 +71,11 @@ describe('when testing subagent protocol', () => {
         );
         expect(fileWrapped?.policy).toEqual(policy);
         expect(fileWrapped?.task).toBe('Inspect the merge request.');
+        expect(
+          extractChildPolicy(
+            `<file name="${taskFilePath}">\nNot a delegated task.\n</file>\n`,
+          ),
+        ).toBe(undefined);
         expect(extractChildPolicy(`Explain this literal: ${envelope}`)).toBe(
           undefined,
         );
@@ -182,6 +187,22 @@ describe('when testing subagent protocol', () => {
             { ...policy, approvedBashCommands: ['same', 'same'] },
             /approved Bash commands/,
           ],
+          [
+            { ...policy, repositoryCwd: 'relative/repository' },
+            /repository cwd is invalid/,
+          ],
+          [
+            { ...policy, bootstrapCwd: join(tmpdir(), 'source') },
+            /bootstrap cwd is invalid/,
+          ],
+          [
+            {
+              ...policy,
+              repositoryCwd: join(tmpdir(), 'same'),
+              bootstrapCwd: join(tmpdir(), 'same'),
+            },
+            /bootstrap cwd is invalid/,
+          ],
           [{ ...policy, outcomes: [] }, /outcomes are invalid/],
           [
             { ...policy, pauseOutcomes: ['missing'] },
@@ -238,6 +259,12 @@ describe('when testing subagent protocol', () => {
         expect(extract(approvedSourcePolicy)?.policy).toEqual(
           approvedSourcePolicy,
         );
+        const rootedPolicy: ChildStepPolicy = {
+          ...policy,
+          repositoryCwd: join(tmpdir(), 'reviewed-repository'),
+          bootstrapCwd: join(tmpdir(), 'reviewed-source'),
+        };
+        expect(extract(rootedPolicy)?.policy).toEqual(rootedPolicy);
         await rm(otherDirectory, { recursive: true, force: true });
       });
     });

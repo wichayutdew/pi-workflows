@@ -51,7 +51,7 @@ describe('when testing prompt', () => {
         delegatedRun,
         'policy envelope',
       );
-      expect(delegatedTask).toMatch(/Step specialty: scout/);
+      expect(delegatedTask).toMatch(/Agent profile: scout/);
       expect(delegatedTask).toMatch(/Context: fresh workflow-step context/);
       expect(delegatedTask.match(/compact previous-step result/g)).toHaveLength(
         1,
@@ -59,6 +59,7 @@ describe('when testing prompt', () => {
       expect(delegatedTask).toMatch(/Never call `contact_supervisor`/);
       expect(delegatedTask).toMatch(/incoming handoff as the final/);
       expect(delegatedTask).toMatch(/use a pause outcome \(blocked\)/);
+      expect(delegatedTask).toMatch(/Call `structured_output` exactly once/);
 
       const noPauseRaw = baseWorkflow();
       const noPauseSteps = noPauseRaw.steps as Record<

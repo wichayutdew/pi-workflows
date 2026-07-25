@@ -33,7 +33,8 @@ flowchart LR
   Main[Main Pi agent]
   Child[pi-subagents child]
   Policy[Step policy]
-  Complete[workflow_complete_step result]
+  MainComplete[workflow_complete_step]
+  ChildComplete[structured_output]
   Gate[Optional prompt or Plannotator gate]
 
   Files --> Harness
@@ -42,10 +43,11 @@ flowchart LR
   Harness --> Policy
   Policy --> Main
   Policy --> Child
-  Main --> Complete
-  Child --> Complete
-  Complete --> Harness
-  Complete --> Gate
+  Main --> MainComplete
+  Child --> ChildComplete
+  MainComplete --> Harness
+  ChildComplete --> Harness
+  Harness --> Gate
   Gate --> Harness
   Harness --> State
 ```
@@ -72,7 +74,7 @@ flowchart TD
 
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
-  Agents --> StepAgent[step.md<br/>pi-workflows.step]
+  Agents --> StepAgent[step.md<br/>default profile and child guidance]
   Examples --> MR[mr-comments workflow]
   Tests --> TestSuite[Bun test suite]
 ```
@@ -103,8 +105,15 @@ Core commands:
 | `/workflow-abort [reason]`     | Abort active run.                   |
 | `/workflow-reload`             | Reload files when no run is active. |
 
-The live status board and footer use `↻` for running, `✓` for completed, `✕`
-for failed or aborted, and `◆` for paused or awaiting review.
+The persistent step widget, live status board, and footer use `↻` for running,
+`✓` for completed, `✕` for failed or aborted, and `◆` for paused or awaiting
+review. The widget stays visible below the editor during delegated work. The
+status board clamps long reasons to its available width while the checkpoint
+keeps the complete message.
+
+Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`
+value selects the actual Pi Subagents profile, and each profile starts with a
+fresh context containing only the explicit workflow input and compact handoff.
 
 Configured workflow aliases accept multiline input. For example,
 `/work\n"""request"""` is normalized to `/work """request"""` and dispatched as

@@ -43,12 +43,12 @@ flowchart TD
   Start[src/index.ts loaded by Pi]
   Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
   ChildEnv -- no --> Parent[Create WorkflowHarness]
-  ChildEnv -- yes --> NameOk{valid runtime name?<br/>workflow requests use pi-workflows.step}
+  ChildEnv -- yes --> NameOk{valid configured<br/>subagent profile name?}
   NameOk -- yes --> Child[Register child runtime]
   NameOk -- no --> Noop[Return without registering workflow runtime]
 
   Parent --> ParentWork[Commands, catalog, checkpoints, main execution or delegation]
-  Child --> ChildWork[Policy extraction, tool filtering, completion tool]
+  Child --> ChildWork[Policy extraction, profile-tool filtering, structured completion validation]
 ```
 
 ## Data Model
@@ -85,7 +85,7 @@ flowchart TD
   Harness -->|main step| MainRuntime
   Harness -->|optional delegation request| ChildRuntime
   MainRuntime -->|validated result| Harness
-  ChildRuntime -->|validated result file| Harness
+  ChildRuntime -->|validated correlated result| Harness
 ```
 
 ## Catalog Loading

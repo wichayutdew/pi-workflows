@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
 import {
+  formatWorkflowProgressWidget,
   formatWorkflowStatusText,
   WorkflowStatusView,
   type WorkflowStatusSnapshot,
@@ -151,6 +152,30 @@ describe('when testing workflow status', () => {
       expect(lines.every((line) => visibleWidth(line) <= 48)).toBeTruthy();
     });
 
+    test('the status board clamps an oversized failure reason', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const running = createRun(workflow, '', [], 'run-long-failure', 1_000);
+      const reason = `Subagent failed: ${'very long diagnostic context '.repeat(200)}TAIL`;
+      const run = pauseRun(running, reason, 4_000);
+
+      // when
+      const lines = renderSnapshot({ run, workflow, now: 90_000 }, 48);
+      const board = lines.join('\n');
+      const fallback = formatWorkflowStatusText({
+        run,
+        workflow,
+        now: 90_000,
+      });
+
+      // then
+      expect(lines.length).toBeLessThanOrEqual(30);
+      expect(lines.every((line) => visibleWidth(line) <= 48)).toBeTruthy();
+      expect(board).toContain('…');
+      expect(board).not.toContain('TAIL');
+      expect(fallback).toContain('TAIL');
+    });
+
     test('failed steps render a cross while remaining resumable', () => {
       // given
       const workflow = loadedWorkflow();
@@ -241,6 +266,137 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/Progress: starting/);
     });
 
+    test('the compact widget lists running, completed, and pending steps', () => {
+      // given
+      const raw = baseWorkflow();
+      (raw.steps as Record<string, unknown>).verify = {
+        title: 'Verify changes',
+        prompt: 'Verify',
+        transitions: { done: '$done' },
+      };
+      const workflow = loadedWorkflow(raw);
+      const initial = createRun(workflow, '', [], 'run-progress-widget', 1_000);
+      const run = {
+        ...initial,
+        currentStepId: 'implement',
+        currentStepDigest: workflow.stepDigests.implement ?? '',
+        visits: { inspect: 1, implement: 1 },
+        history: [
+          {
+            stepId: 'inspect',
+            stepDigest: workflow.stepDigests.inspect ?? '',
+            outcome: 'ready',
+            summary: 'Inspected',
+            completedAt: 2_000,
+          },
+        ],
+      };
+
+      // when
+      const lines = formatWorkflowProgressWidget({
+        run,
+        workflow,
+        now: 3_000,
+      });
+
+      // then
+      expect(lines).toEqual([
+        '✓ inspect',
+        '↻ implement',
+        '• Verify changes (verify)',
+      ]);
+    });
+
+    test('the compact widget distinguishes paused, failed, aborted, and completed current steps', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const running = createRun(workflow, '', [], 'run-progress-states', 1_000);
+      const paused = pauseRun(running, 'Waiting for review', 2_000);
+      const failed = failRun(running, 'Step failed', 2_000);
+      const awaitingReview = {
+        ...running,
+        status: 'awaiting-gate' as const,
+      };
+      const aborted = {
+        ...running,
+        status: 'aborted' as const,
+        pauseReason: 'Stopped',
+      };
+      const completed = {
+        ...running,
+        status: 'completed' as const,
+      };
+
+      // when / then
+      expect(
+        formatWorkflowProgressWidget({
+          run: paused,
+          workflow,
+          now: 3_000,
+        }),
+      ).toEqual(['◆ inspect', '• implement']);
+      expect(
+        formatWorkflowProgressWidget({
+          run: failed,
+          workflow,
+          now: 3_000,
+        }),
+      ).toEqual(['✕ inspect', '• implement']);
+      expect(
+        formatWorkflowProgressWidget({
+          run: awaitingReview,
+          workflow,
+          now: 3_000,
+        }),
+      ).toEqual(['◆ inspect', '• implement']);
+      expect(
+        formatWorkflowProgressWidget({
+          run: aborted,
+          workflow,
+          now: 3_000,
+        }),
+      ).toEqual(['✕ inspect', '• implement']);
+      expect(
+        formatWorkflowProgressWidget({
+          run: completed,
+          workflow,
+          now: 3_000,
+        }),
+      ).toEqual(['✓ inspect', '• implement']);
+    });
+
+    test('the compact widget falls back to known checkpoint steps when config is unavailable', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const initial = createRun(
+        workflow,
+        '',
+        [],
+        'run-progress-fallback',
+        1_000,
+      );
+      const run = {
+        ...initial,
+        currentStepId: 'implement',
+        currentStepDigest: workflow.stepDigests.implement ?? '',
+        history: [
+          {
+            stepId: 'inspect',
+            stepDigest: workflow.stepDigests.inspect ?? '',
+            outcome: 'ready',
+            summary: 'Inspected',
+            completedAt: 2_000,
+          },
+        ],
+      };
+
+      // when
+      const lines = formatWorkflowProgressWidget({ run, now: 3_000 });
+
+      // then
+      expect(lines).toEqual(['✓ inspect', '↻ implement']);
+    });
+
     test('q and Escape close the board once and force a repaint', () => {
       // given
       const workflow = loadedWorkflow();
@@ -278,6 +434,7 @@ describe('when testing workflow status', () => {
 
     test('renders and disposes an empty live status board', () => {
       // given
+      jest.useFakeTimers();
       const renders: Array<boolean | undefined> = [];
       const view = new WorkflowStatusView(
         () => undefined,
@@ -286,15 +443,21 @@ describe('when testing workflow status', () => {
         () => undefined,
       );
 
-      // when
-      view.start();
-      const output = view.render(40).join('\n');
-      view.dispose();
-      view.invalidate();
+      try {
+        // when
+        view.start();
+        jest.advanceTimersByTime(1_000);
+        const output = view.render(40).join('\n');
+        view.dispose();
+        view.invalidate();
 
-      // then
-      expect(output).toMatch(/No workflow checkpoint/);
-      expect(renders).toEqual([]);
+        // then
+        expect(output).toMatch(/No workflow checkpoint/);
+        expect(renders).toEqual([undefined]);
+      } finally {
+        view.dispose();
+        jest.useRealTimers();
+      }
     });
   });
 });

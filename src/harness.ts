@@ -16,7 +16,6 @@ import { loadCatalog } from './config/load.ts';
 import { hasRuntimeCommandConflict } from './config/command-conflicts.ts';
 import {
   DEFAULT_SETTINGS,
-  DEFAULT_STEP_SUBAGENT,
   type LoadedWorkflow,
   type WorkflowCatalog,
   type WorkflowStep,
@@ -71,15 +70,20 @@ import {
   buildMainStepTask,
   buildMainWorkflowNotice,
 } from './prompt.ts';
-import { narrowApprovedBashCommands } from './policy/approved-commands.ts';
+import {
+  narrowApprovedBashCommands,
+  resolveReviewedRepositoryCwd,
+} from './policy/approved-commands.ts';
 import {
   MainStepRuntime,
   type MainStepExecution,
 } from './runtime/main-step-runtime.ts';
+import { WORKFLOW_COMPLETION_PARAMETERS } from './runtime/completion-tool.ts';
 import { SerialTaskQueue } from './runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from './runtime/step-result.ts';
 import { formatWorkflowList } from './workflow-list.ts';
 import {
+  formatWorkflowProgressWidget,
   formatWorkflowStatusText,
   showWorkflowStatus,
   workflowStatusIcon,
@@ -89,6 +93,7 @@ import {
 
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const STATUS_KEY = 'pi-workflows';
+const PROGRESS_WIDGET_KEY = 'pi-workflows-progress';
 
 interface ActiveDelegation {
   requestId: string;
@@ -799,7 +804,18 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
 
-    const runtimeAgent = DEFAULT_STEP_SUBAGENT.agent;
+    const reviewedRepository = resolveReviewedRepositoryCwd(
+      run.reviewedArtifact ?? '',
+    );
+    if (reviewedRepository.kind === 'invalid') {
+      this.pauseForExecutionFailure('Subagent step', reviewedRepository.reason);
+      return;
+    }
+    const delegationCwd =
+      reviewedRepository.kind === 'resolved'
+        ? reviewedRepository.cwd
+        : (this.latestContext?.cwd ?? process.cwd());
+    const runtimeAgent = subagent.agent;
     const requestId = `${run.runId}:${run.currentStepId}:${randomUUID()}`;
     const resultDirectory = mkdtempSync(join(tmpdir(), 'pi-workflows-step-'));
     const capabilityPath = join(resultDirectory, 'capability');
@@ -817,17 +833,26 @@ export class WorkflowHarness implements WorkflowCommandController {
       run.stepHandoff ?? '',
       step.permissions.bash.approvedSources ?? [],
     );
+    const repositoryPolicy =
+      reviewedRepository.kind === 'resolved'
+        ? {
+            repositoryCwd: reviewedRepository.repositoryCwd,
+            ...(reviewedRepository.bootstrapping
+              ? { bootstrapCwd: reviewedRepository.cwd }
+              : {}),
+          }
+        : {};
     const policyDigest = digest({
       version: 1,
       requestId,
       agent: runtimeAgent,
-      specialty: subagent.agent,
       runId: run.runId,
       stepId: run.currentStepId,
       stepDigest: run.currentStepDigest,
       capabilityPath,
       resultPath,
       approvedBashCommands,
+      ...repositoryPolicy,
     });
     const policy: ChildStepPolicy = {
       version: 1,
@@ -843,6 +868,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       resultPath,
       permissions: structuredClone(step.permissions),
       ...(approvedBashCommands.length > 0 ? { approvedBashCommands } : {}),
+      ...repositoryPolicy,
       outcomes,
       pauseOutcomes: Object.entries(step.transitions)
         .filter(
@@ -870,17 +896,18 @@ export class WorkflowHarness implements WorkflowCommandController {
       // Workflow steps are isolation boundaries. Never fork the parent or a
       // sibling step's transcript; pass only the explicit workflow handoff.
       context: 'fresh',
-      cwd: this.latestContext?.cwd ?? process.cwd(),
+      cwd: delegationCwd,
       timeoutMs: subagent.timeoutMs,
       skill:
         step.permissions.skills.length > 0
           ? [...step.permissions.skills]
           : false,
-      acceptance: {
-        level: 'none',
-        reason:
-          'Pi Workflows owns correlated step completion and human-review gates',
-      },
+      output: false,
+      outputSchema: WORKFLOW_COMPLETION_PARAMETERS as unknown as Record<
+        string,
+        unknown
+      >,
+      agentContract: { version: 1 },
       artifacts: subagent.artifacts,
       ...(subagent.model ? { model: subagent.model } : {}),
       ...(subagent.turnBudget
@@ -1116,6 +1143,13 @@ export class WorkflowHarness implements WorkflowCommandController {
       if (!workflow || !step) {
         throw new Error('Active workflow configuration is unavailable');
       }
+      if (response.status !== 'completed') {
+        throw new Error(
+          `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}${
+            response.error ? `: ${response.error}` : ''
+          }`,
+        );
+      }
       const requiredSkillWarning =
         step.requires.skills.length > 0
           ? response.warnings?.find((warning) => /skill/i.test(warning))
@@ -1133,25 +1167,13 @@ export class WorkflowHarness implements WorkflowCommandController {
         if (
           (error as { code?: unknown } | null | undefined)?.code === 'ENOENT'
         ) {
-          if (response.status !== 'completed') {
-            throw new Error(
-              `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}${
-                response.error ? `: ${response.error}` : ''
-              }`,
-              { cause: error },
-            );
-          }
           throw new Error(
-            `Subagent "${active.agent}" completed without producing the required correlated workflow_complete_step result`,
+            `Subagent "${active.agent}" completed without producing the required correlated structured_output result`,
             { cause: error },
           );
         }
         throw error;
       }
-      // The capability-backed result is the workflow's completion contract.
-      // Current pi-subagents releases can classify a tool-only terminating
-      // child as "failed: no output" even though this result was written and
-      // the child then exited normally.
       const rawResult = JSON.parse(serializedResult) as unknown;
       const result = parseDelegatedStepResult(rawResult, active.policy);
       if (step.gate?.submitOutcome === result.outcome) {
@@ -1785,7 +1807,16 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (!this.latestContext) return;
     if (!this.run) {
       this.latestContext.ui.setStatus(STATUS_KEY, undefined);
+      this.latestContext.ui.setWidget(PROGRESS_WIDGET_KEY, undefined);
       return;
+    }
+    const snapshot = this.workflowStatusSnapshot();
+    if (snapshot) {
+      this.latestContext.ui.setWidget(
+        PROGRESS_WIDGET_KEY,
+        formatWorkflowProgressWidget(snapshot),
+        { placement: 'belowEditor' },
+      );
     }
     const delegation = this.activeDelegation
       ? `; ${this.activeDelegation.agent}: ${this.activeDelegation.progress ?? 'starting'}`

@@ -3,6 +3,8 @@ env = "BUN_PUBLIC_*"
 
 [test]
 coverage = true
-coverageReporter = [ "lcov" ]
+coverageReporter = [ "text", "lcov" ]
 coverageDir = "coverage"
-coverageThreshold = 0.9
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [ "test/**" ]
+coverageThreshold = { lines = 0.9, functions = 0.9, statements = 0.9 }
