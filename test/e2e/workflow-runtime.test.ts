@@ -248,6 +248,11 @@ describe('when running a workflow through real Pi subprocesses', () => {
             PI_CODING_AGENT_SESSION_DIR: sessionDirectory,
             PI_OFFLINE: '1',
             PI_SKIP_VERSION_CHECK: '1',
+            // RpcClient inherits its caller's environment. This test starts the
+            // parent Pi process, while pi-subagents sets these values itself
+            // only for delegated child processes.
+            PI_SUBAGENT_CHILD: '',
+            PI_SUBAGENT_CHILD_AGENT: '',
             PI_SUBAGENT_EXTRA_AGENT_DIRS: join(repositoryRoot, 'agents'),
             PI_WORKFLOWS_DIR: workflowDirectory,
             PI_WORKFLOWS_E2E_TRACE_PATH: tracePath,
