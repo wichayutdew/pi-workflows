@@ -1,0 +1,332 @@
+import { describe, expect, test } from 'bun:test';
+import type {
+  ExtensionCommandContext,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
+import { createRun } from '../src/engine/state.ts';
+import type { HarnessActionContext } from '../src/harness/action-context.ts';
+import { createStartActions } from '../src/harness/start-actions.ts';
+import type { WorkflowStartContext } from '../src/harness/types.ts';
+import { loadedWorkflow } from './helpers.ts';
+
+type Notice = {
+  message: string;
+  level: string;
+};
+
+function createCommandContext(
+  options: {
+    idle?: boolean;
+    onWaitForIdle?: () => void;
+  } = {},
+): {
+  context: ExtensionCommandContext;
+  notices: Array<Notice>;
+  abortCount: () => number;
+} {
+  const notices: Array<Notice> = [];
+  let abortCount = 0;
+  return {
+    context: {
+      abort: () => {
+        abortCount += 1;
+      },
+      getSystemPromptOptions: () => ({
+        skills: [{ name: 'workflow-skill' }],
+      }),
+      isIdle: () => options.idle ?? true,
+      waitForIdle: async () => {
+        options.onWaitForIdle?.();
+      },
+      ui: {
+        notify: (message: string, level: string) => {
+          notices.push({ message, level });
+        },
+      },
+    } as unknown as ExtensionCommandContext,
+    notices,
+    abortCount: () => abortCount,
+  };
+}
+
+function createStartFixture() {
+  const workflow = loadedWorkflow();
+  const calls = {
+    capturedSkills: [] as Array<string>,
+    launched: 0,
+    opened: 0,
+    persisted: 0,
+    reloaded: 0,
+    sentMessages: [] as Array<unknown>,
+    statusUpdates: 0,
+    toolIsolations: 0,
+  };
+  const fixture = {
+    activeDelegation: undefined,
+    catalog: {
+      workflows: new Map([[workflow.definition.id, workflow]]),
+      settings: {
+        version: 1 as const,
+        allowProjectWorkflows: false,
+        statusShortcut: 'ctrl+alt+w' as const,
+      },
+      diagnostics: [] as Array<{
+        level: 'warning' | 'error';
+        path: string;
+        message: string;
+      }>,
+      userDirectory: '/workflows',
+    },
+    dependencies: {
+      createRequestId: () => 'run-1',
+      now: () => 10,
+    },
+    isSessionActive: true,
+    sessionEpoch: 3,
+    run: undefined,
+    pi: {
+      getActiveTools: () => ['read', 'bash'],
+      sendMessage: (message: unknown) => {
+        calls.sentMessages.push(message);
+      },
+    },
+    captureSkills: (skills: ReadonlyArray<{ name: string }> | undefined) => {
+      calls.capturedSkills.push(...(skills ?? []).map(({ name }) => name));
+    },
+    isolateMainSessionTools: () => {
+      calls.toolIsolations += 1;
+    },
+    launchCurrentStep: () => {
+      calls.launched += 1;
+    },
+    openWorkflowStatus: () => {
+      calls.opened += 1;
+    },
+    persist: () => {
+      calls.persisted += 1;
+    },
+    preflight: () => [] as Array<string>,
+    reloadCatalog: async () => {
+      calls.reloaded += 1;
+      return true;
+    },
+    updateStatus: () => {
+      calls.statusUpdates += 1;
+    },
+  };
+  return { calls, fixture, workflow };
+}
+
+function startContext(
+  context: ExtensionCommandContext,
+  onWaitForIdle: () => void = () => {},
+): WorkflowStartContext {
+  return {
+    context: context as ExtensionContext,
+    skills: () => [{ name: 'workflow-skill' }],
+    waitForIdle: async () => {
+      onWaitForIdle();
+    },
+  };
+}
+
+describe('when testing start actions', () => {
+  const actions = createStartActions();
+
+  test('lists workflows and explains an empty catalog', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+
+    await actions.listWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+
+    expect(calls.sentMessages).toHaveLength(1);
+    expect(calls.sentMessages[0]).toMatchObject({
+      customType: 'workflow-list',
+      display: true,
+    });
+
+    fixture.catalog = {
+      ...fixture.catalog,
+      workflows: new Map(),
+      diagnostics: [
+        {
+          level: 'error',
+          path: '/workflows/example.yaml',
+          message: 'invalid',
+        },
+      ],
+    };
+    await actions.listWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+    expect(command.notices.at(-1)).toEqual({
+      message: 'No workflows loaded from /workflows',
+      level: 'warning',
+    });
+  });
+
+  test('rejects delegation and active-run conflicts', async () => {
+    const { fixture, workflow } = createStartFixture();
+    const command = createCommandContext();
+    const context = startContext(command.context);
+
+    fixture.activeDelegation = { agent: 'worker' } as never;
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      'request',
+      context,
+      3,
+    );
+    expect(command.notices.at(-1)?.message).toContain('still cancelling');
+
+    fixture.activeDelegation = undefined;
+    fixture.run = createRun(workflow, '', [], 'existing', 1) as never;
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      'request',
+      context,
+      3,
+    );
+    expect(command.notices.at(-1)?.message).toContain('resume or abort');
+  });
+
+  test('stops a busy start superseded by a session change', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext({ idle: false });
+    const context = startContext(command.context, () => {
+      fixture.sessionEpoch += 1;
+    });
+
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      'request',
+      context,
+      3,
+    );
+
+    expect(command.abortCount()).toBe(1);
+    expect(calls.reloaded).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain('session change');
+  });
+
+  test('rejects stale reloads, later session changes, and missing workflows', async () => {
+    const command = createCommandContext();
+
+    const stale = createStartFixture();
+    stale.fixture.reloadCatalog = async () => false;
+    await actions.startNow.call(
+      stale.fixture as unknown as HarnessActionContext,
+      'example',
+      '',
+      startContext(command.context),
+      3,
+    );
+    expect(command.notices.at(-1)?.message).toContain(
+      'newer configuration load',
+    );
+
+    const switched = createStartFixture();
+    switched.fixture.reloadCatalog = async () => {
+      switched.fixture.sessionEpoch += 1;
+      return true;
+    };
+    await actions.startNow.call(
+      switched.fixture as unknown as HarnessActionContext,
+      'example',
+      '',
+      startContext(command.context),
+      3,
+    );
+    expect(command.notices.at(-1)?.message).toContain('session change');
+
+    const missing = createStartFixture();
+    missing.fixture.catalog.workflows.clear();
+    await actions.startNow.call(
+      missing.fixture as unknown as HarnessActionContext,
+      'missing',
+      '',
+      startContext(command.context),
+      3,
+    );
+    expect(command.notices.at(-1)).toEqual({
+      message: 'Workflow "missing" is not loaded',
+      level: 'error',
+    });
+  });
+
+  test('reports preflight errors before creating a run', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+    fixture.preflight = () => ['read tool is unavailable'];
+
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      '',
+      startContext(command.context),
+      3,
+    );
+
+    expect(fixture.run).toBeUndefined();
+    expect(calls.persisted).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain(
+      'read tool is unavailable',
+    );
+  });
+
+  test('creates a trimmed run and launches its first step', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      '  inspect this  ',
+      startContext(command.context),
+      3,
+    );
+
+    expect(fixture.run).toMatchObject({
+      runId: 'run-1',
+      input: 'inspect this',
+      baselineTools: ['read', 'bash'],
+    });
+    expect(calls).toMatchObject({
+      capturedSkills: ['workflow-skill'],
+      launched: 1,
+      opened: 1,
+      persisted: 1,
+      reloaded: 1,
+      statusUpdates: 1,
+      toolIsolations: 1,
+    });
+  });
+
+  test('reloads only when no workflow is actively executing', async () => {
+    const { calls, fixture, workflow } = createStartFixture();
+    const command = createCommandContext();
+    fixture.run = createRun(workflow, '', [], 'running', 1) as never;
+
+    await actions.reloadNow.call(
+      fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+    expect(calls.reloaded).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain('Pause the workflow');
+
+    fixture.run = undefined;
+    await actions.reloadNow.call(
+      fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+    expect(calls.reloaded).toBe(1);
+    expect(calls.capturedSkills).toEqual(['workflow-skill']);
+  });
+});

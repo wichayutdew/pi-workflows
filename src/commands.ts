@@ -1,74 +1,148 @@
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
+  RegisteredCommand,
 } from '@earendil-works/pi-coding-agent';
 
-export interface WorkflowCommandController {
-  workflowIds(): string[];
-  list(ctx: ExtensionCommandContext): Promise<void>;
-  start(
+/**
+ * Workflow operations exposed to slash-command handlers.
+ */
+export type WorkflowCommandController = {
+  /** Returns loaded workflow IDs for command completion. */
+  readonly workflowIds: () => ReadonlyArray<string>;
+  /** Lists loaded workflows. */
+  readonly list: (context: ExtensionCommandContext) => Promise<void>;
+  /** Starts a workflow. */
+  readonly start: (
     workflowId: string,
     input: string,
-    ctx: ExtensionCommandContext,
-  ): Promise<void>;
-  pause(reason: string, ctx: ExtensionCommandContext): Promise<void>;
-  resume(ctx: ExtensionCommandContext): Promise<void>;
-  abort(reason: string, ctx: ExtensionCommandContext): Promise<void>;
-  reload(ctx: ExtensionCommandContext): Promise<void>;
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
+  /** Pauses the active workflow. */
+  readonly pause: (
+    reason: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
+  /** Resumes the paused workflow. */
+  readonly resume: (context: ExtensionCommandContext) => Promise<void>;
+  /** Aborts the active workflow. */
+  readonly abort: (
+    reason: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
+  /** Reloads workflow configuration. */
+  readonly reload: (context: ExtensionCommandContext) => Promise<void>;
+};
+
+/**
+ * Declarative Pi command registration.
+ */
+export type HarnessCommand = {
+  readonly name: string;
+  readonly options: Omit<RegisteredCommand, 'name' | 'sourceInfo'>;
+};
+
+const splitFirst = (value: string): readonly [string, string] => {
+  const trimmedValue = value.trim();
+  const separatorIndex = trimmedValue.search(/\s/);
+
+  return separatorIndex === -1
+    ? [trimmedValue, '']
+    : [
+        trimmedValue.slice(0, separatorIndex),
+        trimmedValue.slice(separatorIndex).trim(),
+      ];
+};
+
+const createStartCommand = (
+  controller: WorkflowCommandController,
+): HarnessCommand => ({
+  name: 'workflow-start',
+  options: {
+    description: 'Start a workflow: /workflow-start <id> [input]',
+    getArgumentCompletions: (prefix) => {
+      const completions = controller
+        .workflowIds()
+        .filter((workflowId) => workflowId.startsWith(prefix))
+        .map((workflowId) => ({
+          value: workflowId,
+          label: workflowId,
+        }));
+      return completions.length > 0 ? completions : null;
+    },
+    handler: async (args, context) => {
+      const [workflowId, input] = splitFirst(args);
+      if (!workflowId) {
+        context.ui.notify('Usage: /workflow-start <id> [input]', 'warning');
+        return;
+      }
+      await controller.start(workflowId, input, context);
+    },
+  },
+});
+
+/**
+ * Creates the declarative command registrations for a workflow controller.
+ *
+ * @param controller - Injected workflow command operations.
+ * @returns Command names and Pi registration options.
+ */
+export function createHarnessCommands(
+  controller: WorkflowCommandController,
+): ReadonlyArray<HarnessCommand> {
+  return [
+    {
+      name: 'workflow-list',
+      options: {
+        description: 'List loaded declarative workflows',
+        handler: async (_args, context) => controller.list(context),
+      },
+    },
+    createStartCommand(controller),
+    {
+      name: 'workflow-pause',
+      options: {
+        description: 'Pause the active workflow without losing its checkpoint',
+        handler: async (reason, context) =>
+          controller.pause(reason.trim(), context),
+      },
+    },
+    {
+      name: 'workflow-resume',
+      options: {
+        description: 'Reload configuration and resume the paused workflow',
+        handler: async (_args, context) => controller.resume(context),
+      },
+    },
+    {
+      name: 'workflow-abort',
+      options: {
+        description: 'Abort the active workflow',
+        handler: async (reason, context) =>
+          controller.abort(reason.trim(), context),
+      },
+    },
+    {
+      name: 'workflow-reload',
+      options: {
+        description: 'Reload workflow files while no workflow is running',
+        handler: async (_args, context) => controller.reload(context),
+      },
+    },
+  ];
 }
 
-function splitFirst(value: string): [string, string] {
-  const trimmed = value.trim();
-  const separator = trimmed.search(/\s/);
-  if (separator === -1) return [trimmed, ''];
-  return [trimmed.slice(0, separator), trimmed.slice(separator).trim()];
-}
-
+/**
+ * Registers all workflow commands with Pi.
+ *
+ * @param pi - Pi extension API used for registration.
+ * @param controller - Injected workflow command operations.
+ */
 export function registerHarnessCommands(
   pi: ExtensionAPI,
   controller: WorkflowCommandController,
 ): void {
-  pi.registerCommand('workflow-list', {
-    description: 'List loaded declarative workflows',
-    handler: async (_args, ctx) => controller.list(ctx),
-  });
-
-  pi.registerCommand('workflow-start', {
-    description: 'Start a workflow: /workflow-start <id> [input]',
-    getArgumentCompletions: (prefix) => {
-      const items = controller
-        .workflowIds()
-        .filter((id) => id.startsWith(prefix))
-        .map((id) => ({ value: id, label: id }));
-      return items.length > 0 ? items : null;
-    },
-    handler: async (args, ctx) => {
-      const [workflowId, input] = splitFirst(args);
-      if (!workflowId) {
-        ctx.ui.notify('Usage: /workflow-start <id> [input]', 'warning');
-        return;
-      }
-      await controller.start(workflowId, input, ctx);
-    },
-  });
-
-  pi.registerCommand('workflow-pause', {
-    description: 'Pause the active workflow without losing its checkpoint',
-    handler: async (reason, ctx) => controller.pause(reason.trim(), ctx),
-  });
-
-  pi.registerCommand('workflow-resume', {
-    description: 'Reload configuration and resume the paused workflow',
-    handler: async (_args, ctx) => controller.resume(ctx),
-  });
-
-  pi.registerCommand('workflow-abort', {
-    description: 'Abort the active workflow',
-    handler: async (reason, ctx) => controller.abort(reason.trim(), ctx),
-  });
-
-  pi.registerCommand('workflow-reload', {
-    description: 'Reload workflow files while no workflow is running',
-    handler: async (_args, ctx) => controller.reload(ctx),
-  });
+  for (const command of createHarnessCommands(controller)) {
+    pi.registerCommand(command.name, command.options);
+  }
 }

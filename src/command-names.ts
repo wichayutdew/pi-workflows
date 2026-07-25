@@ -1,3 +1,6 @@
+/**
+ * Slash commands owned by the workflow harness.
+ */
 export const HARNESS_COMMAND_NAMES = [
   'workflow-abort',
   'workflow-list',
@@ -39,7 +42,10 @@ export const PI_BUILTIN_COMMAND_NAMES = [
   'trust',
 ] as const;
 
-export const RESERVED_COMMAND_NAMES = new Set<string>([
+/**
+ * Command names that workflow aliases may not shadow.
+ */
+export const RESERVED_COMMAND_NAMES: ReadonlySet<string> = new Set([
   ...HARNESS_COMMAND_NAMES,
   ...PI_BUILTIN_COMMAND_NAMES,
 ]);

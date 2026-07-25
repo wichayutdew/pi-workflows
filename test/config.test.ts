@@ -101,22 +101,21 @@ describe('when testing config', () => {
         /retryToolFailures: expected a boolean/,
       );
 
-      const unsafeReplay = baseWorkflow();
-      const unsafeReplaySteps = unsafeReplay.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      unsafeReplaySteps.inspect = {
-        ...unsafeReplaySteps.inspect,
+      const mutationCapableRecovery = baseWorkflow();
+      const mutationCapableRecoverySteps =
+        mutationCapableRecovery.steps as Record<
+          string,
+          Record<string, unknown>
+        >;
+      mutationCapableRecoverySteps.inspect = {
+        ...mutationCapableRecoverySteps.inspect,
         subagent: { retryToolFailures: true },
         permissions: {
           tools: ['read', 'bash', 'edit'],
           bash: { mode: 'read-only' },
         },
       };
-      expect(validateWorkflow(unsafeReplay).errors.join('\n')).toMatch(
-        /retryToolFailures: requires a step without edit or write tools/,
-      );
+      expect(validateWorkflow(mutationCapableRecovery).errors).toEqual([]);
 
       const defaults = baseWorkflow();
       const defaultSteps = defaults.steps as Record<
@@ -782,13 +781,37 @@ describe('when testing config', () => {
       const contextCeiling = structuredClone(
         settings.value!.permissionCeiling!,
       );
-      contextCeiling.subagent!.contexts = [];
+      if (!contextCeiling.subagent) {
+        throw new Error('expected a subagent permission ceiling');
+      }
+      const contextCeilingWithoutContexts = {
+        ...contextCeiling,
+        subagent: { ...contextCeiling.subagent, contexts: [] },
+      };
       expect(
-        checkWorkflowAgainstCeiling(workflow.value!, contextCeiling).join('\n'),
+        checkWorkflowAgainstCeiling(
+          workflow.value!,
+          contextCeilingWithoutContexts,
+        ).join('\n'),
       ).toMatch(/subagent\.context/);
 
-      const retryRequested = structuredClone(workflow.value!);
-      retryRequested.steps.inspect!.subagent!.retryToolFailures = true;
+      const inspectedStep = workflow.value!.steps.inspect;
+      if (!inspectedStep?.subagent) {
+        throw new Error('expected the inspect step to use a subagent');
+      }
+      const retryRequested = {
+        ...workflow.value!,
+        steps: {
+          ...workflow.value!.steps,
+          inspect: {
+            ...inspectedStep,
+            subagent: {
+              ...inspectedStep.subagent,
+              retryToolFailures: true,
+            },
+          },
+        },
+      };
       expect(
         checkWorkflowAgainstCeiling(
           retryRequested,

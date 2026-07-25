@@ -1622,7 +1622,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('retries a replay-safe step once after an ordinary tool failure', async () => {
+    test('automatically recovers a replay-safe step after an ordinary tool failure', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -1731,7 +1731,7 @@ describe('when testing harness subagent', () => {
         });
         expect(requests).toHaveLength(2);
         expect(requests[1]?.task).toContain(
-          '## Reinforcement retry after subagent failure',
+          '## Automatic recovery after subagent failure',
         );
         expect(requests[1]?.task).toContain(
           JSON.stringify(`Arguments: {"path":"${missingPath}"}`).slice(1, -1),
@@ -1745,10 +1745,210 @@ describe('when testing harness subagent', () => {
         expect(
           fixture.notifications.some(({ message }) =>
             message.startsWith(
-              'Reinforcement retry for "inspect" after a subagent failure',
+              'Automatic recovery for "inspect" after a subagent failure',
             ),
           ),
         ).toBe(true);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('uses two fresh recovery children for distinct replay-safe failures', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(directory);
+        const firstRunId = 'distinct-recovery-first';
+        const secondRunId = 'distinct-recovery-second';
+        const firstError = 'first input path does not exist';
+        const secondError = 'second manifest is stale';
+        const firstSession = await writeFailureSession(
+          directory,
+          firstRunId,
+          'read',
+          { path: '/missing/first-input.md' },
+          firstError,
+        );
+        const secondSession = await writeFailureSession(
+          directory,
+          secondRunId,
+          'read',
+          { path: '/missing/second-manifest.md' },
+          secondError,
+        );
+        const fixture = createHarnessFixture(directory);
+        const requests: Array<SubagentDelegationRequest> = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+
+          if (requests.length <= 2) {
+            const isFirstAttempt = requests.length === 1;
+            const sessionFile = isFirstAttempt ? firstSession : secondSession;
+            const runId = isFirstAttempt ? firstRunId : secondRunId;
+            const error = isFirstAttempt ? firstError : secondError;
+            await bindSessionToRequest(sessionFile, request);
+            fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+              version: 1,
+              requestId: request.requestId,
+              status: 'failed',
+              error: `read failed (exit 1): ${error}`,
+              exitCode: 1,
+              runId,
+              childIndex: 0,
+              sessionFile,
+            });
+            return;
+          }
+
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'done',
+              summary: 'Recovered after two distinct approaches',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+        expect(requests).toHaveLength(3);
+        expect(requests.every(({ context }) => context === 'fresh')).toBe(true);
+        expect(requests[1]?.task).toContain(
+          'automatic recovery attempt 1 of 2',
+        );
+        expect(requests[2]?.task).toContain(
+          'automatic recovery attempt 2 of 2',
+        );
+        expect(requests[2]?.task).toContain(firstError);
+        expect(requests[2]?.task).toContain(secondError);
+        expect(
+          fixture.notifications.filter(({ message }) =>
+            message.startsWith(
+              'Automatic recovery for "inspect" after a subagent failure',
+            ),
+          ),
+        ).toHaveLength(2);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('stops recovery when a fresh child repeats the same semantic failure', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeWorkflow(directory);
+        const failureError = 'the required input is still missing';
+        const sessionFiles = await Promise.all(
+          ['duplicate-recovery-first', 'duplicate-recovery-second'].map(
+            (runId) =>
+              writeFailureSession(
+                directory,
+                runId,
+                'read',
+                { path: '/missing/repeated-input.md' },
+                failureError,
+              ),
+          ),
+        );
+        const fixture = createHarnessFixture(directory);
+        const requests: Array<SubagentDelegationRequest> = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+
+          const sessionFile = sessionFiles[requests.length - 1];
+          if (sessionFile) {
+            await bindSessionToRequest(sessionFile, request);
+            fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+              version: 1,
+              requestId: request.requestId,
+              status: 'failed',
+              error: `read failed (exit 1): ${failureError}`,
+              exitCode: 1,
+              runId:
+                requests.length === 1
+                  ? 'duplicate-recovery-first'
+                  : 'duplicate-recovery-second',
+              childIndex: 0,
+              sessionFile,
+            });
+            return;
+          }
+
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'done',
+              summary: 'Unexpected third attempt',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        // then
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('paused');
+        });
+        expect(requests).toHaveLength(2);
+        expect(
+          fixture.notifications.filter(({ message }) =>
+            message.startsWith(
+              'Automatic recovery for "inspect" after a subagent failure',
+            ),
+          ),
+        ).toHaveLength(1);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1869,13 +2069,13 @@ describe('when testing harness subagent', () => {
             true,
           );
           expect(requests[1]?.task).toContain(
-            '## Reinforcement retry after subagent failure',
+            '## Automatic recovery after subagent failure',
           );
           expect(requests[1]?.task).toContain(failure.expectedDiagnostic);
           expect(
             fixture.notifications.filter(({ message }) =>
               message.startsWith(
-                'Reinforcement retry for "inspect" after a subagent failure',
+                'Automatic recovery for "inspect" after a subagent failure',
               ),
             ),
           ).toHaveLength(1);
@@ -2760,7 +2960,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('pauses after a disabled-tool retry also fails', async () => {
+    test('pauses after a disabled-tool automatic recovery also fails', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -2821,7 +3021,7 @@ describe('when testing harness subagent', () => {
         expect(
           fixture.notifications.filter(({ message }) =>
             message.startsWith(
-              'Reinforcement retry for "inspect" after a subagent failure',
+              'Automatic recovery for "inspect" after a subagent failure',
             ),
           ),
         ).toHaveLength(1);
@@ -2931,7 +3131,7 @@ describe('when testing harness subagent', () => {
         expect(requests).toHaveLength(1);
         expect(
           fixture.notifications.some(({ message }) =>
-            message.startsWith('Reinforcement retry for "implement"'),
+            message.startsWith('Automatic recovery for "implement"'),
           ),
         ).toBe(false);
         expect(String(latestRun(fixture).pauseReason)).toContain(
@@ -3098,7 +3298,7 @@ describe('when testing harness subagent', () => {
         expect(requests).toHaveLength(1);
         expect(
           fixture.notifications.some(({ message }) =>
-            message.startsWith('Reinforcement retry for "implement"'),
+            message.startsWith('Automatic recovery for "implement"'),
           ),
         ).toBe(false);
         expect(

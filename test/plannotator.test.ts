@@ -299,5 +299,39 @@ describe('when testing plannotator', () => {
         feedback: '',
       });
     });
+
+    test('uses injected timer boundaries', async () => {
+      // given
+      const scheduledTimeouts: Array<number> = [];
+      const cancelledTimers = new Set<ReturnType<typeof setTimeout>>();
+      const dependencies = {
+        scheduleTimeout: (callback: () => void, timeoutMs: number) => {
+          scheduledTimeouts.push(timeoutMs);
+          return setTimeout(callback, 60_000);
+        },
+        cancelTimeout: (timer: ReturnType<typeof setTimeout>) => {
+          cancelledTimers.add(timer);
+          clearTimeout(timer);
+        },
+      };
+
+      // when
+      const response = await requestPlannotatorReview(
+        respondingEvents({
+          status: 'handled',
+          result: { status: 'pending', reviewId: 'injected-review' },
+        }),
+        'injected-request',
+        '# Plan',
+        'test',
+        250,
+        dependencies,
+      );
+
+      // then
+      expect(response.status).toBe('handled');
+      expect(scheduledTimeouts).toEqual([250]);
+      expect(cancelledTimers.size).toBe(1);
+    });
   });
 });

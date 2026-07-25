@@ -2,6 +2,9 @@ import { Type } from 'typebox';
 
 export const WORKFLOW_COMPLETION_TOOL = 'workflow_complete_step';
 
+/**
+ * Schema accepted by the main-agent workflow completion tool.
+ */
 export const WORKFLOW_COMPLETION_PARAMETERS = Type.Object(
   {
     outcome: Type.String({

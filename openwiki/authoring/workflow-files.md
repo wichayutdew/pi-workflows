@@ -197,7 +197,7 @@ flowchart TD
   Subagent --> TurnBudget[turnBudget<br/>maxTurns, graceTurns]
   Subagent --> ToolBudget[toolBudget<br/>soft, hard, block]
   Subagent --> Artifacts[artifacts boolean]
-  Subagent --> Retry[retryToolFailures<br/>broader Bash retry opt-in]
+  Subagent --> Retry[retryToolFailures<br/>broader Bash recovery opt-in]
 ```
 
 ## Example MR Comments Workflow

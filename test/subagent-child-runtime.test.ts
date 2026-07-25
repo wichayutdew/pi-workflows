@@ -13,7 +13,9 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   CHILD_COMPLETION_TOOL,
   registerSubagentChildRuntime,
+  type SubagentChildRuntimeDependencies,
 } from '../src/integrations/subagents/child-runtime.ts';
+import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from '../src/integrations/subagents/child-runtime-dependencies.ts';
 import {
   encodeChildPolicy,
   parseDelegatedStepResult,
@@ -57,6 +59,7 @@ describe('when testing subagent child runtime', () => {
   function runtime(
     childAgent: string | undefined,
     profileTools = ['read', 'bash', CHILD_COMPLETION_TOOL],
+    dependencies?: SubagentChildRuntimeDependencies,
   ) {
     const handlers = new Map<string, Handler[]>();
     const activeTools: string[][] = [];
@@ -116,6 +119,7 @@ describe('when testing subagent child runtime', () => {
     } as unknown as ExtensionAPI;
     registerSubagentChildRuntime(pi, {
       ...(childAgent ? { childAgent } : {}),
+      ...(dependencies ? { dependencies } : {}),
     });
     return {
       handlers,
@@ -710,6 +714,113 @@ describe('when testing subagent child runtime', () => {
             rm(directory, { recursive: true, force: true }),
           ),
         );
+      }
+    });
+
+    test('uses injected process and file-system boundaries', () => {
+      // given
+      const temporaryRoot = '/virtual-pi-temp';
+      const directory = join(
+        temporaryRoot,
+        'pi-workflows-step-injected-runtime',
+      );
+      const policy = childPolicy(directory);
+      const files = new Map([[policy.capabilityPath, policy.capabilityToken]]);
+      const inspection = {
+        isDirectory: () => true,
+        isFile: () => true,
+        isSymbolicLink: () => false,
+      };
+      const dependencies: SubagentChildRuntimeDependencies = {
+        fileSystem: {
+          exists: (path) => files.has(path),
+          inspect: () => inspection,
+          readText: (path) => {
+            const content = files.get(path);
+            if (content === undefined) throw new Error('missing file');
+            return content;
+          },
+          realPath: (path) => path,
+          rename: (source, destination) => {
+            const content = files.get(source);
+            if (content === undefined) throw new Error('missing source');
+            files.delete(source);
+            files.set(destination, content);
+          },
+          stat: () => inspection,
+          unlink: (path) => {
+            files.delete(path);
+          },
+          writeExclusive: (path, content) => {
+            if (files.has(path)) throw new Error('file exists');
+            files.set(path, content);
+          },
+        },
+        createUniqueId: () => 'injected-id',
+        currentWorkingDirectory: () => '/virtual-workspace',
+        environmentChildAgent: () => policy.agent,
+        temporaryDirectory: () => temporaryRoot,
+        tokensAreEqual: (actual, expected) => actual === expected,
+      };
+      const rig = runtime(undefined, undefined, dependencies);
+      const input = rig.handlers.get('input')?.[0];
+      const toolCall = rig.handlers.get('tool_call')?.[0];
+      expectTruthy(input);
+      expectTruthy(toolCall);
+
+      // when
+      const transformed = input({
+        type: 'input',
+        source: 'rpc',
+        text: `${encodeChildPolicy(policy)}\n\nFinish in memory.`,
+      });
+      const completionInput = {
+        value: {
+          outcome: 'ready',
+          summary: 'Completed through injected boundaries',
+        },
+      };
+      const completionResult = toolCall({
+        type: 'tool_call',
+        toolCallId: 'injected-completion',
+        toolName: CHILD_COMPLETION_TOOL,
+        input: completionInput,
+      });
+
+      // then
+      expect(transformed).toEqual({
+        action: 'transform',
+        text: 'Finish in memory.',
+      });
+      expect(completionResult).toBe(undefined);
+      expect(files.has(policy.capabilityPath)).toBe(false);
+      expect(JSON.parse(files.get(policy.resultPath) ?? '')).toEqual({
+        version: 1,
+        policyDigest: policy.policyDigest,
+        outcome: 'ready',
+        summary: 'Completed through injected boundaries',
+      });
+      expect(Object.isFrozen(completionInput)).toBe(true);
+    });
+
+    test('normalizes the default child-agent environment boundary', () => {
+      // given
+      const previousChildAgent = process.env.PI_SUBAGENT_CHILD_AGENT;
+      process.env.PI_SUBAGENT_CHILD_AGENT = ' worker ';
+
+      try {
+        // when
+        const childAgent =
+          DEFAULT_CHILD_RUNTIME_DEPENDENCIES.environmentChildAgent();
+
+        // then
+        expect(childAgent).toBe('worker');
+      } finally {
+        if (previousChildAgent === undefined) {
+          delete process.env.PI_SUBAGENT_CHILD_AGENT;
+        } else {
+          process.env.PI_SUBAGENT_CHILD_AGENT = previousChildAgent;
+        }
       }
     });
   });

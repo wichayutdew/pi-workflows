@@ -18,8 +18,8 @@ describe('when testing prompt', () => {
         1,
       );
 
-      expect(prompt).toContain('## Reinforcement retry after subagent failure');
-      expect(prompt).toContain('bounded reinforcement retry 1 of 1');
+      expect(prompt).toContain('## Automatic recovery after subagent failure');
+      expect(prompt).toContain('automatic recovery attempt 1 of 1');
       expect(prompt).toContain('<pi-workflows-retry-diagnostic-v1>');
       expect(prompt).toContain('Command: denied-command');
       expect(prompt).toContain(

@@ -1,43 +1,62 @@
-export interface StepResultPolicy {
-  policyDigest: string;
-  outcomes: string[];
-  summaryMaxChars: number;
-  gateSubmitOutcome?: string;
-}
+const MAX_ARTIFACT_CHARS = 200_000;
+const RESULT_KEYS = new Set([
+  'version',
+  'policyDigest',
+  'outcome',
+  'summary',
+  'artifact',
+]);
 
-export interface WorkflowStepResult {
-  version: 1;
-  policyDigest: string;
-  outcome: string;
-  summary: string;
-  artifact?: string;
-}
+/**
+ * Result constraints derived from the active workflow step.
+ */
+export type StepResultPolicy = {
+  readonly policyDigest: string;
+  readonly outcomes: ReadonlyArray<string>;
+  readonly summaryMaxChars: number;
+  readonly gateSubmitOutcome?: string;
+};
 
-function isObject(value: unknown): value is Record<string, unknown> {
+/**
+ * Validated result handed back to the workflow engine.
+ */
+export type WorkflowStepResult = {
+  readonly version: 1;
+  readonly policyDigest: string;
+  readonly outcome: string;
+  readonly summary: string;
+  readonly artifact?: string;
+};
+
+const isObject = (value: unknown): value is Record<string, unknown> => {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+};
 
+/**
+ * Validates and normalizes the structured result returned by a workflow step.
+ *
+ * @param value - Untrusted structured output from the agent.
+ * @param policy - Result constraints for the active workflow step.
+ * @returns A normalized workflow-step result.
+ * @throws When the result violates the active policy or result schema.
+ */
 export function parseWorkflowStepResult(
   value: unknown,
   policy: StepResultPolicy,
 ): WorkflowStepResult {
-  if (!isObject(value))
+  if (!isObject(value)) {
     throw new Error('workflow step result must be an object');
-  const allowedKeys = new Set([
-    'version',
-    'policyDigest',
-    'outcome',
-    'summary',
-    'artifact',
-  ]);
-  const unknownKey = Object.keys(value).find((key) => !allowedKeys.has(key));
+  }
+
+  const unknownKey = Object.keys(value).find((key) => !RESULT_KEYS.has(key));
   if (unknownKey) {
     throw new Error(
       `workflow step result has unknown property "${unknownKey}"`,
     );
   }
-  if (value.version !== 1)
+  if (value.version !== 1) {
     throw new Error('unsupported workflow step result version');
+  }
   if (value.policyDigest !== policy.policyDigest) {
     throw new Error('workflow step result does not match the active policy');
   }
@@ -66,8 +85,10 @@ export function parseWorkflowStepResult(
   }
   const artifact =
     typeof value.artifact === 'string' ? value.artifact : undefined;
-  if (artifact !== undefined && artifact.length > 200_000) {
-    throw new Error('workflow step artifact exceeds 200000 characters');
+  if (artifact !== undefined && artifact.length > MAX_ARTIFACT_CHARS) {
+    throw new Error(
+      `workflow step artifact exceeds ${MAX_ARTIFACT_CHARS} characters`,
+    );
   }
   if (
     value.outcome === policy.gateSubmitOutcome &&

@@ -300,5 +300,36 @@ describe('when testing subagent client', () => {
       });
       expect(deadlineClient.activeRequestId).toBe(undefined);
     });
+
+    test('uses injected timer boundaries', async () => {
+      // given
+      const events = new FakeEventBus();
+      const scheduledTimeouts: Array<number> = [];
+      const cancelledTimers = new Set<ReturnType<typeof setTimeout>>();
+      const client = new SubagentDelegationClient(events, {
+        scheduleTimeout: (callback, timeoutMs) => {
+          scheduledTimeouts.push(timeoutMs);
+          return setTimeout(callback, 60_000);
+        },
+        cancelTimeout: (timer) => {
+          cancelledTimers.add(timer);
+          clearTimeout(timer);
+        },
+      });
+      events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
+        events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+          ...(data as SubagentDelegationRequest),
+          status: 'completed',
+        });
+      });
+
+      // when
+      const response = await client.delegate(request('injected-timers'));
+
+      // then
+      expect(response.status).toBe('completed');
+      expect(scheduledTimeouts).toEqual([3_000, 10_000]);
+      expect(cancelledTimers.size).toBe(2);
+    });
   });
 });

@@ -23,6 +23,14 @@ stateDiagram-v2
   aborted --> [*]
 ```
 
+The state machine is implemented by the pure engine modules under
+`src/engine/`. `create-run.ts` creates the initial immutable run,
+`run-advance.ts` handles ordinary step outcomes, `gate-transitions.ts` handles
+review submission and resolution, `run-lifecycle.ts` owns pause/resume/abort
+helpers, and `run-reconciliation.ts` plus `reconciliation-history.ts` reconcile
+persisted checkpoints after workflow files change. `transitions.ts` and
+`state.ts` are compatibility facades over those modules.
+
 ## Start Sequence
 
 ```mermaid
@@ -51,6 +59,14 @@ sequenceDiagram
   end
 ```
 
+Parent-mode orchestration starts in `src/harness.ts`, but the behavior is now
+split across action modules in `src/harness/`. `start-actions.ts` reloads the
+catalog, checks the requested step, captures baseline tools, creates the run,
+persists the checkpoint, and launches either a main step or a delegated step.
+`dependencies.ts` is the injected boundary for Pi APIs, time, IDs,
+configuration loading, temporary delegation workspaces, status display,
+Plannotator, prompt gates, subagents, and the main-step runtime.
+
 ## Main-Agent Step Sequence
 
 ```mermaid
@@ -69,6 +85,14 @@ sequenceDiagram
   Runtime-->>Harness: validated result
   Harness->>Engine: advanceRun or beginGate
 ```
+
+Main-agent execution is registered by `src/runtime/main-step-runtime.ts`. That
+facade creates a controller over `main-step-state.ts`,
+`main-step-lifecycle.ts`, `main-step-policy.ts`, and
+`main-step-completion.ts`; it also preserves the older `MainStepRuntime` class
+for compatibility. Policy decisions come from `src/policy/tools.ts`,
+`bash.ts`, `completion-batch.ts`, and `immutable-input.ts`, while completion
+payloads are parsed by `step-result.ts`.
 
 ## Delegated Step Sequence
 
@@ -99,6 +123,65 @@ contract v1. It starts in a clean context with the original workflow input and
 the previous step's compact result or approved artifact. No accumulated parent
 or sibling transcript crosses the step boundary.
 
+Delegation planning and recovery decisions live in `src/harness/delegation-*.ts`
+and launch through `step-execution-actions.ts`. The parent-side subagent client
+surface remains `src/integrations/subagents/client.ts`; the correlated request,
+event handling, cancellation, late terminal handling, and timeout work is split
+across `client-delegation.ts`, `client-messages.ts`, and `client-types.ts`.
+
+The child side is registered by `child-runtime.ts`. Its implementation modules
+parse the encoded policy envelope, validate child agent identity and private
+capability/result paths, narrow active tools, block interactive coordination
+tools, authorize Bash/MCP/tool calls through the shared policy core, validate
+structured completion, and write the bounded result file. Diagnostic modules
+under the same folder read replay audits, hidden Bash failures, and session
+transcripts so the harness can decide whether automatic recovery is safe.
+
+### Failure Recovery Before Pause
+
+A terminal error or nonzero exit code is evidence, not an unconditional stop.
+The harness first considers two bounded recovery paths:
+
+1. If the trusted child transcript proves that `structured_output` completed
+   after the reported failure, the harness validates the terminal identity and
+   projection, reads the private correlated result, and requires the transcript
+   value and result file to match exactly. This also covers the narrowly
+   reproduced hidden Bash false-positive case.
+2. Otherwise, the harness may launch up to two fresh automatic recovery
+   attempts. Candidate statuses are `failed`, `structured_output_failed`,
+   `timed_out`, `turn_budget_exhausted`, and `tool_budget_exhausted`. Every
+   failed attempt needs a complete, correctly bound transcript whose actual
+   calls prove that no mutation can be repeated.
+
+Configured `edit` or `write` availability is not by itself a veto. An actual
+recorded `edit`, `write`, mutation-capable Bash, or other unknown-effect call
+makes the audit unsafe. Denied and read-only Bash need no opt-in;
+`retryToolFailures` authorizes the same bounded sequence for allow-list or
+unrestricted Bash, but never bypasses the actual-call audit.
+
+Each recovery launches a fresh child with all previous bounded failure evidence.
+Failures receive a stable semantic fingerprint that excludes request IDs and
+session paths. If a fresh child repeats any previous fingerprint, recovery stops
+early instead of repeating the same approach.
+
+Cancellation, interruption, detached/stopped execution, inconsistent timeout
+projections, reported file mutation, protocol/setup failure, and unbound,
+incomplete, or malformed audit evidence are hard stops. A synchronous
+delegation startup exception is caught and routed through serialized failure
+handling instead of escaping the harness.
+
+`delegation-failure.ts` gathers evidence,
+`delegation-recovery-validation.ts` proves recovered completion consistency,
+`delegation-retry-policy.ts` makes the replay decision, and
+`delegation-response-actions.ts` plus `delegation-control-actions.ts` continue
+or retry the run. The workflow pauses only when recovery is ambiguous, unsafe,
+or exhausted. This reduces user intervention without automatically repeating a
+possibly successful external mutation.
+
+Temporary delegation workspace removal is best-effort housekeeping. Cleanup
+failures produce a bounded warning, but cannot interrupt an otherwise healthy
+transition, successful recovery, or newly launched attempt.
+
 ## Live Status
 
 ```mermaid
@@ -113,6 +196,12 @@ cleared when execution stops. It never renders a below-editor task board.
 Completed steps, failures, pauses, reviews, progress, and full history live in
 the overlay; its rendering clamps long reasons to the available terminal width
 without altering the full persisted reason.
+
+The status facade is `src/workflow-status.ts`. Rendering and display details
+are split into `workflow-status/format-status.ts`, `formatting.ts`,
+`layout.ts`, `render-board.ts`, `render-path.ts`, `render-summary.ts`,
+`types.ts`, and `view.ts`; harness status actions call that facade instead of
+formatting the overlay inline.
 
 ## Pause And Resume
 
@@ -145,6 +234,12 @@ External effects are not exactly once. If a publish step stops after a remote
 action succeeds but before it checkpoints, resume grants the same exact
 reviewed capability. The step prompt must inspect observable remote state,
 skip only proven-complete actions, and pause on ambiguity.
+
+Pause and resume are coordinated by `pause-actions.ts`, `resume-action.ts`,
+`delegation-control-actions.ts`, `prompt-gate-actions.ts`, and
+`plannotator-result-actions.ts`. Engine helpers only produce the next
+checkpoint state; harness actions own effect cleanup, active-tool restoration,
+child cancellation, prompt review dismissal, and relaunching the current step.
 
 ## Session Restore
 

@@ -92,6 +92,31 @@ describe('when testing subagent protocol', () => {
         expect(isSafeStepCapabilityPath(policy.capabilityPath)).toBe(true);
         expect(isSafeStepResultPath(policy.resultPath)).toBe(true);
         expect(isSafeStepResultPath(join(tmpdir(), 'result.json'))).toBe(false);
+
+        const injectedDirectory = '/virtual-pi-temp/pi-workflows-step-injected';
+        const injectedPolicy = {
+          ...policy,
+          capabilityPath: join(injectedDirectory, 'capability'),
+          resultPath: join(injectedDirectory, 'result.json'),
+        };
+        const environment = {
+          temporaryDirectory: () => '/virtual-pi-temp',
+        };
+        expect(
+          isSafeStepCapabilityPath(injectedPolicy.capabilityPath, environment),
+        ).toBe(true);
+        expect(isSafeStepCapabilityPath(injectedPolicy.capabilityPath)).toBe(
+          false,
+        );
+        expect(
+          extractChildPolicy(
+            `${encodeChildPolicy(injectedPolicy)}\n\nUse injected paths.`,
+            environment,
+          ),
+        ).toEqual({
+          policy: injectedPolicy,
+          task: 'Use injected paths.',
+        });
       });
     });
 

@@ -1,6 +1,6 @@
-interface CommandLike {
-  name: string;
-}
+type CommandLike = {
+  readonly name: string;
+};
 
 function isSuffixedInvocation(name: string, command: string): boolean {
   if (!name.startsWith(`${command}:`)) return false;
@@ -14,7 +14,7 @@ function isSuffixedInvocation(name: string, command: string): boolean {
  */
 export function hasRuntimeCommandConflict(
   command: string,
-  availableCommands: readonly CommandLike[],
+  availableCommands: ReadonlyArray<CommandLike>,
   ownedAliases: ReadonlySet<string>,
 ): boolean {
   if (

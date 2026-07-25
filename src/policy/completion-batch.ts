@@ -1,28 +1,33 @@
-interface ToolCallContent {
-  type: 'toolCall';
-  id: string;
-  name: string;
-}
+type ToolCallContent = {
+  readonly type: 'toolCall';
+  readonly id: string;
+  readonly name: string;
+};
 
-function toolCalls(message: unknown): ToolCallContent[] {
-  if (message === null || typeof message !== 'object') return [];
-  const candidate = message as { role?: unknown; content?: unknown };
-  if (candidate.role !== 'assistant' || !Array.isArray(candidate.content))
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const toolCalls = (message: unknown): Array<ToolCallContent> => {
+  if (!isRecord(message)) return [];
+  if (message.role !== 'assistant' || !Array.isArray(message.content))
     return [];
 
-  return candidate.content.filter(
+  return message.content.filter(
     (item): item is ToolCallContent =>
-      item !== null &&
-      typeof item === 'object' &&
-      (item as { type?: unknown }).type === 'toolCall' &&
-      typeof (item as { id?: unknown }).id === 'string' &&
-      typeof (item as { name?: unknown }).name === 'string',
+      isRecord(item) &&
+      item.type === 'toolCall' &&
+      typeof item.id === 'string' &&
+      typeof item.name === 'string',
   );
-}
+};
 
 /**
  * A completion changes the active step and its permissions. It is therefore
  * safe only when it is the sole tool call in an assistant message.
+ *
+ * @param message - Assistant message to validate.
+ * @param completionTool - Workflow completion tool name.
+ * @returns IDs of invalid completion calls.
  */
 export function invalidCompletionCallIds(
   message: unknown,

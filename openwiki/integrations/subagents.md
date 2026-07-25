@@ -92,16 +92,21 @@ cross-step handoff. Parent and sibling transcripts are never inherited. The
 request's skill selection replaces the selected profile's normal skills for
 that step.
 
-On a `failed` or `structured_output_failed` terminal response with an error or
-nonzero exit code, the harness may launch one fresh reinforcement retry with
-the bounded terminal evidence. Runtime first requires a complete trusted
-transcript proving every recorded call was read-only or rejected before
-execution by the active step policy, using the same approved exact commands as
-the child. Its persisted policy-stripped task and per-request binding must also
-match the active delegation. Denied and read-only Bash modes need no additional
-opt-in; `subagent.retryToolFailures: true` explicitly authorizes the same retry
-in allow-list or unrestricted Bash mode. Validation still rejects the option
-when the step exposes `edit` or `write`.
+Automatic recovery candidates include `failed` and
+`structured_output_failed` responses with an error or nonzero exit, plus
+`timed_out`, `turn_budget_exhausted`, and `tool_budget_exhausted`. The harness
+may launch up to two fresh recovery attempts after distinct failures. Runtime
+first requires a complete trusted transcript proving that every actual call was
+read-only or rejected before execution by the active step policy, using the
+same approved exact commands as the child. Its persisted policy-stripped task
+and per-request binding must also match the active delegation.
+
+Denied and read-only Bash modes need no additional opt-in.
+`subagent.retryToolFailures: true` authorizes the same bounded recovery sequence
+in allow-list or unrestricted Bash mode. A configured `edit` or `write` tool
+does not disable recovery when it was never called; any recorded `edit`,
+`write`, mutation-capable Bash, or unknown-effect call makes the actual-call
+audit unsafe.
 
 Ordinary tool failures remain inside the same child whenever its runtime can
 continue. The delegated completion contract tells the child to inspect the
@@ -159,25 +164,35 @@ For a terminal error or nonzero exit, Pi Workflows audits a bounded tail of the
 retained Pi child session. It accepts only regular, non-symlink files contained
 by the current parent session's child-run root and requires its persisted
 policy-stripped task and per-request binding to match the active delegation.
-Every recorded call must be read-only or rejected by that step's actual Bash
-policy before execution, including its approved exact-command inputs;
-denial-like tool output alone is not replay proof. A complete zero-tool
-transcript is also replay-safe. When the terminal error identifies a tool, the
-diagnostic additionally requires its output to match and includes the exact
-call, tool error, exit code, terminal error, and validated session path.
-Otherwise the generic terminal evidence remains actionable without attributing
-an unrelated earlier call.
+Every actual recorded call must be read-only or rejected by that step's policy
+before execution, including its approved exact-command inputs. Merely exposing
+`edit` or `write` is harmless when neither was called, while a recorded
+mutation-capable call rejects recovery. Denial-like tool output alone is not
+replay proof. A complete zero-tool transcript is also replay-safe. When the
+terminal error identifies a tool, the diagnostic additionally requires its
+output to match and includes the exact call, tool error, exit code, terminal
+error, and validated session path. Otherwise the generic terminal evidence
+remains actionable without attributing an unrelated earlier call.
 
 A failed process status is accepted without replay when the contained
 transcript proves a matching successful `structured_output` after every failed
-tool result and the correlated capability-bound result validates. Without that
-proof, a replay-safe attempt gets at most one fresh reinforcement retry. The
-next child receives terminal evidence in an escaped JSON data boundary,
+tool result and the correlated capability-bound result validates.
+
+Without that proof, each replay-safe, semantically distinct failure may launch
+a fresh child, up to two automatic recovery attempts. The next child receives
+all previous bounded terminal evidence in an escaped JSON data boundary,
 inspects current state, diagnoses the evidence, changes its approach, and
-completes the original step. A second failure, a mutation-capable or
-unknown-effect call, incomplete, malformed, or incorrectly bound evidence,
-cancellation, interruption, timeout, or budget exhaustion pauses without
-automatic replay.
+completes the original step. Stable fingerprints omit request IDs and session
+paths; repeating an earlier fingerprint stops the sequence early.
+
+Cancellation, interruption, detached/stopped execution, inconsistent timeout
+projections, reported mutation, protocol/setup failure, and incomplete,
+malformed, or incorrectly bound evidence pause without automatic recovery.
+Consistent timeout and turn/tool-budget exhaustion remain eligible when their
+complete audit is replay-safe. A synchronous startup exception is caught and
+routed through normal serialized failure handling. Temporary workspace cleanup
+is best effort: removal failure warns but cannot interrupt a healthy run or
+recovery attempt.
 
 ## Planning And Questions
 

@@ -6,24 +6,31 @@ const PAUSE = 'Pause workflow';
 
 export type PromptGateReviewResult =
   | {
-      status: 'resolved';
-      approved: boolean;
-      feedback: string;
+      readonly status: 'resolved';
+      readonly approved: boolean;
+      readonly feedback: string;
     }
   | {
-      status: 'dismissed';
+      readonly status: 'dismissed';
     };
 
-export async function requestPromptGateReview(
+const selectionOptions = (
+  signal: AbortSignal | undefined,
+): Array<{ signal: AbortSignal }> => (signal ? [{ signal }] : []);
+
+/**
+ * Presents a local workflow gate and returns the reviewer's normalized choice.
+ */
+export const requestPromptGateReview = async (
   ui: ExtensionUIContext,
   title: string,
   artifact: string,
   signal?: AbortSignal,
-): Promise<PromptGateReviewResult> {
+): Promise<PromptGateReviewResult> => {
   const choice = await ui.select(
     `${title}\n\n${artifact}`,
     [APPROVE, REQUEST_CHANGES, PAUSE],
-    ...(signal ? [{ signal }] : []),
+    ...selectionOptions(signal),
   );
 
   if (choice === APPROVE) {
@@ -36,14 +43,14 @@ export async function requestPromptGateReview(
   let feedback = await ui.input(
     'Workflow review feedback',
     'Describe the required changes',
-    ...(signal ? [{ signal }] : []),
+    ...selectionOptions(signal),
   );
   while (feedback !== undefined && !feedback.trim()) {
     ui.notify('Feedback cannot be empty', 'warning');
     feedback = await ui.input(
       'Workflow review feedback',
       'Describe the required changes',
-      ...(signal ? [{ signal }] : []),
+      ...selectionOptions(signal),
     );
   }
   if (feedback === undefined) return { status: 'dismissed' };
@@ -52,4 +59,4 @@ export async function requestPromptGateReview(
     approved: false,
     feedback: feedback.trim(),
   };
-}
+};

@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -365,7 +375,7 @@ describe('when testing subagent failure diagnostics', () => {
     });
   });
 
-  test('audits the whole attempt before authorizing a reinforcement retry', () => {
+  test('audits the whole attempt before authorizing automatic recovery', () => {
     const policy = replayPolicy({ mode: 'read-only', allow: [] });
     const validReadAttempt = transcript().split('\n').slice(1).join('\n');
     expect(
@@ -695,6 +705,33 @@ describe('when testing subagent failure diagnostics', () => {
         tool: 'bash',
         call: expect.stringContaining('WorkflowHarness'),
       });
+      const fileSystemCalls: Array<string> = [];
+      expect(
+        await readToolFailureDiagnostic(
+          sessionFile,
+          trustedRoot,
+          identity,
+          'bash',
+          'bash failed (exit 1): substitutions and escapes are not allowed inside double quotes',
+          {
+            fileSystem: {
+              inspect: async (path) => {
+                fileSystemCalls.push(`inspect:${path}`);
+                return lstat(path);
+              },
+              realPath: async (path) => {
+                fileSystemCalls.push(`realPath:${path}`);
+                return realpath(path);
+              },
+              openReadOnlyNoFollow: async (path) => {
+                fileSystemCalls.push(`open:${path}`);
+                return open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+              },
+            },
+          },
+        ),
+      ).toMatchObject({ tool: 'bash' });
+      expect(fileSystemCalls).toHaveLength(4);
       expect(
         await readDelegationReplayAudit(
           sessionFile,

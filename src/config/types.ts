@@ -7,193 +7,195 @@ export const SUBAGENT_RUNTIME_NAME_PATTERN =
 
 export const TERMINAL_TARGETS = ['$done', '$pause'] as const;
 export type TerminalTarget = (typeof TERMINAL_TARGETS)[number];
-export type StepTarget = string | TerminalTarget;
+export type StepTarget = string;
 
 export type BashMode = 'deny' | 'read-only' | 'allow-list' | 'unrestricted';
 export type BashApprovalSource =
   'verification-worker' | 'verification-reviewer' | 'remote-actions';
 
-export interface BashRule {
-  executable: string;
-  argsPrefix: string[];
-}
+export type BashRule = {
+  readonly executable: string;
+  readonly argsPrefix: ReadonlyArray<string>;
+};
 
-export interface BashPermission {
-  mode: BashMode;
-  allow: BashRule[];
+export type BashPermission = {
+  readonly mode: BashMode;
+  readonly allow: ReadonlyArray<BashRule>;
   /**
    * Exact commands extracted from the most recent human-approved artifact.
    * They supplement `allow` only inside the correlated step execution.
    */
-  approvedSources?: BashApprovalSource[];
-}
+  readonly approvedSources?: ReadonlyArray<BashApprovalSource>;
+};
 
-export interface StepPermissions {
+export type StepPermissions = {
   /** Exact Pi tool names, including direct MCP tools. */
-  tools: string[];
+  readonly tools: ReadonlyArray<string>;
   /** MCP proxy selectors in `server` or `server/tool` form. */
-  mcp: string[];
+  readonly mcp: ReadonlyArray<string>;
   /** Source-name/path fragments whose registered tools may be used. */
-  extensions: string[];
+  readonly extensions: ReadonlyArray<string>;
   /** Skills the step prompt is allowed to use. */
-  skills: string[];
-  bash: BashPermission;
-}
+  readonly skills: ReadonlyArray<string>;
+  readonly bash: BashPermission;
+};
 
-export interface StepRequirements {
-  tools: string[];
-  extensions: string[];
-  skills: string[];
-}
+export type StepRequirements = {
+  readonly tools: ReadonlyArray<string>;
+  readonly extensions: ReadonlyArray<string>;
+  readonly skills: ReadonlyArray<string>;
+};
 
 export type SubagentContext = 'fresh';
 
-export interface SubagentTurnBudget {
-  maxTurns: number;
-  graceTurns?: number;
-}
+export type SubagentTurnBudget = {
+  readonly maxTurns: number;
+  readonly graceTurns?: number;
+};
 
-export interface SubagentToolBudget {
-  hard: number;
-  soft?: number;
-  block?: string[] | '*';
-}
+export type SubagentToolBudget = {
+  readonly hard: number;
+  readonly soft?: number;
+  readonly block?: ReadonlyArray<string> | '*';
+};
 
-export interface StepSubagent {
+export type StepSubagent = {
   /** Pi Subagents agent profile launched for this isolated step. */
-  agent: string;
+  readonly agent: string;
   /** Workflow steps always use a fresh context. */
-  context: SubagentContext;
-  model?: string;
-  timeoutMs: number;
-  turnBudget?: SubagentTurnBudget;
-  toolBudget?: SubagentToolBudget;
-  artifacts: boolean;
+  readonly context: SubagentContext;
+  readonly model?: string;
+  readonly timeoutMs: number;
+  readonly turnBudget?: SubagentTurnBudget;
+  readonly toolBudget?: SubagentToolBudget;
+  readonly artifacts: boolean;
   /**
-   * Authorizes one fresh reinforcement retry in Bash modes broader than
-   * read-only when the complete trusted attempt is replay-safe.
+   * Authorizes the bounded automatic recovery sequence in Bash modes broader
+   * than read-only. Every failed attempt must still have a complete,
+   * mutation-safe replay audit.
    */
-  retryToolFailures: boolean;
-}
+  readonly retryToolFailures: boolean;
+};
 
-export type PromptSpec = { inline: string } | { file: string };
+export type PromptSpec =
+  { readonly inline: string } | { readonly file: string };
 
-interface GateDefinition {
-  submitOutcome: string;
-  approvedOutcome: string;
-  rejectedOutcome: string;
-}
+type GateDefinition = {
+  readonly submitOutcome: string;
+  readonly approvedOutcome: string;
+  readonly rejectedOutcome: string;
+};
 
-export interface PromptGate extends GateDefinition {
-  provider: 'prompt';
-}
+export type PromptGate = GateDefinition & {
+  readonly provider: 'prompt';
+};
 
-export interface PlannotatorGate extends GateDefinition {
-  provider: 'plannotator';
-  timeoutMs: number;
-}
+export type PlannotatorGate = GateDefinition & {
+  readonly provider: 'plannotator';
+  readonly timeoutMs: number;
+};
 
 export type WorkflowGate = PromptGate | PlannotatorGate;
 
-export interface WorkflowStep {
-  title: string;
-  prompt: PromptSpec;
+export type WorkflowStep = {
+  readonly title: string;
+  readonly prompt: PromptSpec;
   /** Omit to execute this step in the main Pi agent. */
-  subagent?: StepSubagent;
-  permissions: StepPermissions;
-  requires: StepRequirements;
-  transitions: Record<string, StepTarget>;
-  gate?: WorkflowGate;
-}
+  readonly subagent?: StepSubagent;
+  readonly permissions: StepPermissions;
+  readonly requires: StepRequirements;
+  readonly transitions: Readonly<Record<string, StepTarget>>;
+  readonly gate?: WorkflowGate;
+};
 
-export interface WorkflowDefinition {
-  version: typeof WORKFLOW_SCHEMA_VERSION;
-  id: string;
-  command: string;
-  description: string;
-  start: string;
-  maxStepVisits: number;
-  summaryMaxChars: number;
-  steps: Record<string, WorkflowStep>;
-}
+export type WorkflowDefinition = {
+  readonly version: typeof WORKFLOW_SCHEMA_VERSION;
+  readonly id: string;
+  readonly command: string;
+  readonly description: string;
+  readonly start: string;
+  readonly maxStepVisits: number;
+  readonly summaryMaxChars: number;
+  readonly steps: Readonly<Record<string, WorkflowStep>>;
+};
 
 export type WorkflowSourceKind = 'user' | 'project';
 
-export interface LoadedWorkflow {
-  definition: WorkflowDefinition;
-  prompts: Record<string, string>;
-  digest: string;
-  stepDigests: Record<string, string>;
-  sourcePath: string;
-  sourceKind: WorkflowSourceKind;
-}
+export type LoadedWorkflow = {
+  readonly definition: WorkflowDefinition;
+  readonly prompts: Readonly<Record<string, string>>;
+  readonly digest: string;
+  readonly stepDigests: Readonly<Record<string, string>>;
+  readonly sourcePath: string;
+  readonly sourceKind: WorkflowSourceKind;
+};
 
-export interface PermissionCeiling {
-  tools: string[];
-  mcp: string[];
-  extensions: string[];
-  skills: string[];
-  bash: BashPermission;
-  subagent?: SubagentPermissionCeiling;
-}
+export type PermissionCeiling = {
+  readonly tools: ReadonlyArray<string>;
+  readonly mcp: ReadonlyArray<string>;
+  readonly extensions: ReadonlyArray<string>;
+  readonly skills: ReadonlyArray<string>;
+  readonly bash: BashPermission;
+  readonly subagent?: SubagentPermissionCeiling;
+};
 
-export interface SubagentPermissionCeiling {
-  agents: string[];
-  contexts: SubagentContext[];
-  models: string[];
-  maxTimeoutMs: number;
-  maxTurns: number;
-  maxGraceTurns: number;
-  maxToolCalls: number;
-  artifacts: boolean;
-  retryToolFailures: boolean;
-}
+export type SubagentPermissionCeiling = {
+  readonly agents: ReadonlyArray<string>;
+  readonly contexts: ReadonlyArray<SubagentContext>;
+  readonly models: ReadonlyArray<string>;
+  readonly maxTimeoutMs: number;
+  readonly maxTurns: number;
+  readonly maxGraceTurns: number;
+  readonly maxToolCalls: number;
+  readonly artifacts: boolean;
+  readonly retryToolFailures: boolean;
+};
 
-export interface WorkflowSettings {
-  version: typeof WORKFLOW_SCHEMA_VERSION;
-  allowProjectWorkflows: boolean;
-  statusShortcut: KeyId;
-  permissionCeiling?: PermissionCeiling;
-}
+export type WorkflowSettings = {
+  readonly version: typeof WORKFLOW_SCHEMA_VERSION;
+  readonly allowProjectWorkflows: boolean;
+  readonly statusShortcut: KeyId;
+  readonly permissionCeiling?: PermissionCeiling;
+};
 
-export interface ConfigDiagnostic {
-  level: 'warning' | 'error';
-  path: string;
-  message: string;
-}
+export type ConfigDiagnostic = {
+  readonly level: 'warning' | 'error';
+  readonly path: string;
+  readonly message: string;
+};
 
-export interface WorkflowCatalog {
-  workflows: Map<string, LoadedWorkflow>;
-  settings: WorkflowSettings;
-  diagnostics: ConfigDiagnostic[];
-  userDirectory: string;
-  projectDirectory?: string;
-}
+export type WorkflowCatalog = {
+  readonly workflows: ReadonlyMap<string, LoadedWorkflow>;
+  readonly settings: WorkflowSettings;
+  readonly diagnostics: ReadonlyArray<ConfigDiagnostic>;
+  readonly userDirectory: string;
+  readonly projectDirectory?: string;
+};
 
-export const EMPTY_PERMISSIONS: StepPermissions = {
+export const EMPTY_PERMISSIONS = {
   tools: [],
   mcp: [],
   extensions: [],
   skills: [],
   bash: { mode: 'deny', allow: [] },
-};
+} as const satisfies StepPermissions;
 
-export const EMPTY_REQUIREMENTS: StepRequirements = {
+export const EMPTY_REQUIREMENTS = {
   tools: [],
   extensions: [],
   skills: [],
-};
+} as const satisfies StepRequirements;
 
-export const DEFAULT_STEP_SUBAGENT: StepSubagent = {
+export const DEFAULT_STEP_SUBAGENT = {
   agent: 'pi-workflows.step',
   context: 'fresh',
   timeoutMs: 900_000,
   artifacts: false,
   retryToolFailures: false,
-};
+} as const satisfies StepSubagent;
 
-export const DEFAULT_SETTINGS: WorkflowSettings = {
+export const DEFAULT_SETTINGS = {
   version: WORKFLOW_SCHEMA_VERSION,
   allowProjectWorkflows: false,
   statusShortcut: DEFAULT_STATUS_SHORTCUT,
-};
+} as const satisfies WorkflowSettings;

@@ -2,12 +2,14 @@ import type {
   BashPermission,
   BashRule,
   PermissionCeiling,
+  StepSubagent,
+  SubagentPermissionCeiling,
   WorkflowDefinition,
 } from './types.ts';
 
 function selectorAllowed(
   requested: string,
-  ceiling: readonly string[],
+  ceiling: ReadonlyArray<string>,
 ): boolean {
   const separator = requested.indexOf('/');
   if (separator === -1) return ceiling.includes(requested);
@@ -39,123 +41,121 @@ function bashWithinCeiling(
   );
 }
 
+function turnBudgetErrors(
+  subagent: StepSubagent,
+  ceiling: SubagentPermissionCeiling,
+  path: string,
+): Array<string> {
+  if (!subagent.turnBudget) {
+    return [`${path}.turnBudget: required for a project workflow`];
+  }
+  return [
+    ...(subagent.turnBudget.maxTurns > ceiling.maxTurns
+      ? [`${path}.turnBudget.maxTurns: exceeds the user permission ceiling`]
+      : []),
+    ...((subagent.turnBudget.graceTurns ?? 0) > ceiling.maxGraceTurns
+      ? [`${path}.turnBudget.graceTurns: exceeds the user permission ceiling`]
+      : []),
+  ];
+}
+
+function toolBudgetErrors(
+  subagent: StepSubagent,
+  ceiling: SubagentPermissionCeiling,
+  path: string,
+): Array<string> {
+  if (!subagent.toolBudget) {
+    return [`${path}.toolBudget: required for a project workflow`];
+  }
+  return [
+    ...(subagent.toolBudget.hard > ceiling.maxToolCalls
+      ? [`${path}.toolBudget.hard: exceeds the user permission ceiling`]
+      : []),
+    ...(subagent.toolBudget.block !== '*'
+      ? [`${path}.toolBudget.block: must be "*" for a project workflow`]
+      : []),
+  ];
+}
+
+function subagentErrors(
+  subagent: StepSubagent | undefined,
+  ceiling: SubagentPermissionCeiling | undefined,
+  path: string,
+): Array<string> {
+  if (!subagent) return [];
+  if (!ceiling) {
+    return [`${path}: subagent execution exceeds the user permission ceiling`];
+  }
+  return [
+    ...(!ceiling.agents.includes(subagent.agent)
+      ? [
+          `${path}.agent: "${subagent.agent}" exceeds the user permission ceiling`,
+        ]
+      : []),
+    ...(!ceiling.contexts.includes(subagent.context)
+      ? [
+          `${path}.context: "${subagent.context}" exceeds the user permission ceiling`,
+        ]
+      : []),
+    ...(subagent.model && !ceiling.models.includes(subagent.model)
+      ? [
+          `${path}.model: "${subagent.model}" exceeds the user permission ceiling`,
+        ]
+      : []),
+    ...(subagent.timeoutMs > ceiling.maxTimeoutMs
+      ? [`${path}.timeoutMs: exceeds the user permission ceiling`]
+      : []),
+    ...(subagent.artifacts && !ceiling.artifacts
+      ? [`${path}.artifacts: exceeds the user permission ceiling`]
+      : []),
+    ...(subagent.retryToolFailures && !ceiling.retryToolFailures
+      ? [`${path}.retryToolFailures: exceeds the user permission ceiling`]
+      : []),
+    ...turnBudgetErrors(subagent, ceiling, path),
+    ...toolBudgetErrors(subagent, ceiling, path),
+  ];
+}
+
+/** Return every project-workflow permission that exceeds the user ceiling. */
 export function checkWorkflowAgainstCeiling(
   workflow: WorkflowDefinition,
   ceiling: PermissionCeiling,
-): string[] {
-  const errors: string[] = [];
-  for (const [stepId, step] of Object.entries(workflow.steps)) {
+): Array<string> {
+  return Object.entries(workflow.steps).flatMap(([stepId, step]) => {
     const path = `workflow.steps.${stepId}.permissions`;
-    const subagentPath = `workflow.steps.${stepId}.subagent`;
-    for (const tool of step.permissions.tools) {
-      if (!ceiling.tools.includes(tool)) {
-        errors.push(
-          `${path}.tools: "${tool}" exceeds the user permission ceiling`,
-        );
-      }
-    }
-    for (const selector of step.permissions.mcp) {
-      if (!selectorAllowed(selector, ceiling.mcp)) {
-        errors.push(
-          `${path}.mcp: "${selector}" exceeds the user permission ceiling`,
-        );
-      }
-    }
-    for (const extension of step.permissions.extensions) {
-      if (!ceiling.extensions.includes(extension)) {
-        errors.push(
-          `${path}.extensions: "${extension}" exceeds the user permission ceiling`,
-        );
-      }
-    }
-    for (const skill of step.permissions.skills) {
-      if (!ceiling.skills.includes(skill)) {
-        errors.push(
-          `${path}.skills: "${skill}" exceeds the user permission ceiling`,
-        );
-      }
-    }
-    if (!bashWithinCeiling(step.permissions.bash, ceiling.bash)) {
-      errors.push(`${path}.bash: exceeds the user permission ceiling`);
-    }
-    if (!step.subagent) continue;
-    if (!ceiling.subagent) {
-      errors.push(
-        `${subagentPath}: subagent execution exceeds the user permission ceiling`,
-      );
-      continue;
-    }
-    if (!ceiling.subagent.agents.includes(step.subagent.agent)) {
-      errors.push(
-        `${subagentPath}.agent: "${step.subagent.agent}" exceeds the user permission ceiling`,
-      );
-    }
-    if (!ceiling.subagent.contexts.includes(step.subagent.context)) {
-      errors.push(
-        `${subagentPath}.context: "${step.subagent.context}" exceeds the user permission ceiling`,
-      );
-    }
-    if (
-      step.subagent.model &&
-      !ceiling.subagent.models.includes(step.subagent.model)
-    ) {
-      errors.push(
-        `${subagentPath}.model: "${step.subagent.model}" exceeds the user permission ceiling`,
-      );
-    }
-    if (step.subagent.timeoutMs > ceiling.subagent.maxTimeoutMs) {
-      errors.push(
-        `${subagentPath}.timeoutMs: exceeds the user permission ceiling`,
-      );
-    }
-    if (step.subagent.artifacts && !ceiling.subagent.artifacts) {
-      errors.push(
-        `${subagentPath}.artifacts: exceeds the user permission ceiling`,
-      );
-    }
-    if (
-      step.subagent.retryToolFailures &&
-      !ceiling.subagent.retryToolFailures
-    ) {
-      errors.push(
-        `${subagentPath}.retryToolFailures: exceeds the user permission ceiling`,
-      );
-    }
-    if (!step.subagent.turnBudget) {
-      errors.push(
-        `${subagentPath}.turnBudget: required for a project workflow`,
-      );
-    } else {
-      if (step.subagent.turnBudget.maxTurns > ceiling.subagent.maxTurns) {
-        errors.push(
-          `${subagentPath}.turnBudget.maxTurns: exceeds the user permission ceiling`,
-        );
-      }
-      if (
-        (step.subagent.turnBudget.graceTurns ?? 0) >
-        ceiling.subagent.maxGraceTurns
-      ) {
-        errors.push(
-          `${subagentPath}.turnBudget.graceTurns: exceeds the user permission ceiling`,
-        );
-      }
-    }
-    if (!step.subagent.toolBudget) {
-      errors.push(
-        `${subagentPath}.toolBudget: required for a project workflow`,
-      );
-    } else {
-      if (step.subagent.toolBudget.hard > ceiling.subagent.maxToolCalls) {
-        errors.push(
-          `${subagentPath}.toolBudget.hard: exceeds the user permission ceiling`,
-        );
-      }
-      if (step.subagent.toolBudget.block !== '*') {
-        errors.push(
-          `${subagentPath}.toolBudget.block: must be "*" for a project workflow`,
-        );
-      }
-    }
-  }
-  return errors;
+    return [
+      ...step.permissions.tools
+        .filter((tool) => !ceiling.tools.includes(tool))
+        .map(
+          (tool) =>
+            `${path}.tools: "${tool}" exceeds the user permission ceiling`,
+        ),
+      ...step.permissions.mcp
+        .filter((selector) => !selectorAllowed(selector, ceiling.mcp))
+        .map(
+          (selector) =>
+            `${path}.mcp: "${selector}" exceeds the user permission ceiling`,
+        ),
+      ...step.permissions.extensions
+        .filter((extension) => !ceiling.extensions.includes(extension))
+        .map(
+          (extension) =>
+            `${path}.extensions: "${extension}" exceeds the user permission ceiling`,
+        ),
+      ...step.permissions.skills
+        .filter((skill) => !ceiling.skills.includes(skill))
+        .map(
+          (skill) =>
+            `${path}.skills: "${skill}" exceeds the user permission ceiling`,
+        ),
+      ...(!bashWithinCeiling(step.permissions.bash, ceiling.bash)
+        ? [`${path}.bash: exceeds the user permission ceiling`]
+        : []),
+      ...subagentErrors(
+        step.subagent,
+        ceiling.subagent,
+        `workflow.steps.${stepId}.subagent`,
+      ),
+    ];
+  });
 }

@@ -248,16 +248,16 @@ configured in `~/.pi/agent/workflows/settings.yaml`.
 
 Supported fields:
 
-| Field               | Default               | Description                                                                                                                                                     |
-| ------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`             | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.                                                                               |
-| `context`           | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                                                                                            |
-| `model`             | Profile/default model | Optional pi-subagents model override for the selected profile.                                                                                                  |
-| `timeoutMs`         | `900000`              | Child deadline, from 1 second through 24 hours.                                                                                                                 |
-| `turnBudget`        | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                                                                                                           |
-| `toolBudget`        | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array.                                                                             |
-| `artifacts`         | `false`               | Ask pi-subagents to retain its normal run artifacts.                                                                                                            |
-| `retryToolFailures` | `false`               | Authorize one fresh reinforcement retry in allow-list or unrestricted Bash mode; runtime still requires a wholly replay-safe attempt without `edit` or `write`. |
+| Field               | Default               | Description                                                                                                                                                                                    |
+| ------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`             | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.                                                                                                              |
+| `context`           | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                                                                                                                           |
+| `model`             | Profile/default model | Optional pi-subagents model override for the selected profile.                                                                                                                                 |
+| `timeoutMs`         | `900000`              | Child deadline, from 1 second through 24 hours.                                                                                                                                                |
+| `turnBudget`        | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                                                                                                                                          |
+| `toolBudget`        | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array.                                                                                                            |
+| `artifacts`         | `false`               | Ask pi-subagents to retain its normal run artifacts.                                                                                                                                           |
+| `retryToolFailures` | `false`               | Authorize the bounded automatic recovery sequence in allow-list or unrestricted Bash mode; every failed attempt still needs a complete audit proving that its actual calls were mutation-safe. |
 
 Pi Workflows installs an inert listener in every Pi Subagents child and
 activates policy only after a valid, single-use workflow capability arrives, so
@@ -590,16 +590,17 @@ blocked. Wait for the terminal event; if the delegation channel has already
 failed, restart Pi before resuming. This prevents an old writer and a resumed
 writer from overlapping.
 
-When a delegated child returns `failed` or `structured_output_failed` with a
-terminal error or nonzero exit code, the harness audits the retained Pi child
-session before deciding whether to launch one fresh reinforcement retry. The
-audit accepts only regular, non-symlink session files contained by the current
-parent session's child-run root, requires the persisted policy-stripped task and
-its per-request binding to match the active delegation, reads a bounded complete
-tail, and proves that every recorded call was read-only or rejected by that
-step's actual Bash policy before execution. Approved exact Bash commands are
-evaluated with the same authorization inputs used by the child. A zero-tool
-attempt is also replay-safe when the complete bound transcript proves it.
+When a delegated child returns `failed`, `structured_output_failed`,
+`timed_out`, `turn_budget_exhausted`, or `tool_budget_exhausted`, the harness
+audits the retained Pi child session before deciding whether to launch a fresh
+automatic recovery child. The audit accepts only regular, non-symlink session
+files contained by the current parent session's child-run root, requires the
+persisted policy-stripped task and its per-request binding to match the active
+delegation, reads a bounded complete tail, and proves that every recorded call
+was read-only or rejected by that step's actual Bash policy before execution.
+Approved exact Bash commands are evaluated with the same authorization inputs
+used by the child. A zero-tool attempt is also replay-safe when the complete
+bound transcript proves it.
 
 When the terminal error identifies a failed tool, the harness also records the
 exact correlated call, tool error, subagent exit code, terminal error, and
@@ -611,13 +612,25 @@ correlated result validates. This accepts the same finalized child result; it
 never replays mutation-capable work.
 
 Without a valid finalized result, the next fresh child receives the bounded
-terminal evidence in an escaped JSON data boundary and is told to inspect
-current state, change its approach, resolve the cause, and finish the original
-step. A second failure pauses. Mutation-capable or unknown-effect calls, a
-truncated or malformed transcript, a missing active-request binding,
-cancellation, interruption, timeout, and budget exhaustion do not trigger an
-automatic retry. Local channel failures also wait for confirmed child
+history of distinct terminal evidence in an escaped JSON data boundary and is
+told to inspect current state, change its approach, resolve the cause, and
+finish the original step. The harness launches at most two automatic recovery
+children and stops early when the semantic failure fingerprint repeats.
+Availability of `edit` or `write` is not itself a veto: the complete audit must
+prove that the failed attempt did not actually make or attempt a mutation.
+Mutation-capable or unknown-effect calls, reported file mutation, a truncated or
+malformed transcript, a missing active-request binding, cancellation,
+interruption, detached or stopped execution, and protocol/configuration errors
+remain hard stops. Local channel failures also wait for confirmed child
 termination instead of risking two live children.
+
+Temporary delegation-workspace removal is best-effort housekeeping. A cleanup
+error produces a warning but cannot pause an otherwise healthy next step or
+recovery child. Synchronous startup exceptions are contained by the serialized
+failure path. Each recovery uses a new request identity, private result
+capability, and fresh context. The fixed two-attempt bound means a failing step
+can consume at most three times its per-child timeout, turn budget, and tool
+budget.
 
 Inside a live child, recovery is not tied to a list of known error strings. The
 completion contract requires the agent to inspect the exact error and current
@@ -806,8 +819,9 @@ ceilings, deterministic transitions, configuration reconciliation, pause/resume
 state, gate handling, MCP isolation, Bash policy, extension tool selection,
 main-agent completion, built-in feedback/approval, subagent request correlation
 and cancellation, child policy enforcement, and dependency preflight,
-including reinforcement retry after replay-safe terminal errors and nonzero
-exits, reviewed exact-command propagation, and fail-closed legacy checkpoints.
+including bounded automatic recovery after replay-safe terminal errors,
+timeouts, budget exhaustion, and nonzero exits; duplicate-failure stopping;
+reviewed exact-command propagation; and fail-closed legacy checkpoints.
 `bun run check` also launches real Pi RPC subprocesses, invokes
 `/work`, and verifies fresh `scout`, `worker`, and `reviewer` children receive
 only the explicit compact handoff from the immediately preceding step.
@@ -827,17 +841,17 @@ The `pi-package` keyword makes the package discoverable by the Pi package galler
 The current schema covers the execution harness requested here. Useful future
 extensions, without hard-coding them into the orchestrator, are:
 
-| Parameter                         | Why it belongs in configuration                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------- |
-| Configurable retry and backoff    | Extend the single safe reinforcement retry with per-step transient-failure policy.          |
-| Acceptance criteria               | Give each step machine-checkable completion evidence and verification commands.             |
-| Working directory or worktree     | Isolate mutating steps, monorepo packages, and concurrent branches.                         |
-| Parallel groups and join policy   | Run independent steps together and declare fail-fast, quorum, or all-success behavior.      |
-| Generic gates                     | Add ticket, CI, chat, or custom approval providers behind the same versioned gate contract. |
-| Output schema and named artifacts | Pass structured data between steps instead of relying only on a summary.                    |
-| Cost and token ceilings           | Bound model spend independently from turn and tool-call budgets.                            |
-| Environment and secret references | Select named credentials without embedding secret values in workflow files.                 |
-| Logging and retention             | Configure progress events, redaction, child artifact retention, and checkpoint history.     |
+| Parameter                         | Why it belongs in configuration                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Configurable recovery and backoff | Replace the fixed two-attempt recovery cap with a ceiling-aware per-step transient-failure policy. |
+| Acceptance criteria               | Give each step machine-checkable completion evidence and verification commands.                    |
+| Working directory or worktree     | Isolate mutating steps, monorepo packages, and concurrent branches.                                |
+| Parallel groups and join policy   | Run independent steps together and declare fail-fast, quorum, or all-success behavior.             |
+| Generic gates                     | Add ticket, CI, chat, or custom approval providers behind the same versioned gate contract.        |
+| Output schema and named artifacts | Pass structured data between steps instead of relying only on a summary.                           |
+| Cost and token ceilings           | Bound model spend independently from turn and tool-call budgets.                                   |
+| Environment and secret references | Select named credentials without embedding secret values in workflow files.                        |
+| Logging and retention             | Configure progress events, redaction, child artifact retention, and checkpoint history.            |
 
 ## Current limits
 

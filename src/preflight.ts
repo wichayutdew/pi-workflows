@@ -1,76 +1,111 @@
 import type { WorkflowStep } from './config/types.ts';
 
-interface SourceInfoLike {
-  source?: string;
-  path?: string;
-}
+type SourceInfoLike = {
+  readonly source?: string;
+  readonly path?: string;
+};
 
-interface NamedResource {
-  name: string;
-  sourceInfo?: SourceInfoLike;
-}
+type NamedResource = {
+  readonly name: string;
+  readonly sourceInfo?: SourceInfoLike;
+};
 
-export interface PreflightInventory {
-  tools: readonly NamedResource[];
-  commands: readonly NamedResource[];
-  skills: ReadonlySet<string>;
-}
+/**
+ * Installed resources visible to workflow preflight checks.
+ */
+export type PreflightInventory = {
+  readonly tools: ReadonlyArray<NamedResource>;
+  readonly commands: ReadonlyArray<NamedResource>;
+  readonly skills: ReadonlySet<string>;
+};
 
-function sourceMatches(resource: NamedResource, selector: string): boolean {
-  const source = `${resource.sourceInfo?.source ?? ''}\n${resource.sourceInfo?.path ?? ''}`;
+const sourceMatches = (resource: NamedResource, selector: string): boolean => {
+  const source = [
+    resource.sourceInfo?.source ?? '',
+    resource.sourceInfo?.path ?? '',
+  ].join('\n');
   return source.toLowerCase().includes(selector.toLowerCase());
-}
+};
 
+type ResourceKind = 'extension' | 'skill' | 'tool';
+
+const MISSING_RESOURCE_STATE = {
+  extension: 'detectable',
+  skill: 'loaded',
+  tool: 'installed',
+} as const satisfies Record<ResourceKind, string>;
+
+type MissingRequiredResourcesOptions = {
+  readonly requiredNames: ReadonlyArray<string>;
+  readonly hasResource: (name: string) => boolean;
+  readonly resourceKind: ResourceKind;
+};
+
+const missingRequiredResources = ({
+  requiredNames,
+  hasResource,
+  resourceKind,
+}: MissingRequiredResourcesOptions): ReadonlyArray<string> =>
+  requiredNames
+    .filter((name) => !hasResource(name))
+    .map(
+      (name) =>
+        `required ${resourceKind} "${name}" is not ${MISSING_RESOURCE_STATE[resourceKind]}`,
+    );
+
+/**
+ * Checks that resources required by a workflow step are available before
+ * execution begins.
+ *
+ * @param step - Workflow step to validate.
+ * @param inventory - Installed tools, commands, and loaded skills.
+ * @returns Human-readable preflight errors, or an empty array when ready.
+ */
 export function preflightStep(
   step: WorkflowStep,
   inventory: PreflightInventory,
-): string[] {
-  const errors: string[] = [];
+): Array<string> {
   const toolNames = new Set(inventory.tools.map((tool) => tool.name));
-  const subagentTool = inventory.tools.find(
+  const extensionResources = [...inventory.tools, ...inventory.commands];
+  const hasExtension = (extension: string): boolean =>
+    extensionResources.some((resource) => sourceMatches(resource, extension));
+  const hasSubagentTool = inventory.tools.some(
     (tool) => tool.name === 'subagent' && sourceMatches(tool, 'pi-subagents'),
   );
-
-  if (step.subagent && !subagentTool) {
-    errors.push(
-      'pi-subagents is required, but its "subagent" tool is not installed or detectable',
-    );
-  }
-
-  for (const tool of step.requires.tools) {
-    if (!toolNames.has(tool)) {
-      errors.push(`required tool "${tool}" is not installed`);
-    }
-  }
-  if (step.permissions.mcp.length > 0 && !toolNames.has('mcp')) {
-    errors.push(
-      'MCP selectors are configured, but the "mcp" proxy tool is not installed',
-    );
-  }
-
-  const extensionResources = [...inventory.tools, ...inventory.commands];
-  if (
+  const isPlannotatorRequired =
     step.gate?.provider === 'plannotator' &&
-    !step.requires.extensions.includes('plannotator') &&
-    !extensionResources.some((resource) =>
-      sourceMatches(resource, 'plannotator'),
-    )
-  ) {
-    errors.push(
-      'Plannotator is required by this gate, but its extension is not installed or detectable',
-    );
-  }
-  for (const extension of step.requires.extensions) {
-    if (
-      !extensionResources.some((resource) => sourceMatches(resource, extension))
-    ) {
-      errors.push(`required extension "${extension}" is not detectable`);
-    }
-  }
-  for (const skill of step.requires.skills) {
-    if (!inventory.skills.has(skill)) {
-      errors.push(`required skill "${skill}" is not loaded`);
-    }
-  }
-  return errors;
+    !step.requires.extensions.includes('plannotator');
+
+  return [
+    ...(step.subagent && !hasSubagentTool
+      ? [
+          'pi-subagents is required, but its "subagent" tool is not installed or detectable',
+        ]
+      : []),
+    ...missingRequiredResources({
+      requiredNames: step.requires.tools,
+      hasResource: (toolName) => toolNames.has(toolName),
+      resourceKind: 'tool',
+    }),
+    ...(step.permissions.mcp.length > 0 && !toolNames.has('mcp')
+      ? [
+          'MCP selectors are configured, but the "mcp" proxy tool is not installed',
+        ]
+      : []),
+    ...(isPlannotatorRequired && !hasExtension('plannotator')
+      ? [
+          'Plannotator is required by this gate, but its extension is not installed or detectable',
+        ]
+      : []),
+    ...missingRequiredResources({
+      requiredNames: step.requires.extensions,
+      hasResource: hasExtension,
+      resourceKind: 'extension',
+    }),
+    ...missingRequiredResources({
+      requiredNames: step.requires.skills,
+      hasResource: (skillName) => inventory.skills.has(skillName),
+      resourceKind: 'skill',
+    }),
+  ];
 }
