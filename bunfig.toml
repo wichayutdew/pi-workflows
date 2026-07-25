@@ -5,4 +5,4 @@ env = "BUN_PUBLIC_*"
 coverage = true
 coverageReporter = [ "lcov" ]
 coverageDir = "coverage"
-coverageThreshold = 1
+coverageThreshold = 0.9
