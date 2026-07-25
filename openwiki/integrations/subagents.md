@@ -62,9 +62,9 @@ flowchart TD
   Input --> Envelope{workflow policy envelope?}
   Envelope -- no --> Ordinary[leave ordinary child untouched]
   Envelope -- yes --> Verify[verify exact child profile and capability]
-  Verify --> Baseline[capture selected profile active tools]
-  Baseline --> Complete[require upstream structured_output]
-  Complete --> Narrow[intersect profile tools with step permissions]
+  Verify --> Complete[require upstream structured_output]
+  Complete --> Registered[inspect tools registered in the child]
+  Registered --> Narrow[activate only workflow-permitted tools]
   Narrow --> Prompt[append child system prompt]
   Prompt --> Work[child performs step]
 ```
@@ -76,13 +76,13 @@ such as `subagent: scout` therefore starts Pi Subagents' actual `scout` profile;
 it is not merely a label in a general-purpose prompt. The bundled
 `pi-workflows.step` profile is only the default when `agent` is omitted.
 
-The selected profile remains an outer boundary. Its explicit tools and loaded
-extensions can hide capabilities from the workflow child. Pi Workflows then
-narrows that visible set with the declarative step permissions; it cannot add a
-normal tool or extension the profile excluded. Pi Subagents 0.36 supplies
-`structured_output` from the request's `outputSchema`, so delegated completion
-does not depend on a profile exposing the main-agent-only
-`workflow_complete_step` tool.
+The selected profile supplies its persona, model defaults, context policy, and
+loaded extensions. Once the signed workflow capability is verified, its
+ordinary active-tool list is replaced by the declarative step permissions
+resolved against tools registered in that child. An unloaded extension provider
+remains unavailable. Pi Subagents 0.36 supplies `structured_output` from the
+request's `outputSchema`, so delegated completion does not depend on a profile
+exposing the main-agent-only `workflow_complete_step` tool.
 
 The workflow request deliberately owns fresh context, timeout, skills,
 artifacts, and its optional model override. The profile supplies its specialty,
@@ -91,6 +91,20 @@ self-contained compact summary or approved gate artifact supplies the only
 cross-step handoff. Parent and sibling transcripts are never inherited. The
 request's skill selection replaces the selected profile's normal skills for
 that step.
+
+`subagent.retryToolFailures: true` explicitly authorizes the harness to launch
+one fresh retry with the actionable terminal diagnostic. Validation rejects
+the option when the step exposes `edit` or `write`. Because unrestricted Bash
+can still mutate state, the workflow author must use it only when every
+possible earlier effect is safe to repeat.
+
+Ordinary tool failures remain inside the same child whenever its runtime can
+continue. The delegated completion contract tells the child to inspect the
+exact error and observed state, try a permitted semantically equivalent
+alternative, and finish the original step. It must not stop after the first
+recoverable error or broaden mutation scope. A terminal pause is reserved for
+exhausted recovery and must carry the failed call, error, attempted
+alternatives, and unresolved blocker.
 
 When an approved artifact names one repository, the request starts in its
 existing absolute `repositories[].cwd`. A missing target worktree may start
@@ -136,6 +150,20 @@ stateDiagram-v2
 
 While blocked, the harness keeps main tools isolated and refuses resume because a child may still be alive.
 
+For a terminal tool failure, Pi Workflows reads only the correlated failed-tool
+records from a bounded tail of the retained Pi child session. It accepts only
+regular, non-symlink files contained by the current parent session's child-run
+root and requires the tool output to match the terminal failure. Retry and
+pause diagnostics include the exact tool call, tool error, subagent exit code,
+terminal error, and validated session path. If safe correlation is unavailable,
+the terminal error remains actionable without attributing an unrelated earlier
+tool call. A failed process status is accepted when the contained transcript
+proves a matching successful `structured_output` after every failed tool result
+and the correlated capability-bound result validates. This consumes the same
+finalized child result and does not replay its effects. Without that proof,
+replay-safe delegated steps get at most one retry with the diagnostic.
+Mutation-capable steps pause without automatic replay.
+
 ## Planning And Questions
 
 Delegated workflow children are non-interactive. The child runtime removes and
@@ -158,16 +186,18 @@ before enabling Bash.
 
 ```mermaid
 flowchart TD
-  Settings[Pi Subagents settings for selected profile] --> Runtime[resolved active tools]
-  Workflow[workflow step permissions] --> Intersection[tool intersection]
-  Runtime --> Intersection
+  Settings[Pi Subagents selected profile] --> Providers[loaded child providers]
+  Workflow[workflow step permissions] --> Activation[exact tool activation]
+  Providers --> Registered[registered child tools]
+  Registered --> Activation
   Capability[single-use workflow capability] --> Completion[structured_output]
-  Intersection --> Effective[effective child tools]
+  Activation --> Effective[effective child tools]
   Completion --> Effective
 ```
 
-The selected profile's resolved tools and extensions are the outer visibility
-boundary. Pi Workflows may narrow them but cannot activate a normal tool or
-extension that Pi Subagents excluded. `structured_output` is supplied upstream
-for this schema-backed request and is accepted only after capability
+The workflow step is the sole active-tool allow-list after capability
+verification. The selected profile still controls provider loading, so an
+unregistered extension tool cannot be activated. Ordinary non-workflow
+subagent runs retain their profile tool lists. `structured_output` is supplied
+upstream for this schema-backed request and is accepted only after capability
 verification.

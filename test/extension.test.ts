@@ -10,12 +10,16 @@ describe('when testing extension', () => {
       const tools = new Set<string>();
       const events = new Set<string>();
       const channels = new Set<string>();
+      const shortcuts = new Set<string>();
       const pi = {
         registerCommand(name: string) {
           commands.add(name);
         },
         registerTool(tool: { name: string }) {
           tools.add(tool.name);
+        },
+        registerShortcut(shortcut: string) {
+          shortcuts.add(shortcut);
         },
         on(event: string) {
           events.add(event);
@@ -37,7 +41,8 @@ describe('when testing extension', () => {
       expect(commands.has('workflow-start')).toBe(true);
       expect(commands.has('workflow-pause')).toBe(true);
       expect(commands.has('workflow-resume')).toBe(true);
-      expect(commands.has('workflow-status')).toBe(true);
+      expect(commands.has('workflow-status')).toBe(false);
+      expect(shortcuts.has('ctrl+alt+w')).toBe(true);
       expect(events.has('before_agent_start')).toBe(true);
       expect(events.has('session_start')).toBe(true);
       expect(channels.has('plannotator:review-result')).toBe(true);

@@ -178,6 +178,7 @@ describe('when testing subagent child runtime', () => {
           'read',
           'bash',
           CHILD_COMPLETION_TOOL,
+          'mcp',
         ]);
         const started = beforeAgentStart({
           systemPrompt: 'Base child prompt',
@@ -193,18 +194,26 @@ describe('when testing subagent child runtime', () => {
         );
 
         expect(
+          toolCall({
+            type: 'tool_call',
+            toolCallId: 'workflow-enabled',
+            toolName: 'mcp',
+            input: {
+              server: 'gitlab',
+              tool: 'get_merge_request',
+            },
+          }),
+        ).toBe(undefined);
+        expect(
           (
             toolCall({
               type: 'tool_call',
-              toolCallId: 'profile-denied',
-              toolName: 'mcp',
-              input: {
-                server: 'gitlab',
-                tool: 'get_merge_request',
-              },
+              toolCallId: 'workflow-denied',
+              toolName: 'edit',
+              input: { path: 'README.md', oldText: 'a', newText: 'b' },
             }) as { reason?: string }
           ).reason ?? '',
-        ).toMatch(/not enabled by subagent "worker"/);
+        ).toMatch(/not allowed for this workflow step/);
         expect(
           (
             toolCall({

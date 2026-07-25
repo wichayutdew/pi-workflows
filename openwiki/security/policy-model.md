@@ -128,8 +128,9 @@ For a delegated step, pi-subagents 0.36 creates `structured_output` from the
 request's workflow result schema and agent contract v1. For a main-agent step,
 the harness registers `workflow_complete_step`. Both paths feed the same
 outcome, summary, artifact, sole-call, and policy-digest validation. The
-selected subagent profile's tool and extension allow-lists remain an outer
-boundary for ordinary tools; workflow policy can narrow but never widen them.
+workflow step permissions become the sole active-tool allow-list after the
+child capability is verified. The selected subagent profile still controls
+which extension providers are loaded; unavailable providers fail closed.
 
 For a reviewed repository contract, `edit` and `write` inputs are also confined
 to the sole absolute `repositories[].cwd`. If that target worktree does not yet

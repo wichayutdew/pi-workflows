@@ -182,6 +182,7 @@ export function advanceRun(
       stepHandoff: summary,
       lastSummary: summary,
       gateFeedback: '',
+      ...(nextStep.gate ? { reviewedArtifact: '' } : {}),
       ...(overVisitLimit
         ? {
             pausedFrom: 'running' as const,

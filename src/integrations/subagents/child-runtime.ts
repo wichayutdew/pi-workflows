@@ -40,6 +40,7 @@ function policyStep(policy: ChildStepPolicy): WorkflowStep {
       context: 'fresh',
       timeoutMs: 900_000,
       artifacts: false,
+      retryToolFailures: false,
     },
     permissions: policy.permissions,
     requires: { tools: [], extensions: [], skills: [] },
@@ -299,12 +300,7 @@ export function registerSubagentChildRuntime(
           pi.getAllTools(),
           policyStep(activePolicy),
           CHILD_COMPLETION_TOOL,
-        )
-          .filter((toolName) => !CHILD_COORDINATION_TOOLS.has(toolName))
-          .filter(
-            (toolName) =>
-              toolName === CHILD_COMPLETION_TOOL || profileTools.has(toolName),
-          ),
+        ).filter((toolName) => !CHILD_COORDINATION_TOOLS.has(toolName)),
       );
     } catch (error) {
       policyError = error instanceof Error ? error.message : String(error);
@@ -392,10 +388,23 @@ export function registerSubagentChildRuntime(
           'workflow children are non-interactive; use structured_output with a pause outcome and describe the unresolved contract in summary',
       };
     }
+    const authorization = authorizeToolCall(
+      event.toolName,
+      event.input as unknown as Record<string, unknown>,
+      policyStep(activePolicy),
+      pi.getAllTools(),
+      activePolicy.approvedBashCommands ?? [],
+    );
+    if (!authorization.allowed) {
+      return {
+        block: true,
+        reason: authorization.reason ?? 'Tool blocked by workflow child policy',
+      };
+    }
     if (!effectiveTools.has(event.toolName)) {
       return {
         block: true,
-        reason: `tool "${event.toolName}" is not enabled by subagent "${childAgent ?? 'unknown'}"`,
+        reason: `tool "${event.toolName}" is allowed by the workflow but unavailable in this child runtime`,
       };
     }
 
@@ -408,20 +417,6 @@ export function registerSubagentChildRuntime(
       return {
         block: true,
         reason: mutationError,
-      };
-    }
-
-    const authorization = authorizeToolCall(
-      event.toolName,
-      event.input as unknown as Record<string, unknown>,
-      policyStep(activePolicy),
-      pi.getAllTools(),
-      activePolicy.approvedBashCommands ?? [],
-    );
-    if (!authorization.allowed) {
-      return {
-        block: true,
-        reason: authorization.reason ?? 'Tool blocked by workflow child policy',
       };
     }
     freezeToolInput(event.input);

@@ -214,6 +214,59 @@ describe('when testing engine', () => {
       expect(run.history.at(-1)?.summary).toBe('# Plan');
     });
 
+    test('replanning clears stale reviewed authority before the next gate', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          permissions: { extensions: ['plannotator'] },
+          requires: { extensions: ['plannotator'] },
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: 'plan',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            replan: 'plan',
+            done: '$done',
+          },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      const artifact =
+        '{"repositories":[{"worker":[{"command":"bun install"}]}]}';
+      let run = createRun(workflow, '', [], 'run-replan', 1);
+      run = beginGate(workflow, run, 'submit', artifact, 'request-replan', 2);
+      run = resolveGate(
+        workflow,
+        run,
+        { approved: true, feedback: '', resolvedAt: 3 },
+        3,
+      );
+      expect(run.reviewedArtifact).toBe(artifact);
+
+      run = advanceRun(
+        workflow,
+        run,
+        'replan',
+        'The approved command is invalid',
+        4,
+      );
+
+      expect(run.currentStepId).toBe('plan');
+      expect(run.reviewedArtifact).toBe('');
+      expect(run.stepHandoff).toBe('The approved command is invalid');
+    });
+
     test('configuration rewind never promotes legacy gate summaries to reviewed artifacts', () => {
       // given
       const raw = baseWorkflow();

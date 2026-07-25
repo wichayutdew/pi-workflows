@@ -178,10 +178,11 @@ overrides.
 
 Delegation requires pi-subagents 0.36.0 or newer. Requests disable any
 profile-default output file, provide the workflow result schema, and opt into
-agent contract v1. The upstream `structured_output` tool completes delegated steps;
-`workflow_complete_step` remains the main-agent completion tool. Profile tool
-and extension allow-lists are an outer boundary that workflow permissions can
-only narrow.
+agent contract v1. The upstream `structured_output` tool completes delegated
+steps; `workflow_complete_step` remains the main-agent completion tool. After
+capability verification, workflow permissions replace the profile's ordinary
+active-tool list. The selected profile still determines which extension
+providers are loaded, so an unavailable provider cannot be activated.
 
 Each child receives the original workflow input plus only the previous step's
 self-contained compact `summary` or approved review artifact. It never inherits
@@ -196,6 +197,7 @@ flowchart TD
   Subagent --> TurnBudget[turnBudget<br/>maxTurns, graceTurns]
   Subagent --> ToolBudget[toolBudget<br/>soft, hard, block]
   Subagent --> Artifacts[artifacts boolean]
+  Subagent --> Retry[retryToolFailures<br/>explicit replay-safe opt-in]
 ```
 
 ## Example MR Comments Workflow

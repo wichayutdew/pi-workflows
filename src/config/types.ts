@@ -66,6 +66,11 @@ export interface StepSubagent {
   turnBudget?: SubagentTurnBudget;
   toolBudget?: SubagentToolBudget;
   artifacts: boolean;
+  /**
+   * Authorizes one full fresh-context replay after a retryable tool failure.
+   * Use only when the whole step is safe to repeat.
+   */
+  retryToolFailures: boolean;
 }
 
 export type PromptSpec = { inline: string } | { file: string };
@@ -138,6 +143,7 @@ export interface SubagentPermissionCeiling {
   maxGraceTurns: number;
   maxToolCalls: number;
   artifacts: boolean;
+  retryToolFailures: boolean;
 }
 
 export interface WorkflowSettings {
@@ -179,6 +185,7 @@ export const DEFAULT_STEP_SUBAGENT: StepSubagent = {
   context: 'fresh',
   timeoutMs: 900_000,
   artifacts: false,
+  retryToolFailures: false,
 };
 
 export const DEFAULT_SETTINGS: WorkflowSettings = {

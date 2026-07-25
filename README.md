@@ -199,10 +199,11 @@ steps:
 ```
 
 The expanded defaults are `agent: pi-workflows.step`, `context: fresh`,
-`timeoutMs: 900000`, and `artifacts: false`. The `agent` value is the actual Pi
-Subagents profile launched for that step. `fresh` is the only supported
-workflow-step context: each child receives the original workflow input and the
-previous step's compact handoff, never the parent or a sibling transcript.
+`timeoutMs: 900000`, `artifacts: false`, and `retryToolFailures: false`. The
+`agent` value is the actual Pi Subagents profile launched for that step.
+`fresh` is the only supported workflow-step context: each child receives the
+original workflow input and the previous step's compact handoff, never the
+parent or a sibling transcript.
 
 Use a profile name directly when only the child profile changes:
 
@@ -247,15 +248,16 @@ configured in `~/.pi/agent/workflows/settings.yaml`.
 
 Supported fields:
 
-| Field        | Default               | Description                                                                         |
-| ------------ | --------------------- | ----------------------------------------------------------------------------------- |
-| `agent`      | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.   |
-| `context`    | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                |
-| `model`      | Profile/default model | Optional pi-subagents model override for the selected profile.                      |
-| `timeoutMs`  | `900000`              | Child deadline, from 1 second through 24 hours.                                     |
-| `turnBudget` | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                               |
-| `toolBudget` | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array. |
-| `artifacts`  | `false`               | Ask pi-subagents to retain its normal run artifacts.                                |
+| Field               | Default               | Description                                                                                                          |
+| ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `agent`             | `pi-workflows.step`   | Actual Pi Subagents profile, such as `scout`, `planner`, `worker`, or `reviewer`.                                    |
+| `context`           | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                                                 |
+| `model`             | Profile/default model | Optional pi-subagents model override for the selected profile.                                                       |
+| `timeoutMs`         | `900000`              | Child deadline, from 1 second through 24 hours.                                                                      |
+| `turnBudget`        | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                                                                |
+| `toolBudget`        | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array.                                  |
+| `artifacts`         | `false`               | Ask pi-subagents to retain its normal run artifacts.                                                                 |
+| `retryToolFailures` | `false`               | Authorize one fresh-context retry after a tool failure; only for wholly replay-safe steps without `edit` or `write`. |
 
 Pi Workflows installs an inert listener in every Pi Subagents child and
 activates policy only after a valid, single-use workflow capability arrives, so
@@ -263,11 +265,12 @@ ordinary subagent runs remain unchanged. Delegated completion uses the
 `structured_output` tool provided by Pi Subagents; `workflow_complete_step`
 remains the completion tool only for main-agent steps.
 
-The selected profile's tool and extension allow-lists remain an outer boundary.
-Effective step tools are their intersection with workflow `permissions`, plus
-the upstream structured completion tool. Pi Workflows can remove access but
-cannot grant a normal tool or load an extension excluded from the selected
-profile.
+After capability verification, Pi Workflows resolves the step permissions
+against every tool registered in the child and activates only that exact set,
+plus the upstream structured completion tool. The selected profile's ordinary
+active-tool allow-list is not a second workflow policy. Profile extension
+loading still controls which extension providers exist in the child; a workflow
+cannot activate a tool whose provider was not loaded.
 
 Workflow `permissions.skills` is sent as Pi Subagents' request-level skill
 selection, so it replaces the selected profile's normal skill list for that
@@ -280,7 +283,7 @@ At runtime:
 
 1. The harness creates a correlated child policy and result channel.
 2. pi-subagents starts one foreground child using the step's configured agent profile.
-3. The child runtime intersects profile access with workflow permissions and validates `structured_output`.
+3. The child runtime activates the workflow-permitted registered tools and validates `structured_output`.
 4. The parent waits for the correlated terminal response, applies the transition, and launches the next fresh-context step.
 
 Main-agent mode uses the same per-step tool, MCP, Bash, extension-tool, and
@@ -587,6 +590,29 @@ blocked. Wait for the terminal event; if the delegation channel has already
 failed, restart Pi before resuming. This prevents an old writer and a resumed
 writer from overlapping.
 
+When a delegated tool fails, the harness correlates the terminal response with
+the retained Pi child session and records the exact failed tool call, tool
+error, subagent exit code, terminal error, and validated diagnostic session
+path. The fallback accepts only regular, non-symlink session files contained
+by the current parent session's child-run root, reads a bounded tail, and
+requires the tool error to match the terminal failure. If correlation is not
+safe, the terminal error is preserved without claiming an exact command. A
+failed process status is treated as resolved when the retained session proves
+a successful `structured_output` occurred after every failed tool result and
+the correlated result validates. This accepts the same finalized child result;
+it never replays mutation-capable work. Without a valid finalized result, a
+replay-safe delegated step may receive the actionable detail in one bounded
+retry prompt. Otherwise the detail is preserved in the pause reason for repair
+and resume.
+
+Inside a live child, recovery is not tied to a list of known error strings. The
+completion contract requires the agent to inspect the exact error and current
+state, try a permitted semantically equivalent alternative, and continue the
+original step. It may pause only after safe alternatives are exhausted, with
+the failed call, error, attempted alternatives, and remaining blocker in its
+handoff. A fresh retry is explicitly a continuation: it inspects state first
+and must not repeat a side effect that is already present.
+
 While paused, fix repository code, workflow YAML, prompts, MCP configuration,
 an extension, or any other environmental problem. Then run:
 
@@ -608,27 +634,25 @@ Resume reloads configuration before continuing:
 
 ## Commands
 
-In TUI mode, `/workflow-status` opens a read-only board for the current
-checkpoint. It refreshes once per second and shows run timing, the current
-execution or review, pause reasons, configuration drift, and the completed
-attempt path. Press `q`, `Esc`, `Ctrl-C`, or `Ctrl-D` to close it. Non-TUI modes
-receive the same checkpoint as text. Status glyphs are `↻` for a running step,
-`✓` for a completed step, `✕` for a failed or aborted run, and `◆` for a paused
-step or pending review. A persistent below-editor widget shows every workflow
-step with the same live glyphs, so a delegated step remains visibly in progress
-while its child runs. Long failure and pause reasons are clamped to the
-available display width; the durable checkpoint retains the full text.
+The full status overlay opens when a workflow starts and is toggled with
+`Ctrl+Alt+W` (`q` or `Esc` also hides it). It shows run timing, execution or
+review, pause reasons, configuration drift, and the completed attempt path
+without a task-viewer pane below the editor. The main surface shows only one
+small animated `◐`/`◓`/`◑`/`◒` working indicator while a workflow runs, then
+clears it when execution stops. All step, progress, history, failure, and review
+detail stays in the overlay. There, `✓` marks a completed step, `✕` a failed or
+aborted run, and `◆` a paused step or pending review. Long reasons are clamped
+to the available display width; the durable checkpoint retains the full text.
 
-| Command                         | Purpose                                               |
-| ------------------------------- | ----------------------------------------------------- |
-| `/workflow-list`                | List loaded workflows and their configured commands.  |
-| `/workflow-start <id> [input]`  | Start by workflow identifier.                         |
-| `/<configured-command> [input]` | Start through a workflow alias.                       |
-| `/workflow-status`              | Open a live run-status board (text outside TUI mode). |
-| `/workflow-pause [reason]`      | Halt without losing the checkpoint.                   |
-| `/workflow-resume`              | Reload, reconcile, and continue.                      |
-| `/workflow-abort [reason]`      | End the active run and restore baseline tools.        |
-| `/workflow-reload`              | Reload definitions while no workflow is running.      |
+| Command                         | Purpose                                              |
+| ------------------------------- | ---------------------------------------------------- |
+| `/workflow-list`                | List loaded workflows and their configured commands. |
+| `/workflow-start <id> [input]`  | Start by workflow identifier.                        |
+| `/<configured-command> [input]` | Start through a workflow alias.                      |
+| `/workflow-pause [reason]`      | Halt without losing the checkpoint.                  |
+| `/workflow-resume`              | Reload, reconcile, and continue.                     |
+| `/workflow-abort [reason]`      | End the active run and restore baseline tools.       |
+| `/workflow-reload`              | Reload definitions while no workflow is running.     |
 
 Configured aliases also accept multiline input. For example, if `work` is a
 loaded workflow command, Pi Workflows normalizes:
@@ -672,6 +696,7 @@ permissionCeiling:
     maxGraceTurns: 3
     maxToolCalls: 100
     artifacts: false
+    retryToolFailures: false
 ```
 
 Settings use the same strict YAML 1.2 parser as workflow definitions. The

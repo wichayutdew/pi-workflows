@@ -381,6 +381,10 @@
             "artifacts": {
               "type": "boolean",
               "default": false
+            },
+            "retryToolFailures": {
+              "type": "boolean",
+              "default": false
             }
           }
         }
@@ -445,6 +449,10 @@
         },
         "artifacts": {
           "type": "boolean"
+        },
+        "retryToolFailures": {
+          "type": "boolean",
+          "default": false
         }
       }
     },

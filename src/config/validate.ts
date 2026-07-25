@@ -513,6 +513,7 @@ function parseStepSubagent(
       'turnBudget',
       'toolBudget',
       'artifacts',
+      'retryToolFailures',
     ],
     path,
     errors,
@@ -561,6 +562,12 @@ function parseStepSubagent(
     `${path}.artifacts`,
     errors,
   );
+  const retryToolFailures = readBoolean(
+    value.retryToolFailures,
+    DEFAULT_STEP_SUBAGENT.retryToolFailures,
+    `${path}.retryToolFailures`,
+    errors,
+  );
   return {
     agent,
     context,
@@ -569,6 +576,7 @@ function parseStepSubagent(
     ...(turnBudget ? { turnBudget } : {}),
     ...(toolBudget ? { toolBudget } : {}),
     artifacts,
+    retryToolFailures,
   };
 }
 
@@ -752,6 +760,14 @@ function parseStep(
     `${path}.permissions`,
     errors,
   );
+  if (
+    subagent?.retryToolFailures &&
+    permissions.tools.some((tool) => tool === 'edit' || tool === 'write')
+  ) {
+    errors.push(
+      `${path}.subagent.retryToolFailures: requires a step without edit or write tools`,
+    );
+  }
   const requires = parseRequirements(
     value.requires,
     permissions,
@@ -994,6 +1010,7 @@ function parseSubagentPermissionCeiling(
       'maxGraceTurns',
       'maxToolCalls',
       'artifacts',
+      'retryToolFailures',
     ],
     path,
     errors,
@@ -1064,6 +1081,12 @@ function parseSubagentPermissionCeiling(
     `${path}.artifacts`,
     errors,
   );
+  const retryToolFailures = readBoolean(
+    value.retryToolFailures,
+    false,
+    `${path}.retryToolFailures`,
+    errors,
+  );
   return {
     agents,
     contexts,
@@ -1073,6 +1096,7 @@ function parseSubagentPermissionCeiling(
     maxGraceTurns,
     maxToolCalls,
     artifacts,
+    retryToolFailures,
   };
 }
 

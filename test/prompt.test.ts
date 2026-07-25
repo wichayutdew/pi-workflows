@@ -4,12 +4,35 @@ import {
   buildMainStepTask,
   buildMainWorkflowNotice,
   renderTemplate,
+  toolRetryTask,
 } from '../src/prompt.ts';
 import { createRun } from '../src/engine/state.ts';
 import { baseWorkflow, loadedWorkflow } from './helpers.ts';
 
 describe('when testing prompt', () => {
   describe('should satisfy its behavioral contract', () => {
+    test('retains both ends of a long actionable retry diagnostic', () => {
+      const prompt = toolRetryTask(
+        `Command: denied-command\n${'x'.repeat(10_000)}\nTerminal error: exact policy denial`,
+      );
+
+      expect(prompt).toContain('> Command: denied-command');
+      expect(prompt).toContain(
+        '> … [diagnostic truncated; beginning and end preserved] …',
+      );
+      expect(prompt).toContain('> Terminal error: exact policy denial');
+      expect(prompt).toContain(
+        'The `Failed tool`, `Command` or `Arguments`, and `Tool error` lines identify the exact failure to fix.',
+      );
+      expect(prompt).toContain(
+        'include the exact failed call, exact error, alternatives attempted',
+      );
+      expect(prompt).toContain('This is a continuation, not a blind replay.');
+      expect(prompt).toContain(
+        'do not return a pause outcome merely because the first call failed',
+      );
+    });
+
     test('renders workflow prompts, notices, and an explicit missing-step error', () => {
       // given
       const workflow = loadedWorkflow();
@@ -58,8 +81,42 @@ describe('when testing prompt', () => {
       );
       expect(delegatedTask).toMatch(/Never call `contact_supervisor`/);
       expect(delegatedTask).toMatch(/incoming handoff as the final/);
-      expect(delegatedTask).toMatch(/use a pause outcome \(blocked\)/);
+      expect(delegatedTask).toMatch(
+        /do not treat the first recoverable failure as terminal/,
+      );
+      expect(delegatedTask).toMatch(/use a pause outcome \(blocked\)/i);
       expect(delegatedTask).toMatch(/Call `structured_output` exactly once/);
+
+      const recoverableRaw = baseWorkflow();
+      const recoverableSteps = recoverableRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      recoverableSteps.inspect = {
+        ...recoverableSteps.inspect,
+        subagent: { agent: 'scout' },
+        transitions: {
+          retry: 'inspect',
+          replan: 'inspect',
+          blocked: '$pause',
+        },
+      };
+      delete recoverableSteps.implement;
+      const recoverableWorkflow = loadedWorkflow(recoverableRaw);
+      const recoverableTask = buildDelegatedStepTask(
+        recoverableWorkflow,
+        createRun(recoverableWorkflow, '', [], 'run-recovery', 1),
+        'policy envelope',
+      );
+      expect(recoverableTask).toMatch(
+        /Use outcome `retry` when the execution contract remains valid/,
+      );
+      expect(recoverableTask).toMatch(
+        /Use outcome `replan` when recovery requires a material change/,
+      );
+      expect(recoverableTask).toMatch(
+        /Use a pause outcome \(blocked\) only when permitted alternatives/,
+      );
 
       const noPauseRaw = baseWorkflow();
       const noPauseSteps = noPauseRaw.steps as Record<

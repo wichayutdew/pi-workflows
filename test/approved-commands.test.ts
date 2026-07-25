@@ -6,6 +6,7 @@ import {
   extractApprovedBashCommands,
   narrowApprovedBashCommands,
   resolveReviewedRepositoryCwd,
+  reviewedCommandShapeError,
 } from '../src/policy/approved-commands.ts';
 
 describe('when testing approved commands', () => {
@@ -142,6 +143,41 @@ describe('when testing approved commands', () => {
       expect(
         extractApprovedBashCommands(artifact, ['verification-worker']),
       ).toEqual([]);
+    });
+
+    test('rejects Bun install commands with global cwd ordering', () => {
+      const artifact = JSON.stringify({
+        repositories: [
+          {
+            worker: [
+              {
+                command:
+                  'bun --cwd /tmp/reviewed-worktree install --frozen-lockfile',
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(reviewedCommandShapeError(artifact)).toBe(
+        'Invalid Bun install command: "bun --cwd /tmp/reviewed-worktree install --frozen-lockfile". `--cwd` appears before `install`, so Bun interprets `install` as a package script. Use `bun install --cwd <absolute-cwd> --frozen-lockfile`, preserving the reviewed path and any other intended install flags, then resubmit the plan.',
+      );
+      expect(
+        reviewedCommandShapeError(
+          JSON.stringify({
+            repositories: [
+              {
+                reviewer: [
+                  {
+                    command:
+                      'bun install --cwd /tmp/reviewed-worktree --frozen-lockfile',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ).toBe(undefined);
     });
 
     test('an unreviewed handoff can only narrow approved commands', () => {

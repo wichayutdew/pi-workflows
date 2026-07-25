@@ -4,7 +4,7 @@ import { visibleWidth } from '@earendil-works/pi-tui';
 import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
 import {
-  formatWorkflowProgressWidget,
+  formatWorkflowStatusWidget,
   formatWorkflowStatusText,
   WorkflowStatusView,
   type WorkflowStatusSnapshot,
@@ -81,7 +81,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/COMPLETED · ready/);
       expect(output).toMatch(/implement/);
       expect(output).toMatch(/✓ inspect/);
-      expect(output).toMatch(/↻ implement/);
+      expect(output).toMatch(/◐ implement/);
       expect(output).toMatch(/pi-workflows\.step/);
       expect(output).toMatch(/checking/);
       expect(output).toMatch(/implementation details/);
@@ -266,7 +266,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/Progress: starting/);
     });
 
-    test('the compact widget lists running, completed, and pending steps', () => {
+    test('the persistent widget renders the status board', () => {
       // given
       const raw = baseWorkflow();
       (raw.steps as Record<string, unknown>).verify = {
@@ -293,18 +293,17 @@ describe('when testing workflow status', () => {
       };
 
       // when
-      const lines = formatWorkflowProgressWidget({
+      const lines = formatWorkflowStatusWidget({
         run,
         workflow,
         now: 3_000,
       });
 
       // then
-      expect(lines).toEqual([
-        '✓ inspect',
-        '↻ implement',
-        '• Verify changes (verify)',
-      ]);
+      expect(lines.join('\n')).toMatch(/✦ Workflow Status/);
+      expect(lines.join('\n')).toMatch(/\[RUNNING\]/);
+      expect(lines.join('\n')).toMatch(/✓ inspect/);
+      expect(lines.join('\n')).toMatch(/◐ implement/);
     });
 
     test('the compact widget distinguishes paused, failed, aborted, and completed current steps', () => {
@@ -329,40 +328,40 @@ describe('when testing workflow status', () => {
 
       // when / then
       expect(
-        formatWorkflowProgressWidget({
+        formatWorkflowStatusWidget({
           run: paused,
           workflow,
           now: 3_000,
-        }),
-      ).toEqual(['◆ inspect', '• implement']);
+        }).join('\n'),
+      ).toMatch(/◆ inspect/);
       expect(
-        formatWorkflowProgressWidget({
+        formatWorkflowStatusWidget({
           run: failed,
           workflow,
           now: 3_000,
-        }),
-      ).toEqual(['✕ inspect', '• implement']);
+        }).join('\n'),
+      ).toMatch(/✕ inspect/);
       expect(
-        formatWorkflowProgressWidget({
+        formatWorkflowStatusWidget({
           run: awaitingReview,
           workflow,
           now: 3_000,
-        }),
-      ).toEqual(['◆ inspect', '• implement']);
+        }).join('\n'),
+      ).toMatch(/◆ inspect/);
       expect(
-        formatWorkflowProgressWidget({
+        formatWorkflowStatusWidget({
           run: aborted,
           workflow,
           now: 3_000,
-        }),
-      ).toEqual(['✕ inspect', '• implement']);
+        }).join('\n'),
+      ).toMatch(/✕ inspect/);
       expect(
-        formatWorkflowProgressWidget({
+        formatWorkflowStatusWidget({
           run: completed,
           workflow,
           now: 3_000,
-        }),
-      ).toEqual(['✓ inspect', '• implement']);
+        }).join('\n'),
+      ).toMatch(/✓ inspect/);
     });
 
     test('the compact widget falls back to known checkpoint steps when config is unavailable', () => {
@@ -391,10 +390,25 @@ describe('when testing workflow status', () => {
       };
 
       // when
-      const lines = formatWorkflowProgressWidget({ run, now: 3_000 });
+      const lines = formatWorkflowStatusWidget({ run, now: 3_000 });
 
       // then
-      expect(lines).toEqual(['✓ inspect', '↻ implement']);
+      expect(lines.join('\n')).toMatch(/✓ inspect/);
+      expect(lines.join('\n')).toMatch(/◐ implement/);
+    });
+
+    test('the running icon advances through spinner frames', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const run = createRun(workflow, '', [], 'run-spinner', 1_000);
+
+      // when / then
+      expect(
+        formatWorkflowStatusWidget({ run, workflow, now: 0 }).join('\n'),
+      ).toMatch(/◐ inspect/);
+      expect(
+        formatWorkflowStatusWidget({ run, workflow, now: 250 }).join('\n'),
+      ).toMatch(/◓ inspect/);
     });
 
     test('q and Escape close the board once and force a repaint', () => {

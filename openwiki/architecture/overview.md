@@ -48,7 +48,7 @@ flowchart TD
   NameOk -- no --> Noop[Return without registering workflow runtime]
 
   Parent --> ParentWork[Commands, catalog, checkpoints, main execution or delegation]
-  Child --> ChildWork[Policy extraction, profile-tool filtering, structured completion validation]
+  Child --> ChildWork[Policy extraction, workflow-tool activation, structured completion validation]
 ```
 
 ## Data Model

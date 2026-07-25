@@ -117,6 +117,50 @@ function verificationCommands(
   return commands;
 }
 
+function malformedBunInstallReason(command: string): string | undefined {
+  const parsed = tokenizeRestrictedCommand(command);
+  if (!parsed.tokens) return undefined;
+  const executable = basename(parsed.tokens[0] ?? '');
+  if (executable !== 'bun') return undefined;
+
+  const installIndex = parsed.tokens.indexOf('install', 1);
+  if (installIndex <= 1) return undefined;
+  const optionsBeforeInstall = parsed.tokens.slice(1, installIndex);
+  if (
+    !optionsBeforeInstall.some(
+      (token) => token === '--cwd' || token.startsWith('--cwd='),
+    )
+  ) {
+    return undefined;
+  }
+
+  return [
+    `Invalid Bun install command: ${JSON.stringify(command)}.`,
+    '`--cwd` appears before `install`, so Bun interprets `install` as a package script.',
+    'Use `bun install --cwd <absolute-cwd> --frozen-lockfile`, preserving the reviewed path and any other intended install flags, then resubmit the plan.',
+  ].join(' ');
+}
+
+/**
+ * Reject known command-shape mistakes before a human is asked to approve an
+ * execution contract. Agents still diagnose arbitrary runtime failures; these
+ * deterministic checks prevent previously observed parser traps from escaping
+ * into an approved handoff.
+ */
+export function reviewedCommandShapeError(
+  artifact: string,
+): string | undefined {
+  for (const document of parseJsonDocuments(artifact)) {
+    for (const role of ['worker', 'reviewer'] as const) {
+      for (const command of verificationCommands(document, role)) {
+        const reason = malformedBunInstallReason(command);
+        if (reason) return reason;
+      }
+    }
+  }
+  return undefined;
+}
+
 function remoteActionCommands(value: unknown): string[] {
   if (!isObject(value) || !Array.isArray(value.actions)) return [];
   const commands: string[] = [];

@@ -103,17 +103,16 @@ or sibling transcript crosses the step boundary.
 
 ```mermaid
 flowchart LR
-  Run[Workflow checkpoint] --> Format[format every configured step]
-  Active[active delegation or main step] --> Format
-  Format --> Widget[persistent below-editor widget]
-  Format --> Board["/workflow-status board"]
-  Format --> Footer[Pi status footer]
+  Run[Workflow checkpoint] --> Board[shortcut-toggleable detail overlay]
+  Active[active delegation or main step] --> Board
+  Active --> Footer[one animated working indicator]
 ```
 
-The current step displays `↻` while it runs, completed steps display `✓`, and
-failed or aborted runs display `✕`; `◆` marks a pause or review. Status rendering
-clamps long failure and pause reasons to the available terminal width without
-altering the full persisted reason.
+The footer cycles through `◐`, `◓`, `◑`, and `◒` only while work runs and is
+cleared when execution stops. It never renders a below-editor task board.
+Completed steps, failures, pauses, reviews, progress, and full history live in
+the overlay; its rendering clamps long reasons to the available terminal width
+without altering the full persisted reason.
 
 ## Pause And Resume
 

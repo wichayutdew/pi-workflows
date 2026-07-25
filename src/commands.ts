@@ -15,7 +15,6 @@ export interface WorkflowCommandController {
   resume(ctx: ExtensionCommandContext): Promise<void>;
   abort(reason: string, ctx: ExtensionCommandContext): Promise<void>;
   reload(ctx: ExtensionCommandContext): Promise<void>;
-  status(ctx: ExtensionCommandContext): Promise<void>;
 }
 
 function splitFirst(value: string): [string, string] {
@@ -71,10 +70,5 @@ export function registerHarnessCommands(
   pi.registerCommand('workflow-reload', {
     description: 'Reload workflow files while no workflow is running',
     handler: async (_args, ctx) => controller.reload(ctx),
-  });
-
-  pi.registerCommand('workflow-status', {
-    description: 'Open the active workflow status board',
-    handler: async (_args, ctx) => controller.status(ctx),
   });
 }

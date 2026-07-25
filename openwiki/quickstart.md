@@ -99,16 +99,17 @@ Core commands:
 | `/workflow-list`               | List loaded workflows.              |
 | `/workflow-start <id> [input]` | Start by workflow id.               |
 | `/<workflow command> [input]`  | Start through configured alias.     |
-| `/workflow-status`             | Open a live run-status board.       |
 | `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
 | `/workflow-resume`             | Reload, reconcile, and continue.    |
 | `/workflow-abort [reason]`     | Abort active run.                   |
 | `/workflow-reload`             | Reload files when no run is active. |
 
-The persistent step widget, live status board, and footer use `↻` for running,
-`✓` for completed, `✕` for failed or aborted, and `◆` for paused or awaiting
-review. The widget stays visible below the editor during delegated work. The
-status board clamps long reasons to its available width while the checkpoint
+The main surface has no task-viewer pane. Its footer shows only a compact
+`◐`/`◓`/`◑`/`◒` indicator while work is running, then clears it. The full
+overlay opens at workflow start; toggle it with `Ctrl+Alt+W`, or hide it with
+`q` or `Esc`. The overlay contains every step and diagnostic detail, using `✓`
+for completed, `✕` for failed or aborted, and `◆` for paused or awaiting
+review. It clamps long reasons to its available width while the checkpoint
 keeps the complete message.
 
 Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`

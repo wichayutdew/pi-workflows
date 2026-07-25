@@ -52,15 +52,24 @@ flowchart TD
   Timeout --> Turns{turnBudget present and within ceiling?}
   Turns --> ToolBudget{toolBudget present, hard <= maxToolCalls, block = *?}
   ToolBudget --> Artifacts{artifacts allowed?}
-  Artifacts --> Accept
+  Artifacts --> Retry{tool-failure retry allowed?}
+  Retry --> Accept
 ```
 
 If any decision is false, the project workflow is diagnosed and skipped.
 Main-only project workflows do not need a `subagent` ceiling. Delegated project
 steps require that ceiling plus explicit turn and tool budgets. The ceiling's
 `agents` list contains the actual Pi Subagents profiles a project workflow may
-launch. Each delegated request still uses a fresh context and the workflow
-policy can only narrow the selected profile's visible tools and extensions.
+launch. Each delegated request still uses a fresh context. After its capability
+is verified, the workflow policy is the sole active-tool allow-list inside the
+child; the selected profile still determines which extension providers were
+loaded and therefore available to activate.
+
+`retryToolFailures` authorizes one full fresh-context replay after a retryable
+tool failure. It is rejected for steps with `edit` or `write`; unrestricted
+Bash still means the workflow author must attest that every possible command
+and earlier effect is safe to repeat. Project workflows may enable it only when
+the user ceiling also sets `subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules
 

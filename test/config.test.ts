@@ -25,6 +25,7 @@ describe('when testing config', () => {
       maxGraceTurns: 1,
       maxToolCalls: 20,
       artifacts: false,
+      retryToolFailures: false,
     };
   }
 
@@ -56,6 +57,7 @@ describe('when testing config', () => {
           turnBudget: { maxTurns: 12, graceTurns: 2 },
           toolBudget: { soft: 20, hard: 30, block: '*' },
           artifacts: true,
+          retryToolFailures: true,
         },
       };
       // when
@@ -70,6 +72,7 @@ describe('when testing config', () => {
         turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 20, hard: 30, block: '*' },
         artifacts: true,
+        retryToolFailures: true,
       });
 
       const invalid = baseWorkflow();
@@ -83,6 +86,7 @@ describe('when testing config', () => {
           agent: 'Reviewer!',
           context: 'shared',
           toolBudget: { soft: 10, hard: 5 },
+          retryToolFailures: 'yes',
         },
       };
       const invalidResult = validateWorkflow(invalid);
@@ -92,6 +96,26 @@ describe('when testing config', () => {
       expect(invalidResult.errors.join('\n')).toMatch(/expected fresh/);
       expect(invalidResult.errors.join('\n')).toMatch(
         /soft: must not exceed hard/,
+      );
+      expect(invalidResult.errors.join('\n')).toMatch(
+        /retryToolFailures: expected a boolean/,
+      );
+
+      const unsafeReplay = baseWorkflow();
+      const unsafeReplaySteps = unsafeReplay.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      unsafeReplaySteps.inspect = {
+        ...unsafeReplaySteps.inspect,
+        subagent: { retryToolFailures: true },
+        permissions: {
+          tools: ['read', 'bash', 'edit'],
+          bash: { mode: 'read-only' },
+        },
+      };
+      expect(validateWorkflow(unsafeReplay).errors.join('\n')).toMatch(
+        /retryToolFailures: requires a step without edit or write tools/,
       );
 
       const defaults = baseWorkflow();
@@ -107,6 +131,7 @@ describe('when testing config', () => {
         context: 'fresh',
         timeoutMs: 900_000,
         artifacts: false,
+        retryToolFailures: false,
       });
 
       const named = baseWorkflow();
@@ -122,6 +147,7 @@ describe('when testing config', () => {
         context: 'fresh',
         timeoutMs: 900_000,
         artifacts: false,
+        retryToolFailures: false,
       });
 
       const invalidName = baseWorkflow();
@@ -723,6 +749,15 @@ describe('when testing config', () => {
       expect(
         checkWorkflowAgainstCeiling(workflow.value!, contextCeiling).join('\n'),
       ).toMatch(/subagent\.context/);
+
+      const retryRequested = structuredClone(workflow.value!);
+      retryRequested.steps.inspect!.subagent!.retryToolFailures = true;
+      expect(
+        checkWorkflowAgainstCeiling(
+          retryRequested,
+          settings.value!.permissionCeiling!,
+        ).join('\n'),
+      ).toMatch(/subagent\.retryToolFailures/);
     });
 
     test('project permission ceiling constrains reviewed Bash sources', () => {
@@ -959,6 +994,7 @@ describe('when testing config', () => {
           context: 'fresh',
           timeoutMs: 900_000,
           artifacts: false,
+          retryToolFailures: false,
         });
         expect(catalog.diagnostics.length).toBe(1);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(/unique/i);
@@ -1096,6 +1132,7 @@ describe('when testing config', () => {
           '    maxGraceTurns: 3',
           '    maxToolCalls: 100',
           '    artifacts: false',
+          '    retryToolFailures: false',
         ].join('\n'),
         'utf8',
       );

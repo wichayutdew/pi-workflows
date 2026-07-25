@@ -1,9 +1,10 @@
 import type {
-  ExtensionCommandContext,
+  ExtensionContext,
   Theme,
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import {
+  Key,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -18,7 +19,9 @@ import type {
   WorkflowRunStatus,
 } from './engine/state.ts';
 
-const REFRESH_INTERVAL_MS = 1_000;
+const REFRESH_INTERVAL_MS = 250;
+const WORKING_ICON_FRAME_MS = 250;
+const WORKING_ICON_FRAMES = ['◐', '◓', '◑', '◒'] as const;
 const WIDE_LAYOUT_MIN_COLUMNS = 92;
 const MAX_PATH_ROWS = 16;
 const MAX_REASON_ROWS = 5;
@@ -79,42 +82,41 @@ export function formatWorkflowStatusText(
   return lines.join('\n');
 }
 
-/**
- * Format the persistent, compact workflow widget shown beside the editor.
- *
- * Each workflow step is rendered exactly once in definition order. The current
- * step takes precedence over an earlier completed visit so loops still show
- * what the workflow is doing now.
- */
-export function formatWorkflowProgressWidget(
+/** Format the full workflow status board. */
+export function formatWorkflowStatusWidget(
   snapshot: WorkflowStatusSnapshot,
+  width = 88,
+  theme: Theme = unstyledTheme,
 ): string[] {
-  const { run, workflow } = snapshot;
-  const stepIds = workflow
-    ? Object.keys(workflow.definition.steps)
-    : knownStepIds(run);
-  const completedSteps = new Set(run.history.map((entry) => entry.stepId));
-
-  return stepIds.map((stepId) => {
-    const glyph =
-      stepId === run.currentStepId
-        ? workflowStatusIcon(run)
-        : completedSteps.has(stepId)
-          ? '✓'
-          : '•';
-    return `${glyph} ${formatStepName(stepTitle(workflow, stepId), stepId)}`;
-  });
+  return renderBoard(theme, snapshot, Math.max(8, Math.floor(width)), false);
 }
 
+const unstyledTheme = {
+  fg: (_color: string, value: string) => value,
+  bg: (_color: string, value: string) => value,
+  bold: (value: string) => value,
+} as unknown as Theme;
+
 export async function showWorkflowStatus(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   getSnapshot: SnapshotProvider,
 ): Promise<void> {
-  await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-    const view = new WorkflowStatusView(getSnapshot, tui, theme, done);
-    view.start();
-    return view;
-  });
+  await ctx.ui.custom<void>(
+    (tui, theme, _keybindings, done) => {
+      const view = new WorkflowStatusView(getSnapshot, tui, theme, done);
+      view.start();
+      return view;
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: 'center',
+        width: '95%',
+        maxHeight: '95%',
+        margin: 1,
+      },
+    },
+  );
 }
 
 export class WorkflowStatusView implements Component {
@@ -149,7 +151,8 @@ export class WorkflowStatusView implements Component {
       data === 'Q' ||
       matchesKey(data, 'escape') ||
       matchesKey(data, 'ctrl+c') ||
-      matchesKey(data, 'ctrl+d')
+      matchesKey(data, 'ctrl+d') ||
+      matchesKey(data, Key.ctrlAlt('w'))
     ) {
       this.close();
     }
@@ -160,7 +163,7 @@ export class WorkflowStatusView implements Component {
     const snapshot = this.getSnapshot();
     if (viewportWidth < 12) {
       const label = snapshot
-        ? `${statusGlyph(this.theme, runDisplayStatus(snapshot.run))} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
+        ? `${statusGlyph(this.theme, runDisplayStatus(snapshot.run), snapshot.now)} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
         : 'No workflow';
       return [truncateToWidth(label, viewportWidth, '…', true)];
     }
@@ -187,6 +190,7 @@ function renderBoard(
   theme: Theme,
   snapshot: WorkflowStatusSnapshot,
   width: number,
+  showCloseHint = true,
 ): string[] {
   const header = boxed(
     theme,
@@ -234,13 +238,11 @@ function renderBoard(
     ];
   }
 
-  return [
-    ...header,
-    '',
-    ...body,
-    '',
-    theme.fg('dim', 'q / Esc close · live refresh'),
-  ];
+  const lines = [...header, '', ...body];
+  if (showCloseHint) {
+    lines.push('', theme.fg('dim', 'Ctrl+Alt+W / q / Esc hide · live refresh'));
+  }
+  return lines;
 }
 
 function renderEmptyBoard(theme: Theme, width: number): string[] {
@@ -270,7 +272,7 @@ function renderHeaderLines(
     `${run.history.length} completed attempt${run.history.length === 1 ? '' : 's'}`,
   );
   const firstLine = [
-    statusGlyph(theme, runDisplayStatus(run)),
+    statusGlyph(theme, runDisplayStatus(run), snapshot.now),
     theme.bold(workflowName),
     status,
     theme.fg('muted', '·'),
@@ -420,7 +422,7 @@ function renderPathLines(
   for (const entry of visible) {
     const visit =
       entry.visit > 1 ? theme.fg('dim', ` · visit ${entry.visit}`) : '';
-    const left = `${statusGlyph(theme, entry.status)} ${theme.fg(
+    const left = `${statusGlyph(theme, entry.status, snapshot.now)} ${theme.fg(
       entry.current ? 'text' : 'muted',
       entry.title,
     )}${visit}`;
@@ -573,9 +575,15 @@ function padAnsi(value: string, width: number): string {
   return `${value}${' '.repeat(width - visible)}`;
 }
 
-function statusGlyph(theme: Theme, status: StepDisplayStatus): string {
+function statusGlyph(
+  theme: Theme,
+  status: StepDisplayStatus,
+  now = Date.now(),
+): string {
   if (status === 'completed') return theme.fg('success', '✓');
-  if (status === 'running') return theme.fg('accent', '↻');
+  if (status === 'running') {
+    return theme.fg('accent', workingIcon(now));
+  }
   if (status === 'paused' || status === 'awaiting-gate') {
     return theme.fg('warning', '◆');
   }
@@ -609,22 +617,19 @@ function runDisplayStatus(run: WorkflowRun): StepDisplayStatus {
     : run.status;
 }
 
-function knownStepIds(run: WorkflowRun): string[] {
-  return [
-    ...new Set([
-      ...run.history.map((entry) => entry.stepId),
-      run.currentStepId,
-    ]),
-  ];
-}
-
-export function workflowStatusIcon(run: WorkflowRun): string {
+export function workflowStatusIcon(run: WorkflowRun, now = Date.now()): string {
   const status = runDisplayStatus(run);
   if (status === 'completed') return '✓';
-  if (status === 'running') return '↻';
+  if (status === 'running') return workingIcon(now);
   if (status === 'failed' || status === 'aborted') return '✕';
   if (status === 'paused' || status === 'awaiting-gate') return '◆';
   return '•';
+}
+
+function workingIcon(now: number): string {
+  return WORKING_ICON_FRAMES[
+    Math.floor(now / WORKING_ICON_FRAME_MS) % WORKING_ICON_FRAMES.length
+  ]!;
 }
 
 function stepTitle(
