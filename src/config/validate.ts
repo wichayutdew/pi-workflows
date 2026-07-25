@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_STATUS_SHORTCUT,
   DEFAULT_STEP_SUBAGENT,
   EMPTY_PERMISSIONS,
   EMPTY_REQUIREMENTS,
@@ -38,6 +39,60 @@ const MCP_SELECTOR_PATTERN = /^[A-Za-z0-9_.:-]+(?:\/[A-Za-z0-9_.:-]+)?$/;
 const EXECUTABLE_PATTERN = /^[A-Za-z0-9_./+-]+$/;
 const BASH_APPROVAL_SOURCE_PATTERN =
   /^(verification-worker|verification-reviewer|remote-actions)$/;
+const SHORTCUT_MODIFIERS = new Set(['ctrl', 'shift', 'alt', 'super']);
+const SHORTCUT_NAMED_KEYS = new Map<string, string>([
+  ['escape', 'escape'],
+  ['esc', 'esc'],
+  ['enter', 'enter'],
+  ['return', 'return'],
+  ['tab', 'tab'],
+  ['space', 'space'],
+  ['backspace', 'backspace'],
+  ['delete', 'delete'],
+  ['insert', 'insert'],
+  ['clear', 'clear'],
+  ['home', 'home'],
+  ['end', 'end'],
+  ['pageup', 'pageUp'],
+  ['pagedown', 'pageDown'],
+  ['up', 'up'],
+  ['down', 'down'],
+  ['left', 'left'],
+  ['right', 'right'],
+]);
+const SHORTCUT_SYMBOL_KEYS = new Set([
+  '`',
+  '-',
+  '=',
+  '[',
+  ']',
+  '\\',
+  ';',
+  "'",
+  ',',
+  '.',
+  '/',
+  '!',
+  '@',
+  '#',
+  '$',
+  '%',
+  '^',
+  '&',
+  '*',
+  '(',
+  ')',
+  '_',
+  '|',
+  '~',
+  '{',
+  '}',
+  ':',
+  '<',
+  '>',
+  '?',
+]);
+const MAX_SHORTCUT_CHARS = 64;
 const PROMPT_VARIABLES = new Set([
   'workflow.input',
   'workflow.id',
@@ -89,6 +144,54 @@ function readString(
     return undefined;
   }
   return result;
+}
+
+function canonicalShortcutKey(value: string): string | undefined {
+  if (/^[a-z0-9]$/.test(value) || SHORTCUT_SYMBOL_KEYS.has(value)) {
+    return value;
+  }
+  if (/^f(?:[1-9]|1[0-2])$/.test(value)) return value;
+  return SHORTCUT_NAMED_KEYS.get(value);
+}
+
+function readStatusShortcut(
+  value: unknown,
+  path: string,
+  errors: string[],
+): WorkflowSettings['statusShortcut'] {
+  if (value === undefined) return DEFAULT_STATUS_SHORTCUT;
+  const shortcut = readString(value, path, errors);
+  if (!shortcut) return DEFAULT_STATUS_SHORTCUT;
+  if (shortcut.length > MAX_SHORTCUT_CHARS) {
+    errors.push(`${path}: must be at most ${MAX_SHORTCUT_CHARS} characters`);
+    return DEFAULT_STATUS_SHORTCUT;
+  }
+
+  const parts = shortcut.toLowerCase().split('+');
+  const key = parts.pop() ?? '';
+  const modifiers = parts;
+  const uniqueModifiers = new Set(modifiers);
+  const canonicalKey = canonicalShortcutKey(key);
+  const isPlainTypingKey =
+    modifiers.length === 0 && (key.length === 1 || key === 'space');
+  const isUnmatchableModifiedKey =
+    modifiers.length > 0 &&
+    (key === 'escape' || key === 'esc' || /^f(?:[1-9]|1[0-2])$/.test(key));
+  if (
+    !canonicalKey ||
+    modifiers.length > SHORTCUT_MODIFIERS.size ||
+    uniqueModifiers.size !== modifiers.length ||
+    modifiers.some((modifier) => !SHORTCUT_MODIFIERS.has(modifier)) ||
+    isPlainTypingKey ||
+    isUnmatchableModifiedKey
+  ) {
+    errors.push(`${path}: expected a supported Pi key id such as "ctrl+alt+w"`);
+    return DEFAULT_STATUS_SHORTCUT;
+  }
+
+  return [...modifiers, canonicalKey].join(
+    '+',
+  ) as WorkflowSettings['statusShortcut'];
 }
 
 function readInteger(
@@ -1109,7 +1212,13 @@ export function validateSettings(
   }
   rejectUnknownKeys(
     value,
-    ['$schema', 'version', 'allowProjectWorkflows', 'permissionCeiling'],
+    [
+      '$schema',
+      'version',
+      'allowProjectWorkflows',
+      'statusShortcut',
+      'permissionCeiling',
+    ],
     'settings',
     errors,
   );
@@ -1125,6 +1234,11 @@ export function validateSettings(
   } else if (value.allowProjectWorkflows !== undefined) {
     errors.push('settings.allowProjectWorkflows: expected a boolean');
   }
+  const statusShortcut = readStatusShortcut(
+    value.statusShortcut,
+    'settings.statusShortcut',
+    errors,
+  );
   const permissionCeiling = parsePermissionCeiling(
     value.permissionCeiling,
     'settings.permissionCeiling',
@@ -1140,6 +1254,7 @@ export function validateSettings(
     value: {
       ...DEFAULT_SETTINGS,
       allowProjectWorkflows,
+      statusShortcut,
       ...(permissionCeiling ? { permissionCeiling } : {}),
     },
     errors,

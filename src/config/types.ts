@@ -1,4 +1,7 @@
+import type { KeyId } from '@earendil-works/pi-tui';
+
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
+export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
 export const SUBAGENT_RUNTIME_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 
@@ -149,6 +152,7 @@ export interface SubagentPermissionCeiling {
 export interface WorkflowSettings {
   version: typeof WORKFLOW_SCHEMA_VERSION;
   allowProjectWorkflows: boolean;
+  statusShortcut: KeyId;
   permissionCeiling?: PermissionCeiling;
 }
 
@@ -191,4 +195,5 @@ export const DEFAULT_STEP_SUBAGENT: StepSubagent = {
 export const DEFAULT_SETTINGS: WorkflowSettings = {
   version: WORKFLOW_SCHEMA_VERSION,
   allowProjectWorkflows: false,
+  statusShortcut: DEFAULT_STATUS_SHORTCUT,
 };

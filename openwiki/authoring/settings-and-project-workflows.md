@@ -16,6 +16,20 @@ flowchart TD
   Settings --> UserFiles[user workflow YAML]
 ```
 
+## Status Shortcut
+
+The workflow status overlay uses `Ctrl+Alt+W` by default. Configure another Pi
+key identifier in the user-owned settings file:
+
+```yaml
+version: 1
+statusShortcut: ctrl+shift+y
+```
+
+Run Pi's `/reload` after changing `statusShortcut` so the extension can
+re-register the key. `/workflow-reload` reloads workflow definitions and warns
+about a shortcut mismatch, but the active editor keeps the startup binding.
+
 ## Project Workflow Gate
 
 ```mermaid

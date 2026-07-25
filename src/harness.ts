@@ -8,7 +8,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { Key } from '@earendil-works/pi-tui';
+import type { KeyId } from '@earendil-works/pi-tui';
 import {
   registerHarnessCommands,
   type WorkflowCommandController,
@@ -17,6 +17,7 @@ import { loadCatalog } from './config/load.ts';
 import { hasRuntimeCommandConflict } from './config/command-conflicts.ts';
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_STATUS_SHORTCUT,
   type LoadedWorkflow,
   type WorkflowCatalog,
   type WorkflowStep,
@@ -93,6 +94,7 @@ import { SerialTaskQueue } from './runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from './runtime/step-result.ts';
 import { formatWorkflowList } from './workflow-list.ts';
 import {
+  formatShortcutLabel,
   showWorkflowStatus as showWorkflowStatusOverlay,
   workflowStatusIcon,
   type WorkflowStatusExecution,
@@ -452,12 +454,19 @@ export class WorkflowHarness implements WorkflowCommandController {
   private registeredWorkflowCommands = new Set<string>();
   private catalogLoadSequence = 0;
   private readonly mutationQueue = new SerialTaskQueue();
+  private readonly statusShortcut: KeyId;
+  private readonly statusShortcutLabel: string;
   private statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private statusOverlayOpen = false;
   private legacyProgressWidgetContext: ExtensionContext | undefined;
 
-  constructor(pi: ExtensionAPI) {
+  constructor(
+    pi: ExtensionAPI,
+    statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
+  ) {
     this.pi = pi;
+    this.statusShortcut = statusShortcut;
+    this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
     this.subagents = new SubagentDelegationClient(pi.events);
     this.mainSteps = new MainStepRuntime(pi);
     registerHarnessCommands(pi, this);
@@ -1032,7 +1041,7 @@ export class WorkflowHarness implements WorkflowCommandController {
         return;
       }
       return {
-        systemPrompt: `${event.systemPrompt}\n\n${buildMainWorkflowNotice(workflow, this.run)}`,
+        systemPrompt: `${event.systemPrompt}\n\n${buildMainWorkflowNotice(workflow, this.run, this.statusShortcutLabel)}`,
       };
     });
   }
@@ -2151,6 +2160,15 @@ export class WorkflowHarness implements WorkflowCommandController {
       return false;
     }
     this.latestContext = ctx;
+    if (catalog.settings.statusShortcut !== this.statusShortcut) {
+      catalog.diagnostics.push({
+        level: 'warning',
+        path: join(catalog.userDirectory, 'settings.yaml'),
+        message:
+          `settings.statusShortcut is "${catalog.settings.statusShortcut}", ` +
+          `but the active shortcut is "${this.statusShortcut}"; run Pi /reload to apply shortcut changes`,
+      });
+    }
     const availableCommands = this.pi.getCommands();
     for (const [workflowId, workflow] of catalog.workflows) {
       const command = workflow.definition.command;
@@ -2216,7 +2234,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     }
     this.latestContext.ui.setStatus(
       STATUS_KEY,
-      `${workflowStatusIcon(this.run, snapshot?.now)} ${this.run.workflowId}: working · Ctrl+Alt+W`,
+      `${workflowStatusIcon(this.run, snapshot?.now)} ${this.run.workflowId}: working · ${this.statusShortcutLabel}`,
     );
   }
 
@@ -2239,7 +2257,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   }
 
   private registerWorkflowStatusShortcut(): void {
-    this.pi.registerShortcut(Key.ctrlAlt('w'), {
+    this.pi.registerShortcut(this.statusShortcut, {
       description: 'Toggle workflow status',
       handler: async (ctx) => {
         this.latestContext = ctx;
@@ -2273,7 +2291,11 @@ export class WorkflowHarness implements WorkflowCommandController {
     }
     this.statusOverlayOpen = true;
     try {
-      await showWorkflowStatusOverlay(ctx, () => this.workflowStatusSnapshot());
+      await showWorkflowStatusOverlay(
+        ctx,
+        () => this.workflowStatusSnapshot(),
+        this.statusShortcut,
+      );
     } finally {
       this.statusOverlayOpen = false;
     }

@@ -106,12 +106,15 @@ Core commands:
 
 The main surface has no task-viewer pane. Its footer shows only a compact
 `◐`/`◓`/`◑`/`◒` indicator while work is running, then clears it. The full
-overlay opens at workflow start; toggle it with `Ctrl+Alt+W`, or hide it with
-`q` or `Esc`. The overlay contains every step and diagnostic detail, using `✓`
-for completed, `✕` for failed or aborted, and `◆` for paused or awaiting
-review. It clamps long reasons to its available width while the checkpoint
-keeps the complete message. On short terminals, scroll with `↑`/`↓`,
-PgUp/PgDn, or Home/End.
+overlay opens at workflow start; toggle it with `Ctrl+Alt+W` by default, or
+hide it with `q` or `Esc`. Configure another Pi key identifier with
+`statusShortcut` in `settings.yaml`, then run Pi's `/reload` to register the
+change. `/workflow-reload` reloads workflow files but cannot rebind extension
+shortcuts. The overlay contains every step and diagnostic detail, using `✓` for
+completed, `✕` for failed or aborted, and `◆` for paused or awaiting review. It
+clamps long reasons to its available width while the checkpoint keeps the
+complete message. On short terminals, scroll with `↑`/`↓`, PgUp/PgDn, or
+Home/End.
 
 Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`
 value selects the actual Pi Subagents profile, and each profile starts with a

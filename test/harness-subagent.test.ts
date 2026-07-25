@@ -8,7 +8,7 @@ import type {
   ExtensionContext,
   Theme,
 } from '@earendil-works/pi-coding-agent';
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component, KeyId } from '@earendil-works/pi-tui';
 import { WorkflowHarness } from '../src/harness.ts';
 import { loadCatalog } from '../src/config/load.ts';
 import { createRun } from '../src/engine/state.ts';
@@ -549,8 +549,11 @@ describe('when testing harness subagent', () => {
     );
   }
 
-  async function initialize(fixture: HarnessFixture): Promise<WorkflowHarness> {
-    const harness = new WorkflowHarness(fixture.pi);
+  async function initialize(
+    fixture: HarnessFixture,
+    statusShortcut?: KeyId,
+  ): Promise<WorkflowHarness> {
+    const harness = new WorkflowHarness(fixture.pi, statusShortcut);
     await emitLifecycle(fixture, 'session_start', { type: 'session_start' });
     return harness;
   }
@@ -778,6 +781,41 @@ describe('when testing harness subagent', () => {
         ).toMatch(/1 more diagnostic/);
         expect(fixture.notifications.at(-1)?.message).toMatch(
           /Loaded 2 workflow\(s\)/,
+        );
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('workflow reload warns when a shortcut change needs Pi reload', async () => {
+      // given
+      const directory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-shortcut-reload-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      // when / then
+      try {
+        await writeMainWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        await initialize(fixture);
+        const reload = fixture.commands.get('workflow-reload');
+        expectTruthy(reload);
+
+        await writeFile(
+          join(directory, 'settings.yaml'),
+          'version: 1\nstatusShortcut: ctrl+shift+y\n',
+        );
+        await reload('', fixture.context);
+
+        expect(fixture.shortcuts.has('ctrl+alt+w')).toBe(true);
+        expect(fixture.shortcuts.has('ctrl+shift+y')).toBe(false);
+        expect(fixture.notifications.at(-1)?.message).toMatch(
+          /statusShortcut[\s\S]*\/reload/,
         );
       } finally {
         if (previousDirectory === undefined)
@@ -1055,7 +1093,7 @@ describe('when testing harness subagent', () => {
       try {
         await writeMainWorkflow(directory);
         const fixture = createHarnessFixture(directory);
-        await initialize(fixture);
+        await initialize(fixture, 'ctrl+shift+y');
         const start = fixture.commands.get('main-workflow');
         expectTruthy(start);
 
@@ -1064,8 +1102,9 @@ describe('when testing harness subagent', () => {
         await eventually(() => {
           expect(fixture.customRenders.length).toBeGreaterThan(0);
         });
-        const shortcut = fixture.shortcuts.get('ctrl+alt+w');
+        const shortcut = fixture.shortcuts.get('ctrl+shift+y');
         expectTruthy(shortcut);
+        expect(fixture.shortcuts.has('ctrl+alt+w')).toBe(false);
         await shortcut(fixture.context as unknown as ExtensionContext);
         expect(fixture.customRenders).toHaveLength(2);
         const board = fixture.customRenders.at(-1)?.join('\n') ?? '';
@@ -1073,6 +1112,7 @@ describe('when testing harness subagent', () => {
         expect(board).toMatch(/\[RUNNING\]/);
         expect(board).toMatch(/main/);
         expect(board).toMatch(/execution main agent/);
+        expect(board).toMatch(/Ctrl\+Shift\+Y/);
         expect(fixture.customRenders.at(-1)?.length).toBeGreaterThan(10);
         expect(fixture.customOptions.at(-1)).toMatchObject({
           overlay: true,
@@ -1087,7 +1127,7 @@ describe('when testing harness subagent', () => {
         ).toBe(true);
         expect(
           fixture.statusUpdates.some(({ value }) =>
-            /^[◐◓◑◒] main: working · Ctrl\+Alt\+W$/.test(value ?? ''),
+            /^[◐◓◑◒] main: working · Ctrl\+Shift\+Y$/.test(value ?? ''),
           ),
         ).toBe(true);
         expect(fixture.commands.has('workflow-status')).toBe(false);

@@ -442,7 +442,7 @@ describe('when testing workflow status', () => {
       ).toBeTruthy();
     });
 
-    test('q and Escape close the board once and force a repaint', () => {
+    test('the configured shortcut, q, and Escape close the board', () => {
       // given
       const workflow = loadedWorkflow();
       const run = createRun(workflow, '', [], 'run-close-status', 1_000);
@@ -475,6 +475,20 @@ describe('when testing workflow status', () => {
       );
       escapeView.handleInput('\u001b');
       expect(escapeClosed).toBe(1);
+
+      let shortcutClosed = 0;
+      const shortcutView = new WorkflowStatusView(
+        () => ({ run, workflow, now: 2_000 }),
+        { requestRender() {} },
+        plainTheme,
+        () => {
+          shortcutClosed += 1;
+        },
+        'ctrl+x',
+      );
+      expect(shortcutView.render(80).at(-1)).toMatch(/Ctrl\+X/);
+      shortcutView.handleInput('\u0018');
+      expect(shortcutClosed).toBe(1);
     });
 
     test('renders and disposes an empty live status board', () => {

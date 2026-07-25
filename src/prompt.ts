@@ -221,6 +221,7 @@ export function buildMainStepTask(
 export function buildMainWorkflowNotice(
   workflow: LoadedWorkflow,
   run: WorkflowRun,
+  statusShortcutLabel = 'Ctrl+Alt+W',
 ): string {
   const step = workflow.definition.steps[run.currentStepId];
   if (!step) throw new Error(`unknown workflow step "${run.currentStepId}"`);
@@ -239,6 +240,6 @@ export function buildMainWorkflowNotice(
     '',
     `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in a separate pi-subagents child process.`,
     'Do not perform the workflow step in this main session.',
-    'Use `Ctrl+Alt+W` to show or hide the workflow status overlay, or `/workflow-pause` to cancel the child and repair the workflow before resuming.',
+    `Use \`${statusShortcutLabel}\` to show or hide the workflow status overlay, or \`/workflow-pause\` to cancel the child and repair the workflow before resuming.`,
   ].join('\n');
 }

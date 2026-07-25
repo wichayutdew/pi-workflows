@@ -10,9 +10,13 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
   type Component,
+  type KeyId,
   type TUI,
 } from '@earendil-works/pi-tui';
-import type { LoadedWorkflow } from './config/types.ts';
+import {
+  DEFAULT_STATUS_SHORTCUT,
+  type LoadedWorkflow,
+} from './config/types.ts';
 import type {
   StepHistoryEntry,
   WorkflowRun,
@@ -91,7 +95,13 @@ export function formatWorkflowStatusBoard(
   width = 88,
   theme: Theme = unstyledTheme,
 ): string[] {
-  return renderBoard(theme, snapshot, Math.max(8, Math.floor(width)), false);
+  return renderBoard(
+    theme,
+    snapshot,
+    Math.max(8, Math.floor(width)),
+    false,
+    formatShortcutLabel(DEFAULT_STATUS_SHORTCUT),
+  );
 }
 
 const unstyledTheme = {
@@ -100,13 +110,57 @@ const unstyledTheme = {
   bold: (value: string) => value,
 } as unknown as Theme;
 
+const SHORTCUT_LABELS: Readonly<Record<string, string>> = {
+  ctrl: 'Ctrl',
+  shift: 'Shift',
+  alt: 'Alt',
+  super: 'Super',
+  escape: 'Esc',
+  esc: 'Esc',
+  enter: 'Enter',
+  return: 'Enter',
+  tab: 'Tab',
+  space: 'Space',
+  backspace: 'Backspace',
+  delete: 'Del',
+  insert: 'Ins',
+  clear: 'Clear',
+  home: 'Home',
+  end: 'End',
+  pageUp: 'PgUp',
+  pageDown: 'PgDn',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+};
+
+export function formatShortcutLabel(shortcut: KeyId): string {
+  return shortcut
+    .split('+')
+    .map((part) => {
+      const label = SHORTCUT_LABELS[part];
+      if (label) return label;
+      if (/^f\d+$/.test(part)) return part.toUpperCase();
+      return part.length === 1 ? part.toUpperCase() : part;
+    })
+    .join('+');
+}
+
 export async function showWorkflowStatus(
   ctx: ExtensionContext,
   getSnapshot: SnapshotProvider,
+  statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
 ): Promise<void> {
   await ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) => {
-      const view = new WorkflowStatusView(getSnapshot, tui, theme, done);
+      const view = new WorkflowStatusView(
+        getSnapshot,
+        tui,
+        theme,
+        done,
+        statusShortcut,
+      );
       view.start();
       return view;
     },
@@ -128,13 +182,17 @@ export class WorkflowStatusView implements Component {
   private scrollOffset = 0;
   private viewportRows = 0;
   private contentRows = 0;
+  private readonly statusShortcutLabel: string;
 
   constructor(
     private readonly getSnapshot: SnapshotProvider,
     private readonly tui: StatusViewTui,
     private readonly theme: Theme,
     private readonly done: () => void,
-  ) {}
+    private readonly statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
+  ) {
+    this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
+  }
 
   start(): void {
     this.timer = setInterval(
@@ -158,7 +216,7 @@ export class WorkflowStatusView implements Component {
       matchesKey(data, 'escape') ||
       matchesKey(data, 'ctrl+c') ||
       matchesKey(data, 'ctrl+d') ||
-      matchesKey(data, Key.ctrlAlt('w'))
+      matchesKey(data, this.statusShortcut)
     ) {
       this.close();
       return;
@@ -191,7 +249,13 @@ export class WorkflowStatusView implements Component {
 
     const contentWidth = viewportWidth - 2;
     const lines = snapshot
-      ? renderBoard(this.theme, snapshot, contentWidth, false)
+      ? renderBoard(
+          this.theme,
+          snapshot,
+          contentWidth,
+          false,
+          this.statusShortcutLabel,
+        )
       : renderEmptyBoard(this.theme, contentWidth);
     const rendered = lines.map((line) =>
       padAnsi(truncateToWidth(line, contentWidth, '…'), viewportWidth),
@@ -218,8 +282,8 @@ export class WorkflowStatusView implements Component {
     const last = Math.min(lines.length, this.scrollOffset + contentHeight);
     const hint =
       maximumOffset > 0
-        ? `↑/↓ PgUp/PgDn Home/End · rows ${first}-${last}/${lines.length} · Ctrl+Alt+W / q / Esc hide`
-        : 'Ctrl+Alt+W / q / Esc hide · live refresh';
+        ? `↑/↓ PgUp/PgDn Home/End · rows ${first}-${last}/${lines.length} · ${this.statusShortcutLabel} / q / Esc hide`
+        : `${this.statusShortcutLabel} / q / Esc hide · live refresh`;
     return [
       ...visible,
       padAnsi(truncateToWidth(this.theme.fg('dim', hint), width, '…'), width),
@@ -253,6 +317,7 @@ function renderBoard(
   snapshot: WorkflowStatusSnapshot,
   width: number,
   showCloseHint = true,
+  statusShortcutLabel = formatShortcutLabel(DEFAULT_STATUS_SHORTCUT),
 ): string[] {
   const header = boxed(
     theme,
@@ -302,7 +367,10 @@ function renderBoard(
 
   const lines = [...header, '', ...body];
   if (showCloseHint) {
-    lines.push('', theme.fg('dim', 'Ctrl+Alt+W / q / Esc hide · live refresh'));
+    lines.push(
+      '',
+      theme.fg('dim', `${statusShortcutLabel} / q / Esc hide · live refresh`),
+    );
   }
   return lines;
 }

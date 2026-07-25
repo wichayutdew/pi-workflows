@@ -502,6 +502,43 @@ describe('when testing config', () => {
       ]);
     });
 
+    test('validates and normalizes the workflow status shortcut', () => {
+      // given
+      const invalidShortcuts: unknown[] = [
+        42,
+        '',
+        'w',
+        'meta+w',
+        'ctrl+ctrl+w',
+        'ctrl+w+alt',
+        'ctrl+unknown',
+        'ctrl+escape',
+        'ctrl+f12',
+        'ctrl++',
+      ];
+
+      // when
+      const omitted = validateSettings({ version: 1 });
+      const custom = validateSettings({
+        version: 1,
+        statusShortcut: '  ALT+CTRL+Y  ',
+      });
+      const invalid = invalidShortcuts.map((statusShortcut) =>
+        validateSettings({ version: 1, statusShortcut }),
+      );
+
+      // then
+      expect(omitted.errors).toEqual([]);
+      expect(omitted.value?.statusShortcut).toBe('ctrl+alt+w');
+      expect(custom.errors).toEqual([]);
+      expect(custom.value?.statusShortcut).toBe('alt+ctrl+y');
+      expect(invalid.every(({ value }) => value === undefined)).toBe(true);
+      expect(invalid.every(({ errors }) => errors.length > 0)).toBe(true);
+      expect(invalid.flatMap(({ errors }) => errors).join('\n')).toMatch(
+        /settings\.statusShortcut/,
+      );
+    });
+
     test('rejects malformed settings and returns independent defaults', () => {
       // given
       const malformed: unknown[] = [
@@ -1065,6 +1102,50 @@ describe('when testing config', () => {
       }
     });
 
+    test('loader reads a custom status shortcut and falls back on invalid syntax', async () => {
+      // given
+      const root = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-settings-shortcut-'),
+      );
+      const userDirectory = join(root, 'workflows');
+      const settingsPath = join(userDirectory, 'settings.yaml');
+      await mkdir(userDirectory, { recursive: true });
+
+      // when / then
+      try {
+        await writeFile(
+          settingsPath,
+          'version: 1\nstatusShortcut: ctrl+shift+y\n',
+          'utf8',
+        );
+        const configured = await loadCatalog({
+          cwd: root,
+          projectTrusted: false,
+          userDirectory,
+        });
+        expect(configured.diagnostics).toEqual([]);
+        expect(configured.settings.statusShortcut).toBe('ctrl+shift+y');
+
+        await writeFile(
+          settingsPath,
+          'version: 1\nstatusShortcut: bogus+w\n',
+          'utf8',
+        );
+        const invalid = await loadCatalog({
+          cwd: root,
+          projectTrusted: false,
+          userDirectory,
+        });
+        expect(invalid.settings.statusShortcut).toBe('ctrl+alt+w');
+        expect(invalid.diagnostics).toHaveLength(1);
+        expect(invalid.diagnostics[0]?.message).toMatch(
+          /settings\.statusShortcut/,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     test('loader rejects invalid settings YAML', async () => {
       // given
       const root = await mkdtemp(join(tmpdir(), 'pi-workflows-settings-yaml-'));
@@ -1091,6 +1172,7 @@ describe('when testing config', () => {
         expect(catalog.settings).toEqual({
           version: 1,
           allowProjectWorkflows: false,
+          statusShortcut: 'ctrl+alt+w',
         });
         expect(catalog.diagnostics.length).toBe(1);
         expect(catalog.diagnostics[0]?.path).toBe(

@@ -147,9 +147,13 @@ describe('when testing prompt', () => {
       );
       expect(noPauseTask).not.toMatch(/use a pause outcome/);
 
-      expect(buildMainWorkflowNotice(delegatedWorkflow, delegatedRun)).toMatch(
-        /Active subagent workflow/,
+      const delegatedNotice = buildMainWorkflowNotice(
+        delegatedWorkflow,
+        delegatedRun,
+        'Ctrl+Shift+Y',
       );
+      expect(delegatedNotice).toMatch(/Active subagent workflow/);
+      expect(delegatedNotice).toMatch(/Ctrl\+Shift\+Y/);
       expect(() =>
         buildMainWorkflowNotice(workflow, { ...run, currentStepId: 'missing' }),
       ).toThrow(/unknown workflow step/);

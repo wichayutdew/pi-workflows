@@ -184,7 +184,7 @@ async function loadWorkflowDirectory(
   return { workflows, diagnostics };
 }
 
-async function loadSettings(userDirectory: string): Promise<{
+export async function loadSettings(userDirectory: string): Promise<{
   settings: WorkflowSettings;
   diagnostics: ConfigDiagnostic[];
 }> {

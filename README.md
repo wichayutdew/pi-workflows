@@ -636,15 +636,18 @@ Resume reloads configuration before continuing:
 ## Commands
 
 The full status overlay opens when a workflow starts and is toggled with
-`Ctrl+Alt+W` (`q` or `Esc` also hides it). It shows run timing, execution or
-review, pause reasons, configuration drift, and the completed attempt path
-without a task-viewer pane below the editor. The main surface shows only one
-small animated `◐`/`◓`/`◑`/`◒` working indicator while a workflow runs, then
-clears it when execution stops. All step, progress, history, failure, and review
-detail stays in the overlay. There, `✓` marks a completed step, `✕` a failed or
-aborted run, and `◆` a paused step or pending review. Long reasons are clamped
-to the available display width; the durable checkpoint retains the full text.
-On short terminals, use `↑`/`↓`, PgUp/PgDn, or Home/End to scroll the overlay.
+`Ctrl+Alt+W` by default (`q` or `Esc` also hides it). Set `statusShortcut` in
+`settings.yaml` to another Pi key identifier, then run Pi's `/reload` to
+re-register it; `/workflow-reload` cannot change extension shortcuts. The
+overlay shows run timing, execution or review, pause reasons, configuration
+drift, and the completed attempt path without a task-viewer pane below the
+editor. The main surface shows only one small animated `◐`/`◓`/`◑`/`◒` working
+indicator while a workflow runs, then clears it when execution stops. All step,
+progress, history, failure, and review detail stays in the overlay. There, `✓`
+marks a completed step, `✕` a failed or aborted run, and `◆` a paused step or
+pending review. Long reasons are clamped to the available display width; the
+durable checkpoint retains the full text. On short terminals, use `↑`/`↓`,
+PgUp/PgDn, or Home/End to scroll the overlay.
 
 | Command                         | Purpose                                              |
 | ------------------------------- | ---------------------------------------------------- |
@@ -683,6 +686,7 @@ Project workflows are disabled by default. Enable them in the user-owned
 # yaml-language-server: $schema=/absolute/path/to/pi-workflows/schemas/settings.schema.json
 version: 1
 allowProjectWorkflows: true
+statusShortcut: ctrl+alt+w
 permissionCeiling:
   tools: [read, grep, bash]
   mcp: []
