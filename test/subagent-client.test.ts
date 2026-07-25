@@ -8,8 +8,6 @@ import {
   SUBAGENT_DELEGATION_REQUEST_EVENT,
   SUBAGENT_DELEGATION_RESPONSE_EVENT,
   SUBAGENT_DELEGATION_STARTED_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT,
   SUBAGENT_DELEGATION_UPDATE_EVENT,
   type SubagentDelegationRequest,
 } from '../src/integrations/subagents/protocol.ts';
@@ -223,59 +221,6 @@ describe('when testing subagent client', () => {
         { version: 1, requestId: 'updates', message: 'working' },
       ]);
       await pending;
-    });
-
-    test('keeps the original delegation active across a supervisor reply', async () => {
-      const events = new FakeEventBus();
-      const supervisorRequests: unknown[] = [];
-      const client = new SubagentDelegationClient(events);
-      const pending = client.delegate(request('supervised'), {
-        onSupervisorRequest: (supervisorRequest) =>
-          supervisorRequests.push(supervisorRequest),
-      });
-
-      events.emit(SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT, {
-        version: 1,
-        delegationRequestId: 'other',
-        runId: 'child-1',
-        agent: 'pi-workflows.step',
-        requestId: 'question-1',
-        reason: 'need_decision',
-        message: 'Ignore me',
-      });
-      events.emit(SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT, {
-        version: 1,
-        delegationRequestId: 'supervised',
-        runId: 'child-1',
-        agent: 'pi-workflows.step',
-        requestId: 'question-1',
-        reason: 'need_decision',
-        message: 'Which option?',
-      });
-
-      expect(supervisorRequests).toHaveLength(1);
-      expect(client.activeRequestId).toBe('supervised');
-      expect(
-        client.replyToSupervisor({
-          version: 1,
-          delegationRequestId: 'supervised',
-          runId: 'child-1',
-          agent: 'pi-workflows.step',
-          requestId: 'question-1',
-          message: 'Use option A.',
-        }),
-      ).toBe(true);
-      expect(
-        events.emitted.some(
-          (entry) => entry.event === SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
-        ),
-      ).toBe(true);
-      events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
-        version: 1,
-        requestId: 'supervised',
-        status: 'completed',
-      });
-      expect((await pending).status).toBe('completed');
     });
 
     test('handles signal cancellation and the overall child deadline', async () => {

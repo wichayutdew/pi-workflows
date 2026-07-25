@@ -51,9 +51,23 @@ export function pauseRun(
       status: 'paused',
       pausedFrom: run.status,
       pauseReason: reason || `Paused during step "${run.currentStepId}"`,
+      failedStepId: undefined,
     },
     now,
   );
+}
+
+export function failRun(
+  run: WorkflowRun,
+  reason: string,
+  now: number,
+): WorkflowRun {
+  const paused = pauseRun(run, reason, now);
+  if (paused.status !== 'paused') return paused;
+  return {
+    ...paused,
+    failedStepId: paused.currentStepId,
+  };
 }
 
 export function resumeRun(run: WorkflowRun, now: number): WorkflowRun {
@@ -64,6 +78,7 @@ export function resumeRun(run: WorkflowRun, now: number): WorkflowRun {
       status: run.pausedFrom ?? (run.pendingGate ? 'awaiting-gate' : 'running'),
       pauseReason: undefined,
       pausedFrom: undefined,
+      failedStepId: undefined,
     },
     now,
   );
@@ -80,8 +95,8 @@ export function abortRun(
       status: 'aborted',
       pauseReason: reason || 'Aborted by user',
       pausedFrom: undefined,
+      failedStepId: undefined,
       pendingGate: undefined,
-      pendingSupervisor: undefined,
     },
     now,
   );
@@ -393,6 +408,7 @@ export function reconcileRun(
           lastSummary: stepHandoff,
           pendingGate: undefined,
           pausedFrom: 'running',
+          failedStepId: undefined,
           pauseReason: `Configuration changed; restarted step "${restartedStep}"`,
           gateFeedback: '',
         },
@@ -416,6 +432,7 @@ export function reconcileRun(
               status: 'paused' as const,
               pendingGate: undefined,
               pausedFrom: 'running' as const,
+              failedStepId: undefined,
               pauseReason: `Configuration changed; restarted step "${run.currentStepId}"`,
               gateFeedback: '',
             }

@@ -162,16 +162,27 @@ that executable.
 ## Subagent Options
 
 Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
-into pi-subagents with the defaults shown below. Use the exact Pi Subagents
-runtime name, such as `subagent: worker`, when only the agent changes; use the
-object form for additional overrides. Pi Subagents resolves builtin, package,
-user, and project agents and applies matching `settings.json` overrides. The
-integration is optional.
+into pi-subagents with the defaults shown below. A name such as
+`subagent: worker` assigns the step's specialty identity; put the specialty's
+concrete instructions in that step's prompt. Use the object form for model,
+timeout, budget, or artifact overrides.
+
+Every delegated step uses the bundled `pi-workflows.step` runtime. The fixed
+runtime keeps `workflow_complete_step` available even when general-purpose Pi
+Subagents profiles declare tool allow-lists that would hide a dynamically
+registered completion tool. The `agent` field is therefore a workflow prompt
+identity, not an upstream profile selector. Delegation still requires the
+optional pi-subagents integration.
+
+Each child receives the original workflow input plus only the previous step's
+self-contained compact `summary` or approved review artifact. It never inherits
+the parent or sibling transcript.
 
 ```mermaid
 flowchart TD
-  Subagent[subagent] --> Agent[agent<br/>default pi-workflows.step]
-  Subagent --> Context[context<br/>fresh or fork]
+  Subagent[subagent] --> Specialty[agent specialty<br/>default pi-workflows.step]
+  Subagent --> Runtime[fixed runtime<br/>pi-workflows.step]
+  Subagent --> Context[context<br/>fresh only]
   Subagent --> Model[model override]
   Subagent --> Timeout[timeoutMs<br/>1000 to 86400000]
   Subagent --> TurnBudget[turnBudget<br/>maxTurns, graceTurns]

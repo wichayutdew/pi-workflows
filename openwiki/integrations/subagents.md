@@ -2,10 +2,13 @@
 
 This integration is optional. A step runs in the main Pi agent when
 `subagent` is omitted; `subagent: {}` opts into the delegated runtime below.
-`subagent: worker` selects the Pi Subagents `worker` runtime while retaining
-the workflow defaults. The object form accepts the same name under `agent`
-when the step also needs execution overrides. Pi Subagents owns discovery and
-applies matching `subagents.agentOverrides` from Pi settings.
+`subagent: worker` assigns the step's `worker` specialty while retaining the
+workflow defaults. The object form accepts the same specialty under `agent`
+when the step also needs execution overrides.
+
+Pi Subagents supplies the foreground-child transport. Pi Workflows always asks
+it to launch the bundled `pi-workflows.step` runtime, then supplies the
+specialty identity and step-specific prompt inside the correlated task.
 
 ## Event Protocol
 
@@ -24,11 +27,6 @@ sequenceDiagram
   Child-->>Sub: progress and terminal status
   Sub-->>Bus: prompt-template:subagent:update
   Bus-->>Harness: update status
-  Child-->>Sub: contact_supervisor
-  Sub-->>Bus: supervisor request v1
-  Bus-->>Harness: checkpoint paused request
-  Harness-->>Bus: supervisor reply v1 (TUI)
-  Bus-->>Sub: reply to same child
   Sub-->>Bus: prompt-template:subagent:response
   Bus-->>Harness: finish delegation
 ```
@@ -39,9 +37,9 @@ sequenceDiagram
 flowchart TD
   Request[SubagentDelegationRequest] --> Version[version 1]
   Request --> Id[requestId]
-  Request --> Agent[discovered agent runtime name]
-  Request --> Task[rendered task plus policy envelope]
-  Request --> Context[fresh or fork]
+  Request --> Agent[fixed runtime pi-workflows.step]
+  Request --> Task[rendered task with specialty plus policy envelope]
+  Request --> Context[fresh]
   Request --> Cwd[cwd]
   Request --> Timeout[timeoutMs]
   Request --> Skills[skill list or false]
@@ -60,29 +58,38 @@ flowchart TD
   Input --> Envelope{workflow policy envelope?}
   Envelope -- no --> Ordinary[leave ordinary child untouched]
   Envelope -- yes --> Verify[verify exact child agent and capability]
-  Verify --> Baseline[capture resolved profile active tools]
+  Verify --> Baseline[capture bundled runtime active tools]
   Baseline --> Complete[lazily register workflow_complete_step]
-  Complete --> Narrow[intersect profile tools with step permissions]
+  Complete --> Narrow[intersect runtime tools with step permissions]
   Narrow --> Prompt[append child system prompt]
   Prompt --> Work[child performs step]
 ```
 
-## Agent Resolution
+## Runtime And Specialty Resolution
 
-Pi Workflows passes the configured `agent` unchanged through the public
-delegation API. Pi Subagents resolves that name across its builtin, package,
-user, and project agents, then applies `settings.json` precedence and disabled
-state. Pi Workflows deliberately does not read or mirror that settings schema.
+Pi Workflows passes `pi-workflows.step` through the public delegation API for
+every workflow child. Pi Subagents resolves that packaged runtime and applies
+settings for that actual name. The workflow's configured `agent` value is
+instead recorded in the policy digest and rendered into the child task as
+`Step specialty`; it is also used in workflow status. A value such as
+`subagent: scout` therefore does not select Pi Subagents' builtin `scout`
+profile.
 
-An `agentOverrides.worker` entry customizes the discovered builtin `worker`; it
-does not create a new runtime named `worker`. Packaged agents may use qualified
-names such as the bundled `pi-workflows.step`.
+The fixed runtime is a compatibility boundary. General-purpose Pi Subagents
+profiles can declare explicit tool allow-lists; those lists can hide extension
+tools registered after startup, including `workflow_complete_step`. The
+bundled runtime leaves the workflow child runtime free to register that
+correlated completion tool and then narrow normal tools to the step policy.
 
-The workflow request deliberately owns context, timeout, skills, artifacts, and
-its optional model override. Its skill selection replaces the agent profile's
-normal skills for that step. Pi Subagents' separate acceptance report is
-disabled because `workflow_complete_step` and workflow gates are the
-authoritative completion contract.
+The workflow request deliberately owns fresh context, timeout, skills,
+artifacts, and its optional model override. The configured specialty identifies
+the role, the step prompt supplies its exact instructions, and the previous
+step's self-contained compact summary or approved gate artifact supplies the
+only cross-step handoff. Parent and sibling transcripts are never inherited.
+The request's skill selection replaces the bundled runtime's normal skills for
+that step. Pi Subagents' separate acceptance report is disabled because
+`workflow_complete_step` and workflow gates are the authoritative completion
+contract.
 
 ## Result Path
 
@@ -115,36 +122,37 @@ stateDiagram-v2
 
 While blocked, the harness keeps main tools isolated and refuses resume because a child may still be alive.
 
-## Supervisor Coordination
+## Planning And Questions
 
-Delegated steps support child `contact_supervisor` requests with
-pi-subagents `0.36.0` or newer. A correlated request pauses the workflow and
-persists the child agent, child run, request id, reason, message, and optional
-interview payload. The original delegation remains active: Pi Workflows never
-starts a replacement child while the request is pending.
+Delegated workflow children are non-interactive. The child runtime removes and
+blocks `contact_supervisor`, `subagent_supervisor`, and `intercom`, preventing a
+dependency-level detach from escaping the workflow lifecycle.
 
-In Pi TUI, the workflow opens a reply input. A non-empty reply is sent through
-the delegation supervisor-reply event, returns the workflow to running, and
-waits for that original child’s terminal response. Dismissing the input keeps
-the checkpoint paused; `/workflow-resume` reopens it in TUI. RPC and non-TUI
-sessions intentionally keep the workflow paused and must be reopened in TUI
-to answer the child. Normal pause, abort, session change, and shutdown still
-cancel the child and wait for its terminal result before releasing isolation.
+Planning steps put unresolved decisions in their plan artifact. Plannotator or
+the user resolves them before approval; the approved artifact becomes the
+implementation handoff. After approval, implementation and verification never
+ask terminal questions. If the approved plan is insufficient or stale, the
+step returns a pause outcome with evidence instead of opening a side channel.
+
+The installed workflow set uses planning as its only human-decision gate.
+Plan approval may authorize an exact remote-action contract. Later handoffs may
+remove actions but cannot grant new ones: the harness intersects commands from
+the reviewed plan with commands retained by the latest completed-step handoff
+before enabling Bash.
 
 ## Agent And Policy Boundary
 
 ```mermaid
 flowchart TD
-  Settings[Pi Subagents settings and profile] --> Profile[resolved active tools]
+  Settings[Pi Subagents settings for pi-workflows.step] --> Runtime[resolved active tools]
   Workflow[workflow step permissions] --> Intersection[tool intersection]
-  Profile --> Intersection
+  Runtime --> Intersection
   Capability[single-use workflow capability] --> Completion[workflow_complete_step]
   Intersection --> Effective[effective child tools]
   Completion --> Effective
 ```
 
-The selected profile is an outer visibility boundary. Pi Workflows may narrow
-it but cannot activate a normal tool or extension that Pi Subagents excluded.
-The completion tool is the sole addition and appears only after capability
-verification. A custom profile that restricts extension loading must still
-load Pi Workflows for delegated workflow steps.
+The bundled runtime's resolved tools are an outer visibility boundary. Pi
+Workflows may narrow them but cannot activate a normal tool or extension that
+Pi Subagents excluded. The completion tool is the sole addition and appears
+only after capability verification.

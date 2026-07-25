@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { beginGate, pauseRun } from '../src/engine/transitions.ts';
+import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
 import {
   formatWorkflowStatusText,
@@ -79,6 +79,8 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/inspect/);
       expect(output).toMatch(/COMPLETED · ready/);
       expect(output).toMatch(/implement/);
+      expect(output).toMatch(/✓ inspect/);
+      expect(output).toMatch(/↻ implement/);
       expect(output).toMatch(/pi-workflows\.step/);
       expect(output).toMatch(/checking/);
       expect(output).toMatch(/implementation details/);
@@ -126,6 +128,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/2 completed attempts/);
       expect(output).toMatch(/COMPLETED · ready/);
       expect(output).toMatch(/COMPLETED · done/);
+      expect(output).toMatch(/✓ implement/);
       expect(output).not.toMatch(/\bRUNNING\b/);
     });
 
@@ -142,9 +145,25 @@ describe('when testing workflow status', () => {
 
       // then
       expect(output).toMatch(/\[PAUSED\]/);
+      expect(output).toMatch(/◆ inspect/);
       expect(output).toMatch(/reason/);
       expect(output).toMatch(/ขั้นตอนล้มเหลว/);
       expect(lines.every((line) => visibleWidth(line) <= 48)).toBeTruthy();
+    });
+
+    test('failed steps render a cross while remaining resumable', () => {
+      // given
+      const workflow = loadedWorkflow();
+      const running = createRun(workflow, '', [], 'run-failed-status', 1_000);
+      const run = failRun(running, 'Subagent failed', 4_000);
+
+      // when
+      const output = renderSnapshot({ run, workflow, now: 90_000 }).join('\n');
+
+      // then
+      expect(run.status).toBe('paused');
+      expect(output).toMatch(/✕ inspect/);
+      expect(output).toMatch(/\[PAUSED\]/);
     });
 
     test('a pending gate shows its review identifier and waiting state', () => {

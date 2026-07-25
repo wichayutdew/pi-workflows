@@ -41,7 +41,7 @@ export interface WorkflowStatusSnapshot {
 }
 
 type SnapshotProvider = () => WorkflowStatusSnapshot | undefined;
-type StepDisplayStatus = WorkflowRunStatus | 'completed';
+type StepDisplayStatus = WorkflowRunStatus | 'completed' | 'failed';
 
 interface PathEntry {
   stepId: string;
@@ -65,12 +65,6 @@ export function formatWorkflowStatusText(
   ];
   if (run.pendingGate?.reviewId) {
     lines.push(`Review: ${run.pendingGate.reviewId}`);
-  }
-  if (run.pendingSupervisor) {
-    lines.push(
-      `Supervisor request: ${run.pendingSupervisor.reason} from ${run.pendingSupervisor.agent}`,
-      `Question: ${run.pendingSupervisor.message}`,
-    );
   }
   if (snapshot.execution?.kind === 'subagent') {
     lines.push(
@@ -138,7 +132,7 @@ export class WorkflowStatusView implements Component {
     const snapshot = this.getSnapshot();
     if (viewportWidth < 12) {
       const label = snapshot
-        ? `${statusGlyph(this.theme, snapshot.run.status)} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
+        ? `${statusGlyph(this.theme, runDisplayStatus(snapshot.run))} ${snapshot.run.workflowId} ${statusLabel(snapshot.run.status)}`
         : 'No workflow';
       return [truncateToWidth(label, viewportWidth, '…', true)];
     }
@@ -248,7 +242,7 @@ function renderHeaderLines(
     `${run.history.length} completed attempt${run.history.length === 1 ? '' : 's'}`,
   );
   const firstLine = [
-    statusGlyph(theme, run.status),
+    statusGlyph(theme, runDisplayStatus(run)),
     theme.bold(workflowName),
     status,
     theme.fg('muted', '·'),
@@ -318,17 +312,6 @@ function renderSummaryLines(
       ? `${run.pendingGate.provider} · ${run.pendingGate.reviewId}`
       : `${run.pendingGate.provider} · opening`;
     lines.push(...keyValueLines(theme, 'review', review, width, 'warning'));
-  }
-  if (run.pendingSupervisor) {
-    lines.push(
-      ...keyValueLines(
-        theme,
-        'supervisor',
-        `${run.pendingSupervisor.agent} · ${run.pendingSupervisor.reason}: ${run.pendingSupervisor.message}`,
-        width,
-        'warning',
-      ),
-    );
   }
   if (!workflow) {
     lines.push(
@@ -424,7 +407,7 @@ function buildPathEntries(snapshot: WorkflowStatusSnapshot): PathEntry[] {
     entries.push({
       stepId: run.currentStepId,
       title: stepTitle(workflow, run.currentStepId),
-      status: run.status,
+      status: runDisplayStatus(run),
       visit: Math.max(
         visits.get(run.currentStepId) ?? 0,
         run.visits[run.currentStepId] ?? 1,
@@ -548,7 +531,9 @@ function statusGlyph(theme: Theme, status: StepDisplayStatus): string {
   if (status === 'paused' || status === 'awaiting-gate') {
     return theme.fg('warning', '◆');
   }
-  if (status === 'aborted') return theme.fg('error', '✕');
+  if (status === 'failed' || status === 'aborted') {
+    return theme.fg('error', '✕');
+  }
   return theme.fg('dim', '•');
 }
 
@@ -556,7 +541,7 @@ function statusColor(status: StepDisplayStatus): ThemeColor {
   if (status === 'completed') return 'success';
   if (status === 'running') return 'accent';
   if (status === 'paused' || status === 'awaiting-gate') return 'warning';
-  if (status === 'aborted') return 'error';
+  if (status === 'failed' || status === 'aborted') return 'error';
   return 'dim';
 }
 
@@ -568,6 +553,21 @@ function statusLabel(status: StepDisplayStatus): string {
 
 function statusBadge(theme: Theme, status: StepDisplayStatus): string {
   return theme.fg(statusColor(status), theme.bold(`[${statusLabel(status)}]`));
+}
+
+function runDisplayStatus(run: WorkflowRun): StepDisplayStatus {
+  return run.status === 'paused' && run.failedStepId === run.currentStepId
+    ? 'failed'
+    : run.status;
+}
+
+export function workflowStatusIcon(run: WorkflowRun): string {
+  const status = runDisplayStatus(run);
+  if (status === 'completed') return '✓';
+  if (status === 'running') return '↻';
+  if (status === 'failed' || status === 'aborted') return '✕';
+  if (status === 'paused' || status === 'awaiting-gate') return '◆';
+  return '•';
 }
 
 function stepTitle(

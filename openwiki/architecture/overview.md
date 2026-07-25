@@ -43,7 +43,7 @@ flowchart TD
   Start[src/index.ts loaded by Pi]
   Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
   ChildEnv -- no --> Parent[Create WorkflowHarness]
-  ChildEnv -- yes --> NameOk{PI_SUBAGENT_CHILD_AGENT is a valid runtime name?}
+  ChildEnv -- yes --> NameOk{valid runtime name?<br/>workflow requests use pi-workflows.step}
   NameOk -- yes --> Child[Register child runtime]
   NameOk -- no --> Noop[Return without registering workflow runtime]
 

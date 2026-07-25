@@ -32,16 +32,6 @@ export interface PendingGate {
   resolution?: GateResolution | undefined;
 }
 
-export interface PendingSupervisorRequest {
-  delegationRequestId: string;
-  runId: string;
-  agent: string;
-  requestId: string;
-  reason: 'need_decision' | 'interview_request' | 'progress_update';
-  message: string;
-  interview?: unknown;
-}
-
 export interface WorkflowRun {
   stateVersion: typeof RUN_STATE_VERSION;
   runId: string;
@@ -70,9 +60,9 @@ export interface WorkflowRun {
   gateFeedback: string;
   pauseReason?: string | undefined;
   pausedFrom?: 'running' | 'awaiting-gate' | undefined;
+  /** Current step when execution failed and was paused for a resumable retry. */
+  failedStepId?: string | undefined;
   pendingGate?: PendingGate | undefined;
-  /** A detached delegated child is waiting for this supervisor reply. */
-  pendingSupervisor?: PendingSupervisorRequest | undefined;
 }
 
 export function createRun(
@@ -153,21 +143,10 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
       typeof run.reviewedArtifact === 'string') &&
     (run.stepHandoff === undefined || typeof run.stepHandoff === 'string') &&
     (run.pauseReason === undefined || typeof run.pauseReason === 'string') &&
+    (run.failedStepId === undefined || typeof run.failedStepId === 'string') &&
     (run.pausedFrom === undefined ||
       run.pausedFrom === 'running' ||
       run.pausedFrom === 'awaiting-gate');
-  const supervisorIsValid =
-    run.pendingSupervisor === undefined ||
-    (run.pendingSupervisor !== null &&
-      typeof run.pendingSupervisor === 'object' &&
-      typeof run.pendingSupervisor.delegationRequestId === 'string' &&
-      typeof run.pendingSupervisor.runId === 'string' &&
-      typeof run.pendingSupervisor.agent === 'string' &&
-      typeof run.pendingSupervisor.requestId === 'string' &&
-      (run.pendingSupervisor.reason === 'need_decision' ||
-        run.pendingSupervisor.reason === 'interview_request' ||
-        run.pendingSupervisor.reason === 'progress_update') &&
-      typeof run.pendingSupervisor.message === 'string');
   const statusIsValid =
     run.status === 'running' ||
     run.status === 'paused' ||
@@ -178,6 +157,9 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
     run.status === 'paused'
       ? run.pausedFrom === 'running' || run.pausedFrom === 'awaiting-gate'
       : run.pausedFrom === undefined;
+  const failureStateIsValid =
+    run.failedStepId === undefined ||
+    (run.status === 'paused' && run.failedStepId === run.currentStepId);
   const gateStateIsValid = !gateIsValid
     ? false
     : run.pendingGate === undefined
@@ -185,9 +167,6 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
       : run.pendingGate.stepId === run.currentStepId &&
         (run.status === 'awaiting-gate' ||
           (run.status === 'paused' && run.pausedFrom === 'awaiting-gate'));
-  const supervisorStateIsValid =
-    run.pendingSupervisor === undefined ||
-    (run.status === 'paused' && run.pausedFrom === 'running');
   return (
     run.stateVersion === RUN_STATE_VERSION &&
     typeof run.runId === 'string' &&
@@ -201,12 +180,11 @@ export function isWorkflowRun(value: unknown): value is WorkflowRun {
     historyIsValid &&
     visitsAreValid &&
     gateIsValid &&
-    supervisorIsValid &&
     optionalsAreValid &&
     statusIsValid &&
     pauseStateIsValid &&
+    failureStateIsValid &&
     gateStateIsValid &&
-    supervisorStateIsValid &&
     typeof run.startedAt === 'number' &&
     typeof run.updatedAt === 'number' &&
     typeof run.lastSummary === 'string' &&

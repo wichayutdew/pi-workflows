@@ -52,6 +52,7 @@ describe('when testing subagent child runtime', () => {
         bash: { mode: 'read-only', allow: [] },
       },
       outcomes: ['ready', 'blocked'],
+      pauseOutcomes: ['blocked'],
       summaryMaxChars: 500,
       ...overrides,
     };
@@ -69,6 +70,20 @@ describe('when testing subagent child runtime', () => {
       { name: 'read', sourceInfo: { source: 'builtin' } },
       { name: 'write', sourceInfo: { source: 'builtin' } },
       { name: 'bash', sourceInfo: { source: 'builtin' } },
+      {
+        name: 'contact_supervisor',
+        sourceInfo: {
+          source: 'extension',
+          path: '/packages/pi-subagents/index.ts',
+        },
+      },
+      {
+        name: 'intercom',
+        sourceInfo: {
+          source: 'extension',
+          path: '/packages/pi-subagents/index.ts',
+        },
+      },
       {
         name: 'mcp',
         sourceInfo: {
@@ -136,6 +151,7 @@ describe('when testing subagent child runtime', () => {
           bash: { mode: 'read-only', allow: [] },
         },
         outcomes: ['ready', 'blocked'],
+        pauseOutcomes: ['blocked'],
         summaryMaxChars: 500,
       };
       const handlers = new Map<string, Handler[]>();
@@ -217,7 +233,7 @@ describe('when testing subagent child runtime', () => {
         const transformed = input({
           type: 'input',
           source: 'rpc',
-          text: `${encodeChildPolicy(policy)}\n\nInspect now.`,
+          text: `<file name="${join(tmpdir(), 'pi-subagent-long-task', 'task.md')}">\nTask: ${encodeChildPolicy(policy)}\n\nInspect now.\n</file>\n`,
         }) as { action: string; text: string };
         expect(transformed).toEqual({
           action: 'transform',
@@ -364,6 +380,24 @@ describe('when testing subagent child runtime', () => {
         expect(started.systemPrompt).toContain(
           'Outcome "ready" requires the complete gate artifact.',
         );
+        expect(started.systemPrompt).toMatch(/non-interactive workflow child/i);
+        expect(started.systemPrompt).toMatch(
+          /every unresolved decision in the gate artifact/i,
+        );
+        expect(started.systemPrompt).toContain(
+          'choose a pause outcome (blocked)',
+        );
+        expect(
+          toolCall({
+            toolCallId: 'supervisor',
+            toolName: 'contact_supervisor',
+            input: { reason: 'need_decision', message: 'Question?' },
+          }),
+        ).toEqual({
+          block: true,
+          reason:
+            'workflow children are non-interactive; use workflow_complete_step with a pause outcome and describe the unresolved contract in summary',
+        });
         expect(mixed.block).toBe(true);
         expect(mixed.reason).toMatch(/must be the only tool call/);
         expect(isolated).toBe(undefined);
@@ -385,6 +419,37 @@ describe('when testing subagent child runtime', () => {
             summary: 'Done',
           }),
         ).rejects.toThrow(/more than one workflow policy/);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('does not invent a pause outcome when the workflow has none', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, {
+        outcomes: ['done'],
+        pauseOutcomes: [],
+      });
+      const rig = runtime(policy.agent);
+
+      // when
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const beforeAgentStart = rig.handlers.get('before_agent_start')?.[0];
+        expectTruthy(input);
+        expectTruthy(beforeAgentStart);
+        input({ text: `${encodeChildPolicy(policy)}\n\nFinish now.` });
+        const started = beforeAgentStart({
+          systemPrompt: 'Base child prompt',
+        }) as { systemPrompt: string };
+
+        // then
+        expect(started.systemPrompt).toContain(
+          'do not fabricate success or call the completion tool',
+        );
+        expect(started.systemPrompt).not.toContain('choose a pause outcome');
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

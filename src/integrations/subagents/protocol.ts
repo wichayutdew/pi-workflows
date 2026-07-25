@@ -30,15 +30,14 @@ export const SUBAGENT_DELEGATION_RESPONSE_EVENT =
   'prompt-template:subagent:response';
 export const SUBAGENT_DELEGATION_CANCEL_EVENT =
   'prompt-template:subagent:cancel';
-/** Additive supervisor lifecycle events introduced by pi-subagents 0.36.0. */
-export const SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT =
-  'prompt-template:subagent:supervisor-request';
-export const SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT =
-  'prompt-template:subagent:supervisor-reply';
 
 const CHILD_POLICY_OPEN = '<pi-workflows-policy-v1>';
 const CHILD_POLICY_CLOSE = '</pi-workflows-policy-v1>';
-const FORK_TASK_BOUNDARY = '\n\nTask:\n';
+const UPSTREAM_TASK_PREFIX = 'Task: ';
+const UPSTREAM_TASK_FILE_OPEN = '<file name="';
+const UPSTREAM_TASK_FILE_HEADER_CLOSE = '">\n';
+const UPSTREAM_TASK_FILE_CLOSE = '\n</file>\n';
+const UPSTREAM_TASK_DIRECTORY_PREFIX = 'pi-subagent-';
 const POLICY_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const CAPABILITY_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const RESULT_FILE_NAME = 'result.json';
@@ -49,30 +48,6 @@ export type SubagentDelegationRequest = UpstreamDelegationRequest;
 export type SubagentDelegationUpdate = UpstreamDelegationUpdate;
 export type SubagentDelegationStatus = UpstreamDelegationStatus;
 export type SubagentDelegationResponse = UpstreamDelegationResponse;
-
-export type SubagentSupervisorReason =
-  'need_decision' | 'interview_request' | 'progress_update';
-
-/** A correlated request from a detached delegated child to its supervisor. */
-export interface SubagentDelegationSupervisorRequest {
-  version: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
-  delegationRequestId: string;
-  runId: string;
-  agent: string;
-  requestId: string;
-  reason: SubagentSupervisorReason;
-  message: string;
-  interview?: unknown;
-}
-
-export interface SubagentDelegationSupervisorReply {
-  version: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
-  delegationRequestId: string;
-  runId: string;
-  agent: string;
-  requestId: string;
-  message: string;
-}
 
 export interface ChildStepPolicy {
   version: 1;
@@ -90,6 +65,8 @@ export interface ChildStepPolicy {
   /** Exact Bash command strings extracted from a reviewed gate artifact. */
   approvedBashCommands?: string[];
   outcomes: string[];
+  /** Outcomes that pause instead of advancing to another workflow step. */
+  pauseOutcomes: string[];
   summaryMaxChars: number;
   gateSubmitOutcome?: string;
 }
@@ -198,6 +175,7 @@ function parseChildPolicy(value: unknown): ChildStepPolicy {
     'permissions',
     'approvedBashCommands',
     'outcomes',
+    'pauseOutcomes',
     'summaryMaxChars',
     'gateSubmitOutcome',
   ]);
@@ -267,6 +245,15 @@ function parseChildPolicy(value: unknown): ChildStepPolicy {
     throw new Error('child policy outcomes are invalid');
   }
   if (
+    !isStringArray(value.pauseOutcomes) ||
+    new Set(value.pauseOutcomes).size !== value.pauseOutcomes.length ||
+    value.pauseOutcomes.some(
+      (outcome) => !(value.outcomes as string[]).includes(outcome),
+    )
+  ) {
+    throw new Error('child policy pause outcomes are invalid');
+  }
+  if (
     !Number.isInteger(value.summaryMaxChars) ||
     (value.summaryMaxChars as number) < 100 ||
     (value.summaryMaxChars as number) > 50_000
@@ -291,29 +278,60 @@ export function encodeChildPolicy(policy: ChildStepPolicy): string {
   return `${CHILD_POLICY_OPEN}${encoded}${CHILD_POLICY_CLOSE}`;
 }
 
+function unwrapUpstreamTask(text: string): string | undefined {
+  if (text.startsWith(CHILD_POLICY_OPEN)) return text;
+  if (text.startsWith(`${UPSTREAM_TASK_PREFIX}${CHILD_POLICY_OPEN}`)) {
+    return text.slice(UPSTREAM_TASK_PREFIX.length);
+  }
+  if (
+    !text.startsWith(UPSTREAM_TASK_FILE_OPEN) ||
+    !text.endsWith(UPSTREAM_TASK_FILE_CLOSE)
+  ) {
+    return undefined;
+  }
+
+  const pathStart = UPSTREAM_TASK_FILE_OPEN.length;
+  const headerEnd = text.indexOf(UPSTREAM_TASK_FILE_HEADER_CLOSE, pathStart);
+  if (headerEnd === -1) return undefined;
+  const taskFilePath = text.slice(pathStart, headerEnd);
+  const taskDirectory = dirname(resolve(taskFilePath));
+  if (
+    basename(taskFilePath) !== 'task.md' ||
+    !basename(taskDirectory).startsWith(UPSTREAM_TASK_DIRECTORY_PREFIX) ||
+    dirname(taskDirectory) !== resolve(tmpdir())
+  ) {
+    return undefined;
+  }
+
+  const bodyStart = headerEnd + UPSTREAM_TASK_FILE_HEADER_CLOSE.length;
+  const body = text.slice(bodyStart, -UPSTREAM_TASK_FILE_CLOSE.length);
+  if (!body.startsWith(`${UPSTREAM_TASK_PREFIX}${CHILD_POLICY_OPEN}`)) {
+    return undefined;
+  }
+  return body.slice(UPSTREAM_TASK_PREFIX.length);
+}
+
 export function extractChildPolicy(
   text: string,
 ): ExtractedChildPolicy | undefined {
-  let start = 0;
-  if (!text.startsWith(CHILD_POLICY_OPEN)) {
-    const forkStart = text.indexOf(`${FORK_TASK_BOUNDARY}${CHILD_POLICY_OPEN}`);
-    if (forkStart === -1) return undefined;
-    start = forkStart + FORK_TASK_BOUNDARY.length;
-  }
-  const payloadStart = start + CHILD_POLICY_OPEN.length;
-  const end = text.indexOf(CHILD_POLICY_CLOSE, payloadStart);
-  if (end === -1 || text.indexOf(CHILD_POLICY_OPEN, payloadStart) !== -1) {
+  const taskWithPolicy = unwrapUpstreamTask(text);
+  if (taskWithPolicy === undefined) return undefined;
+  const payloadStart = CHILD_POLICY_OPEN.length;
+  const end = taskWithPolicy.indexOf(CHILD_POLICY_CLOSE, payloadStart);
+  if (
+    end === -1 ||
+    taskWithPolicy.indexOf(CHILD_POLICY_OPEN, payloadStart) !== -1
+  ) {
     throw new Error('delegated task contains an invalid child policy envelope');
   }
-  const encoded = text.slice(payloadStart, end);
+  const encoded = taskWithPolicy.slice(payloadStart, end);
   let decoded: unknown;
   try {
     decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
   } catch {
     throw new Error('delegated task child policy cannot be decoded');
   }
-  const task =
-    `${text.slice(0, start)}${text.slice(end + CHILD_POLICY_CLOSE.length)}`.trim();
+  const task = taskWithPolicy.slice(end + CHILD_POLICY_CLOSE.length).trim();
   if (!task) throw new Error('delegated task is empty after policy extraction');
   return { policy: parseChildPolicy(decoded), task };
 }

@@ -50,7 +50,7 @@ describe('when testing config', () => {
         ...steps.inspect,
         subagent: {
           agent: 'worker',
-          context: 'fork',
+          context: 'fresh',
           model: 'anthropic/claude-sonnet-4',
           timeoutMs: 120_000,
           turnBudget: { maxTurns: 12, graceTurns: 2 },
@@ -64,7 +64,7 @@ describe('when testing config', () => {
       expect(result.errors).toEqual([]);
       expect(result.value?.steps.inspect?.subagent).toEqual({
         agent: 'worker',
-        context: 'fork',
+        context: 'fresh',
         model: 'anthropic/claude-sonnet-4',
         timeoutMs: 120_000,
         turnBudget: { maxTurns: 12, graceTurns: 2 },
@@ -89,7 +89,7 @@ describe('when testing config', () => {
       expect(invalidResult.errors.join('\n')).toMatch(
         /agent: invalid value "Reviewer!"/,
       );
-      expect(invalidResult.errors.join('\n')).toMatch(/expected fresh or fork/);
+      expect(invalidResult.errors.join('\n')).toMatch(/expected fresh/);
       expect(invalidResult.errors.join('\n')).toMatch(
         /soft: must not exceed hard/,
       );
@@ -501,7 +501,7 @@ describe('when testing config', () => {
           permissionCeiling: {
             subagent: {
               agents: [],
-              contexts: [],
+              contexts: ['fork'],
               models: 'models',
             },
           },
@@ -525,6 +525,21 @@ describe('when testing config', () => {
 
       // when
       const errors = malformed.map((raw) => validateSettings(raw).errors);
+      const forkCeiling = validateSettings({
+        version: 1,
+        allowProjectWorkflows: true,
+        permissionCeiling: {
+          tools: [],
+          mcp: [],
+          extensions: [],
+          skills: [],
+          bash: { mode: 'deny' },
+          subagent: {
+            ...projectSubagentCeiling(),
+            contexts: ['fork'],
+          },
+        },
+      });
       const first = cloneEmptyRequirements();
       const second = cloneEmptyRequirements();
       first.tools.push('read');
@@ -536,6 +551,10 @@ describe('when testing config', () => {
       );
       expect(errors.flat().join('\n')).toMatch(
         /at least one subagent is required/,
+      );
+      expect(forkCeiling.value).toBe(undefined);
+      expect(forkCeiling.errors.join('\n')).toMatch(
+        /contexts.*invalid value "fork"/,
       );
       expect(second).toEqual({ tools: [], extensions: [], skills: [] });
     });
@@ -654,7 +673,7 @@ describe('when testing config', () => {
             prompt: 'Inspect',
             subagent: {
               agent: 'pi-workflows.writer',
-              context: 'fork',
+              context: 'fresh',
               model: 'anthropic/claude-sonnet-4',
               timeoutMs: 120_000,
               turnBudget: { maxTurns: 12, graceTurns: 2 },
@@ -690,7 +709,6 @@ describe('when testing config', () => {
       expect(errors.join('\n')).toMatch(/"write" exceeds/);
       expect(errors.join('\n')).toMatch(/"gitlab\/get_merge_request" exceeds/);
       expect(errors.join('\n')).toMatch(/subagent\.agent/);
-      expect(errors.join('\n')).toMatch(/subagent\.context/);
       expect(errors.join('\n')).toMatch(/subagent\.model/);
       expect(errors.join('\n')).toMatch(/subagent\.timeoutMs/);
       expect(errors.join('\n')).toMatch(/subagent\.turnBudget\.maxTurns/);

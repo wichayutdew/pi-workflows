@@ -360,7 +360,7 @@
               "default": "pi-workflows.step"
             },
             "context": {
-              "enum": ["fresh", "fork"],
+              "enum": ["fresh"],
               "default": "fresh"
             },
             "model": {
@@ -413,7 +413,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["fresh", "fork"]
+            "enum": ["fresh"]
           }
         },
         "models": {

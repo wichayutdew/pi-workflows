@@ -47,7 +47,7 @@ sequenceDiagram
   alt subagent omitted
     Harness->>Main: activate policy and send user message
   else subagent configured
-    Harness->>Sub: delegation request
+    Harness->>Sub: pi-workflows.step delegation request
   end
 ```
 
@@ -82,8 +82,8 @@ sequenceDiagram
 
   Harness->>Tmp: write capability token
   Harness->>Harness: build ChildStepPolicy and digest
-  Harness->>Sub: request with encoded policy envelope
-  Sub->>Child: resolve configured agent and start child
+  Harness->>Sub: request fixed runtime with specialty, handoff, and encoded policy
+  Sub->>Child: start fresh pi-workflows.step child
   Child->>Tmp: verify and delete capability
   Child->>Child: narrow active tools
   Child->>Tmp: write result.json via workflow_complete_step
@@ -92,6 +92,12 @@ sequenceDiagram
   Harness->>Engine: advanceRun or beginGate
   Harness->>Tmp: cleanup
 ```
+
+The workflow `subagent.agent` value is the child task's specialty identity; it
+does not replace the fixed `pi-workflows.step` runtime. Each delegated request
+starts in a clean context with the original workflow input and the previous
+step's compact result or approved artifact. No accumulated parent or sibling
+transcript crosses the step boundary.
 
 ## Pause And Resume
 

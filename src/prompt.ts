@@ -57,12 +57,29 @@ function buildStepTask(
 ): string {
   const step = workflow.definition.steps[run.currentStepId];
   if (!step) throw new Error(`unknown workflow step "${run.currentStepId}"`);
-  const prompt = renderTemplate(
-    workflow.prompts[run.currentStepId] ?? '',
-    templateValues(workflow, run, step),
-  );
+  const promptTemplate = workflow.prompts[run.currentStepId] ?? '';
+  const handoff = currentStepHandoff(run);
+  const values = templateValues(workflow, run, step);
+  if (
+    execution === 'delegated' &&
+    /\{\{\s*last\.summary\s*\}\}/.test(promptTemplate)
+  ) {
+    values['last.summary'] =
+      '(Provided once in the Previous step handoff section below.)';
+  }
+  const prompt = renderTemplate(promptTemplate, values);
   const outcomes = allowedOutcomes(workflow, run);
   const allowedOutcomeSet = new Set(outcomes);
+  const pauseOutcomes = Object.entries(step.transitions)
+    .filter(
+      ([outcome, target]) =>
+        target === '$pause' && allowedOutcomeSet.has(outcome),
+    )
+    .map(([outcome]) => outcome);
+  const invalidContractInstruction =
+    pauseOutcomes.length > 0
+      ? `If the workflow definition, environment, or final execution contract is wrong, use a pause outcome (${pauseOutcomes.join(', ')}) and describe the evidence declaratively in \`summary\`.`
+      : 'If the workflow definition, environment, or final execution contract is wrong, do not fabricate success or call the completion tool; end with a concise declarative error so the harness pauses the step.';
   const transitionLines = Object.entries(step.transitions)
     .filter(([outcome]) => allowedOutcomeSet.has(outcome))
     .map(([outcome, target]) => `- ${outcome}: ${target}`)
@@ -79,11 +96,25 @@ function buildStepTask(
     `Workflow: ${workflow.definition.id}`,
     `Run: ${run.runId}`,
     `Step: ${run.currentStepId} (${step.title})`,
+    ...(delegated
+      ? [
+          `Step specialty: ${step.subagent?.agent ?? 'generalist'}`,
+          'Context: fresh workflow-step context; no parent or sibling transcript is inherited.',
+        ]
+      : []),
     '',
     '## Step instructions',
     '',
     prompt,
     '',
+    ...(delegated
+      ? [
+          '## Previous step handoff',
+          '',
+          handoff || '(none; this is the first workflow step)',
+          '',
+        ]
+      : []),
     `## Enforced ${delegated ? 'child' : 'step'} resources`,
     '',
     `Pi tools: ${formatList(step.permissions.tools)}`,
@@ -101,7 +132,21 @@ function buildStepTask(
     transitionLines,
     gateLine,
     '',
-    'Put a concise handoff in `summary`. Do not call the completion tool alongside other tool calls. If the workflow definition or environment is wrong, use an outcome that transitions to `$pause`.',
+    'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    ...(delegated
+      ? [
+          'This child is non-interactive. Never call `contact_supervisor`, `subagent_supervisor`, or `intercom`.',
+          ...(step.gate
+            ? [
+                'Put every unresolved decision in the gate artifact with evidence, options, a recommendation, and an adopted default; do not ask a terminal question.',
+              ]
+            : [
+                'Treat the step instructions and incoming handoff as the final execution contract; do not ask a terminal question.',
+              ]),
+        ]
+      : []),
+    'Do not call the completion tool alongside other tool calls.',
+    invalidContractInstruction,
   ].join('\n');
 }
 

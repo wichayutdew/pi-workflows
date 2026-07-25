@@ -500,7 +500,7 @@ function parseStepSubagent(
     return { ...DEFAULT_STEP_SUBAGENT, agent };
   }
   if (!isObject(value)) {
-    errors.push(`${path}: expected a workflow subagent name or object`);
+    errors.push(`${path}: expected a workflow step specialty or object`);
     return undefined;
   }
   rejectUnknownKeys(
@@ -528,12 +528,9 @@ function parseStepSubagent(
     value.context === undefined
       ? DEFAULT_STEP_SUBAGENT.context
       : readString(value.context, `${path}.context`, errors);
-  const context: SubagentContext =
-    contextValue === 'fork' || contextValue === 'fresh'
-      ? contextValue
-      : DEFAULT_STEP_SUBAGENT.context;
-  if (contextValue !== 'fork' && contextValue !== 'fresh') {
-    errors.push(`${path}.context: expected fresh or fork`);
+  const context: SubagentContext = DEFAULT_STEP_SUBAGENT.context;
+  if (contextValue !== 'fresh') {
+    errors.push(`${path}.context: expected fresh`);
   }
   const model =
     value.model === undefined
@@ -1011,7 +1008,7 @@ function parseSubagentPermissionCeiling(
     value.contexts,
     `${path}.contexts`,
     errors,
-    /^(?:fresh|fork)$/,
+    /^fresh$/,
   ) as SubagentContext[];
   const models = readStringList(
     value.models,

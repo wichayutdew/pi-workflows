@@ -4,14 +4,10 @@ import {
   SUBAGENT_DELEGATION_REQUEST_EVENT,
   SUBAGENT_DELEGATION_RESPONSE_EVENT,
   SUBAGENT_DELEGATION_STARTED_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT,
   SUBAGENT_DELEGATION_UPDATE_EVENT,
   type SubagentDelegationRequest,
   type SubagentDelegationResponse,
   type SubagentDelegationStatus,
-  type SubagentDelegationSupervisorReply,
-  type SubagentDelegationSupervisorRequest,
   type SubagentDelegationUpdate,
 } from './protocol.ts';
 
@@ -24,7 +20,6 @@ export interface DelegateOptions {
   signal?: AbortSignal;
   startTimeoutMs?: number;
   onUpdate?: (update: SubagentDelegationUpdate) => void;
-  onSupervisorRequest?: (request: SubagentDelegationSupervisorRequest) => void;
   /**
    * Called when a terminal response arrives after the delegate promise already
    * rejected locally. The child was still potentially alive until this event.
@@ -83,27 +78,6 @@ function parseUpdate(value: unknown): SubagentDelegationUpdate | undefined {
   return update as SubagentDelegationUpdate;
 }
 
-function parseSupervisorRequest(
-  value: unknown,
-): SubagentDelegationSupervisorRequest | undefined {
-  if (value === null || typeof value !== 'object') return undefined;
-  const request = value as Partial<SubagentDelegationSupervisorRequest>;
-  if (
-    request.version !== SUBAGENT_DELEGATION_PROTOCOL_VERSION ||
-    typeof request.delegationRequestId !== 'string' ||
-    typeof request.runId !== 'string' ||
-    typeof request.agent !== 'string' ||
-    typeof request.requestId !== 'string' ||
-    (request.reason !== 'need_decision' &&
-      request.reason !== 'interview_request' &&
-      request.reason !== 'progress_update') ||
-    typeof request.message !== 'string'
-  ) {
-    return undefined;
-  }
-  return request as SubagentDelegationSupervisorRequest;
-}
-
 export class SubagentDelegationClient {
   private readonly events: SubagentEventBus;
   private active: ActiveDelegation | undefined;
@@ -114,12 +88,6 @@ export class SubagentDelegationClient {
 
   get activeRequestId(): string | undefined {
     return this.active?.requestId;
-  }
-
-  replyToSupervisor(request: SubagentDelegationSupervisorReply): boolean {
-    if (this.active?.requestId !== request.delegationRequestId) return false;
-    this.events.emit(SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT, request);
-    return true;
   }
 
   delegate(
@@ -211,16 +179,6 @@ export class SubagentDelegationClient {
           const update = parseUpdate(data);
           if (!update || update.requestId !== request.requestId) return;
           options.onUpdate?.(update);
-        });
-        subscribe(SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT, (data) => {
-          const supervisorRequest = parseSupervisorRequest(data);
-          if (
-            !supervisorRequest ||
-            supervisorRequest.delegationRequestId !== request.requestId
-          ) {
-            return;
-          }
-          options.onSupervisorRequest?.(supervisorRequest);
         });
         subscribe(SUBAGENT_DELEGATION_RESPONSE_EVENT, (data) => {
           const response = parseResponse(data);

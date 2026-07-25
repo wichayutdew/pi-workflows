@@ -223,3 +223,19 @@ export function extractApprovedBashCommands(
   }
   return [...new Set(commands)];
 }
+
+/**
+ * Keep only commands that occur in both the human-approved artifact and the
+ * latest completed-step handoff. A child may narrow reviewed authority, but
+ * its unreviewed output can never add a Bash capability.
+ */
+export function narrowApprovedBashCommands(
+  artifact: string,
+  handoff: string,
+  sources: readonly BashApprovalSource[],
+): string[] {
+  const approved = extractApprovedBashCommands(artifact, sources);
+  if (approved.length === 0) return [];
+  const retained = new Set(extractApprovedBashCommands(handoff, sources));
+  return approved.filter((command) => retained.has(command));
+}

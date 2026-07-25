@@ -16,6 +16,7 @@ import { loadCatalog } from './config/load.ts';
 import { hasRuntimeCommandConflict } from './config/command-conflicts.ts';
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_STEP_SUBAGENT,
   type LoadedWorkflow,
   type WorkflowCatalog,
   type WorkflowStep,
@@ -28,6 +29,7 @@ import {
   attachGateReviewId,
   beginGate,
   failGate,
+  failRun,
   pauseRun,
   reconcileRun,
   resolveGate,
@@ -61,7 +63,6 @@ import {
   type ChildStepPolicy,
   type SubagentDelegationRequest,
   type SubagentDelegationResponse,
-  type SubagentDelegationSupervisorRequest,
   type SubagentDelegationUpdate,
 } from './integrations/subagents/protocol.ts';
 import { preflightStep } from './preflight.ts';
@@ -70,7 +71,7 @@ import {
   buildMainStepTask,
   buildMainWorkflowNotice,
 } from './prompt.ts';
-import { extractApprovedBashCommands } from './policy/approved-commands.ts';
+import { narrowApprovedBashCommands } from './policy/approved-commands.ts';
 import {
   MainStepRuntime,
   type MainStepExecution,
@@ -81,6 +82,7 @@ import { formatWorkflowList } from './workflow-list.ts';
 import {
   formatWorkflowStatusText,
   showWorkflowStatus,
+  workflowStatusIcon,
   type WorkflowStatusExecution,
   type WorkflowStatusSnapshot,
 } from './workflow-status.ts';
@@ -101,11 +103,6 @@ interface ActiveDelegation {
   cancelling?: boolean;
 }
 
-interface ActiveSupervisorRequest {
-  delegation: ActiveDelegation;
-  request: SubagentDelegationSupervisorRequest;
-}
-
 interface MainStepIdentity {
   runId: string;
   stepId: string;
@@ -119,6 +116,12 @@ interface ActivePromptReview {
   stepId: string;
   sessionEpoch: number;
   abortController: AbortController;
+}
+
+interface WorkflowStartContext {
+  context: ExtensionContext;
+  skills: () => readonly { name: string }[] | undefined;
+  waitForIdle: () => Promise<void>;
 }
 
 function emptyCatalog(): WorkflowCatalog {
@@ -141,6 +144,30 @@ function formatDiagnostics(catalog: WorkflowCatalog): string {
   ].join('\n');
 }
 
+function skillNamesFromSystemPrompt(
+  systemPrompt: string,
+): Array<{ name: string }> {
+  const sections = [
+    ...systemPrompt.matchAll(
+      /<available_skills>([\s\S]*?)<\/available_skills>/g,
+    ),
+  ];
+  const section = sections.at(-1)?.[1] ?? '';
+  return [...section.matchAll(/<name>([^<]+)<\/name>/g)].map((match) => ({
+    name: match[1]!.trim(),
+  }));
+}
+
+async function waitForEventContextIdle(ctx: ExtensionContext): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (!ctx.isIdle()) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for the interrupted Pi turn to stop');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 export class WorkflowHarness implements WorkflowCommandController {
   private readonly pi: ExtensionAPI;
   private readonly subagents: SubagentDelegationClient;
@@ -152,7 +179,6 @@ export class WorkflowHarness implements WorkflowCommandController {
   private sessionActive = false;
   private sessionEpoch = 0;
   private activeDelegation: ActiveDelegation | undefined;
-  private activeSupervisorRequest: ActiveSupervisorRequest | undefined;
   private activePromptReview: ActivePromptReview | undefined;
   private registeredWorkflowCommands = new Set<string>();
   private catalogLoadSequence = 0;
@@ -163,6 +189,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     this.subagents = new SubagentDelegationClient(pi.events);
     this.mainSteps = new MainStepRuntime(pi);
     registerHarnessCommands(pi, this);
+    this.registerMultilineCommandInput();
     this.registerLifecycle();
     this.registerPolicy();
     this.registerPlannotatorResults();
@@ -170,6 +197,49 @@ export class WorkflowHarness implements WorkflowCommandController {
 
   workflowIds(): string[] {
     return [...this.catalog.workflows.keys()].sort();
+  }
+
+  private registerMultilineCommandInput(): void {
+    this.pi.on('input', async (event, ctx) => {
+      if (
+        event.source === 'extension' ||
+        event.images?.length ||
+        !event.text.startsWith('/')
+      ) {
+        return;
+      }
+      const newline = event.text.indexOf('\n');
+      if (newline === -1) return;
+      const command = event.text.slice(1, newline).replace(/\r$/, '');
+      if (!this.registeredWorkflowCommands.has(command)) return;
+      const workflow = [...this.catalog.workflows.values()].find(
+        (candidate) => candidate.definition.command === command,
+      );
+      if (!workflow) return;
+
+      const input = event.text.slice(newline + 1);
+      const skills = skillNamesFromSystemPrompt(ctx.getSystemPrompt());
+      try {
+        await this.enqueueMutation(ctx, (sessionEpoch) =>
+          this.startNow(
+            workflow.definition.id,
+            input,
+            {
+              context: ctx,
+              skills: () => skills,
+              waitForIdle: () => waitForEventContextIdle(ctx),
+            },
+            sessionEpoch,
+          ),
+        );
+      } catch (error) {
+        ctx.ui.notify(
+          `Cannot start workflow: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        );
+      }
+      return { action: 'handled' as const };
+    });
   }
 
   async list(ctx: ExtensionCommandContext): Promise<void> {
@@ -198,16 +268,26 @@ export class WorkflowHarness implements WorkflowCommandController {
     ctx: ExtensionCommandContext,
   ): Promise<void> {
     return this.enqueueMutation(ctx, (sessionEpoch) =>
-      this.startNow(workflowId, input, ctx, sessionEpoch),
+      this.startNow(
+        workflowId,
+        input,
+        {
+          context: ctx,
+          skills: () => ctx.getSystemPromptOptions().skills,
+          waitForIdle: () => ctx.waitForIdle(),
+        },
+        sessionEpoch,
+      ),
     );
   }
 
   private async startNow(
     workflowId: string,
     input: string,
-    ctx: ExtensionCommandContext,
+    startContext: WorkflowStartContext,
     sessionEpoch: number,
   ): Promise<void> {
+    const { context: ctx } = startContext;
     if (this.activeDelegation) {
       ctx.ui.notify(
         `Cannot start a workflow while subagent "${this.activeDelegation.agent}" is still cancelling`,
@@ -228,7 +308,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     }
     if (!ctx.isIdle()) {
       ctx.abort();
-      await ctx.waitForIdle();
+      await startContext.waitForIdle();
     }
     if (!this.sessionActive || this.sessionEpoch !== sessionEpoch) {
       ctx.ui.notify(
@@ -238,7 +318,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
 
-    this.captureSkills(ctx.getSystemPromptOptions().skills);
+    this.captureSkills(startContext.skills());
     if (!(await this.reloadCatalog(ctx, false))) {
       ctx.ui.notify(
         'Workflow start was superseded by a newer configuration load',
@@ -337,10 +417,6 @@ export class WorkflowHarness implements WorkflowCommandController {
   private async resumeNow(ctx: ExtensionCommandContext): Promise<void> {
     if (!this.run || this.run.status !== 'paused') {
       ctx.ui.notify('No paused workflow to resume', 'warning');
-      return;
-    }
-    if (this.run.pendingSupervisor) {
-      this.reopenSupervisorRequest(ctx);
       return;
     }
     if (this.activeDelegation) {
@@ -521,7 +597,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
     const preflightErrors = this.preflight(workflow, this.run.currentStepId);
     if (preflightErrors.length > 0) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Step preflight failed: ${preflightErrors.join('; ')}`,
         Date.now(),
@@ -683,7 +759,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       if (!this.run || this.run.status !== 'running') return;
       const workflow = this.catalog.workflows.get(this.run.workflowId);
       if (!workflow) {
-        this.run = pauseRun(
+        this.run = failRun(
           this.run,
           'Workflow configuration disappeared; reload or restore it',
           Date.now(),
@@ -723,6 +799,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
 
+    const runtimeAgent = DEFAULT_STEP_SUBAGENT.agent;
     const requestId = `${run.runId}:${run.currentStepId}:${randomUUID()}`;
     const resultDirectory = mkdtempSync(join(tmpdir(), 'pi-workflows-step-'));
     const capabilityPath = join(resultDirectory, 'capability');
@@ -733,14 +810,18 @@ export class WorkflowHarness implements WorkflowCommandController {
       flag: 'wx',
       mode: 0o600,
     });
-    const approvedBashCommands = extractApprovedBashCommands(
+    const outcomes = allowedOutcomes(workflow, run);
+    const outcomeSet = new Set(outcomes);
+    const approvedBashCommands = narrowApprovedBashCommands(
       run.reviewedArtifact ?? '',
+      run.stepHandoff ?? '',
       step.permissions.bash.approvedSources ?? [],
     );
     const policyDigest = digest({
       version: 1,
       requestId,
-      agent: subagent.agent,
+      agent: runtimeAgent,
+      specialty: subagent.agent,
       runId: run.runId,
       stepId: run.currentStepId,
       stepDigest: run.currentStepDigest,
@@ -751,7 +832,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     const policy: ChildStepPolicy = {
       version: 1,
       requestId,
-      agent: subagent.agent,
+      agent: runtimeAgent,
       workflowId: workflow.definition.id,
       runId: run.runId,
       stepId: run.currentStepId,
@@ -762,7 +843,12 @@ export class WorkflowHarness implements WorkflowCommandController {
       resultPath,
       permissions: structuredClone(step.permissions),
       ...(approvedBashCommands.length > 0 ? { approvedBashCommands } : {}),
-      outcomes: allowedOutcomes(workflow, run),
+      outcomes,
+      pauseOutcomes: Object.entries(step.transitions)
+        .filter(
+          ([outcome, target]) => target === '$pause' && outcomeSet.has(outcome),
+        )
+        .map(([outcome]) => outcome),
       summaryMaxChars: workflow.definition.summaryMaxChars,
       ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     };
@@ -779,9 +865,11 @@ export class WorkflowHarness implements WorkflowCommandController {
     const request: SubagentDelegationRequest = {
       version: 1,
       requestId,
-      agent: subagent.agent,
+      agent: runtimeAgent,
       task: buildDelegatedStepTask(workflow, run, encodeChildPolicy(policy)),
-      context: subagent.context,
+      // Workflow steps are isolation boundaries. Never fork the parent or a
+      // sibling step's transcript; pass only the explicit workflow handoff.
+      context: 'fresh',
       cwd: this.latestContext?.cwd ?? process.cwd(),
       timeoutMs: subagent.timeoutMs,
       skill:
@@ -812,8 +900,6 @@ export class WorkflowHarness implements WorkflowCommandController {
     void this.subagents
       .delegate(request, {
         onUpdate: (update) => this.handleDelegationUpdate(active, update),
-        onSupervisorRequest: (supervisorRequest) =>
-          this.queueSupervisorRequest(active, supervisorRequest),
         onLateTerminal: (response) =>
           this.queueDelegationResponse(active, response),
       })
@@ -832,8 +918,9 @@ export class WorkflowHarness implements WorkflowCommandController {
     run: WorkflowRun,
     step: WorkflowStep,
   ): void {
-    const approvedBashCommands = extractApprovedBashCommands(
+    const approvedBashCommands = narrowApprovedBashCommands(
       run.reviewedArtifact ?? '',
+      run.stepHandoff ?? '',
       step.permissions.bash.approvedSources ?? [],
     );
     const identity: MainStepIdentity = {
@@ -964,162 +1051,6 @@ export class WorkflowHarness implements WorkflowCommandController {
     this.updateStatus();
   }
 
-  private queueSupervisorRequest(
-    active: ActiveDelegation,
-    request: SubagentDelegationSupervisorRequest,
-  ): void {
-    void this.mutationQueue
-      .run(async () => this.handleSupervisorRequest(active, request))
-      .catch((error: unknown) => {
-        this.pauseForDelegationFailure(
-          error instanceof Error ? error.message : String(error),
-        );
-      });
-  }
-
-  private handleSupervisorRequest(
-    active: ActiveDelegation,
-    request: SubagentDelegationSupervisorRequest,
-  ): void {
-    if (
-      this.activeDelegation !== active ||
-      !this.sessionActive ||
-      this.sessionEpoch !== active.sessionEpoch ||
-      !this.run ||
-      this.run.status !== 'running' ||
-      this.run.runId !== active.runId ||
-      this.run.currentStepId !== active.stepId ||
-      this.run.currentStepDigest !== active.stepDigest
-    ) {
-      return;
-    }
-    if (this.activeSupervisorRequest) return;
-    this.activeSupervisorRequest = { delegation: active, request };
-    active.progress = 'waiting for supervisor reply';
-    this.run = pauseRun(
-      this.run,
-      `Subagent "${active.agent}" requested supervisor input`,
-      Date.now(),
-    );
-    this.run = {
-      ...this.run,
-      pendingSupervisor: {
-        delegationRequestId: request.delegationRequestId,
-        runId: request.runId,
-        agent: request.agent,
-        requestId: request.requestId,
-        reason: request.reason,
-        message: request.message,
-        ...(request.interview === undefined
-          ? {}
-          : { interview: request.interview }),
-      },
-      updatedAt: Date.now(),
-    };
-    this.persist();
-    this.isolateMainSessionTools();
-    this.updateStatus();
-    this.latestContext?.ui.notify(
-      `Workflow paused: subagent "${request.agent}" needs supervisor input`,
-      'warning',
-    );
-    if (this.latestContext?.hasUI && this.latestContext.mode === 'tui') {
-      this.openSupervisorReplyDialog(this.activeSupervisorRequest);
-    } else {
-      this.latestContext?.ui.notify(
-        'Reopen this workflow session in Pi TUI and run /workflow-resume to reply.',
-        'warning',
-      );
-    }
-  }
-
-  private reopenSupervisorRequest(ctx: ExtensionCommandContext): void {
-    const active = this.activeSupervisorRequest;
-    if (!active || this.activeDelegation !== active.delegation) {
-      ctx.ui.notify(
-        'The delegated child is no longer available; abort this paused workflow.',
-        'warning',
-      );
-      return;
-    }
-    if (!ctx.hasUI || ctx.mode !== 'tui') {
-      ctx.ui.notify(
-        'This supervisor request must be reopened in Pi TUI.',
-        'warning',
-      );
-      return;
-    }
-    this.openSupervisorReplyDialog(active);
-  }
-
-  private openSupervisorReplyDialog(active: ActiveSupervisorRequest): void {
-    const context = this.latestContext;
-    if (!context?.hasUI || context.mode !== 'tui') return;
-    void context.ui
-      .input(
-        `Reply to ${active.request.agent} (${active.request.reason})`,
-        active.request.message,
-      )
-      .then(
-        (message) => this.queueSupervisorReply(active, message),
-        (error: unknown) => {
-          this.latestContext?.ui.notify(
-            `Cannot open supervisor reply: ${error instanceof Error ? error.message : String(error)}`,
-            'error',
-          );
-        },
-      );
-  }
-
-  private queueSupervisorReply(
-    active: ActiveSupervisorRequest,
-    message: string | undefined,
-  ): void {
-    void this.mutationQueue
-      .run(async () => this.finishSupervisorReply(active, message))
-      .catch((error: unknown) => {
-        this.latestContext?.ui.notify(
-          `Cannot send supervisor reply: ${error instanceof Error ? error.message : String(error)}`,
-          'error',
-        );
-      });
-  }
-
-  private finishSupervisorReply(
-    active: ActiveSupervisorRequest,
-    message: string | undefined,
-  ): void {
-    if (
-      !message?.trim() ||
-      this.activeSupervisorRequest !== active ||
-      this.activeDelegation !== active.delegation ||
-      !this.run ||
-      this.run.status !== 'paused' ||
-      this.run.pendingSupervisor?.requestId !== active.request.requestId
-    ) {
-      return;
-    }
-    const sent = this.subagents.replyToSupervisor({
-      version: 1,
-      delegationRequestId: active.request.delegationRequestId,
-      runId: active.request.runId,
-      agent: active.request.agent,
-      requestId: active.request.requestId,
-      message: message.trim(),
-    });
-    if (!sent) return;
-    this.activeSupervisorRequest = undefined;
-    active.delegation.progress = 'running after supervisor reply';
-    this.run = {
-      ...resumeRun(this.run, Date.now()),
-      pendingSupervisor: undefined,
-      updatedAt: Date.now(),
-    };
-    this.persist();
-    this.isolateMainSessionTools();
-    this.updateStatus();
-  }
-
   private queueDelegationResponse(
     active: ActiveDelegation,
     response: SubagentDelegationResponse,
@@ -1166,34 +1097,9 @@ export class WorkflowHarness implements WorkflowCommandController {
       await this.cleanupDelegation(active);
       return;
     }
-    const hadPendingSupervisor =
-      this.activeSupervisorRequest?.delegation === active;
-    if (hadPendingSupervisor) {
-      this.activeSupervisorRequest = undefined;
-    }
     this.activeDelegation = undefined;
 
     try {
-      if (
-        hadPendingSupervisor &&
-        this.run?.status === 'paused' &&
-        this.run.pendingSupervisor?.delegationRequestId === active.requestId
-      ) {
-        this.run = {
-          ...this.run,
-          pendingSupervisor: undefined,
-          pauseReason: `Subagent "${active.agent}" terminated before its supervisor request was answered`,
-          updatedAt: Date.now(),
-        };
-        this.persist();
-        this.restoreBaselineTools();
-        this.updateStatus();
-        this.latestContext?.ui.notify(
-          `Workflow remains paused: subagent "${active.agent}" terminated before receiving a supervisor reply`,
-          'warning',
-        );
-        return;
-      }
       if (
         !this.sessionActive ||
         this.sessionEpoch !== active.sessionEpoch ||
@@ -1205,14 +1111,6 @@ export class WorkflowHarness implements WorkflowCommandController {
       ) {
         return;
       }
-      if (response.status !== 'completed') {
-        throw new Error(
-          `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}${
-            response.error ? `: ${response.error}` : ''
-          }`,
-        );
-      }
-
       const workflow = this.catalog.workflows.get(this.run.workflowId);
       const step = workflow?.definition.steps[this.run.currentStepId];
       if (!workflow || !step) {
@@ -1228,9 +1126,33 @@ export class WorkflowHarness implements WorkflowCommandController {
         );
       }
 
-      const rawResult = JSON.parse(
-        await readFile(active.policy.resultPath, 'utf8'),
-      ) as unknown;
+      let serializedResult: string;
+      try {
+        serializedResult = await readFile(active.policy.resultPath, 'utf8');
+      } catch (error) {
+        if (
+          (error as { code?: unknown } | null | undefined)?.code === 'ENOENT'
+        ) {
+          if (response.status !== 'completed') {
+            throw new Error(
+              `Subagent "${active.agent}" ${response.status.replaceAll('_', ' ')}${
+                response.error ? `: ${response.error}` : ''
+              }`,
+              { cause: error },
+            );
+          }
+          throw new Error(
+            `Subagent "${active.agent}" completed without producing the required correlated workflow_complete_step result`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+      // The capability-backed result is the workflow's completion contract.
+      // Current pi-subagents releases can classify a tool-only terminating
+      // child as "failed: no output" even though this result was written and
+      // the child then exited normally.
+      const rawResult = JSON.parse(serializedResult) as unknown;
       const result = parseDelegatedStepResult(rawResult, active.policy);
       if (step.gate?.submitOutcome === result.outcome) {
         await this.submitGate(
@@ -1264,17 +1186,6 @@ export class WorkflowHarness implements WorkflowCommandController {
     const active = this.activeDelegation;
     if (!active) return true;
     active.cancelling = true;
-    if (this.activeSupervisorRequest?.delegation === active) {
-      this.activeSupervisorRequest = undefined;
-    }
-    if (this.run?.pendingSupervisor?.delegationRequestId === active.requestId) {
-      this.run = {
-        ...this.run,
-        pendingSupervisor: undefined,
-        updatedAt: Date.now(),
-      };
-      this.persist();
-    }
     active.progress = 'cancelling';
     this.updateStatus();
     if (this.subagents.activeRequestId !== active.requestId) {
@@ -1310,7 +1221,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   private pauseForExecutionFailure(label: string, reason: string): void {
     if (!this.run || this.run.status !== 'running') return;
     this.mainSteps.deactivate();
-    this.run = pauseRun(this.run, `${label} failed: ${reason}`, Date.now());
+    this.run = failRun(this.run, `${label} failed: ${reason}`, Date.now());
     this.persist();
     if (this.activeDelegation) {
       this.isolateMainSessionTools();
@@ -1331,7 +1242,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     active.cancelling = true;
     active.progress = 'cancellation unconfirmed';
     if (this.run?.status === 'running') {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Subagent step failed: ${reason}`,
         Date.now(),
@@ -1418,10 +1329,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (response.status !== 'handled') {
       const reason = response.error ?? 'Plannotator is unavailable';
       const gateFailed = failGate(this.run, reason, Date.now());
-      this.run =
-        this.run.status === 'paused'
-          ? pauseRun(gateFailed, reason, Date.now())
-          : gateFailed;
+      this.run = failRun(gateFailed, reason, Date.now());
       this.persist();
       if (this.run.status === 'running') {
         this.isolateMainSessionTools();
@@ -1455,6 +1363,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         pendingGate.requestId,
         'Built-in review requires Pi TUI or RPC mode; resume there to continue',
+        false,
       );
       return;
     }
@@ -1509,6 +1418,7 @@ export class WorkflowHarness implements WorkflowCommandController {
         this.pausePromptGate(
           active.requestId,
           `Built-in review failed: ${reason}`,
+          true,
         );
       })
       .catch((error: unknown) => {
@@ -1540,6 +1450,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         'Built-in review was dismissed; resume to reopen it',
+        false,
       );
       return;
     }
@@ -1565,6 +1476,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         'Built-in review finished, but workflow configuration is unavailable',
+        true,
       );
       return;
     }
@@ -1575,11 +1487,16 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.pausePromptGate(
         active.requestId,
         `Cannot apply built-in review: ${error instanceof Error ? error.message : String(error)}`,
+        true,
       );
     }
   }
 
-  private pausePromptGate(requestId: string, reason: string): void {
+  private pausePromptGate(
+    requestId: string,
+    reason: string,
+    failed: boolean,
+  ): void {
     if (
       !this.run ||
       this.run.pendingGate?.provider !== 'prompt' ||
@@ -1588,7 +1505,9 @@ export class WorkflowHarness implements WorkflowCommandController {
       return;
     }
     if (this.run.status === 'awaiting-gate') {
-      this.run = pauseRun(this.run, reason, Date.now());
+      this.run = failed
+        ? failRun(this.run, reason, Date.now())
+        : pauseRun(this.run, reason, Date.now());
     }
     this.persist();
     this.restoreBaselineTools();
@@ -1650,7 +1569,7 @@ export class WorkflowHarness implements WorkflowCommandController {
 
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     if (!workflow) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         'Gate result arrived, but workflow configuration is unavailable',
         Date.now(),
@@ -1664,7 +1583,7 @@ export class WorkflowHarness implements WorkflowCommandController {
       this.run = resolveGate(workflow, this.run, resolution, Date.now());
       this.settleAfterTransition(workflow);
     } catch (error) {
-      this.run = pauseRun(
+      this.run = failRun(
         this.run,
         `Cannot apply gate result: ${error instanceof Error ? error.message : String(error)}`,
         Date.now(),
@@ -1680,7 +1599,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     if (this.run.status === 'running') {
       const preflightErrors = this.preflight(workflow, this.run.currentStepId);
       if (preflightErrors.length > 0) {
-        this.run = pauseRun(
+        this.run = failRun(
           this.run,
           `Step preflight failed: ${preflightErrors.join('; ')}`,
           Date.now(),
@@ -1875,7 +1794,7 @@ export class WorkflowHarness implements WorkflowCommandController {
         : '';
     this.latestContext.ui.setStatus(
       STATUS_KEY,
-      `${this.run.workflowId}: ${this.run.currentStepId} (${this.run.status}${delegation})`,
+      `${workflowStatusIcon(this.run)} ${this.run.workflowId}: ${this.run.currentStepId} (${this.run.status}${delegation})`,
     );
   }
 }

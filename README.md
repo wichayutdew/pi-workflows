@@ -41,7 +41,7 @@ pi install npm:@plannotator/pi-extension
 
 Neither integration is required, but both are highly recommended together for
 the best isolation and review experience. Pi Workflows targets
-pi-subagents `0.36.0` or newer. Run `/subagents-doctor` if an explicitly
+pi-subagents `0.35.1` or newer. Run `/subagents-doctor` if an explicitly
 delegated step cannot start.
 
 Pi loads `src/index.ts` through the package manifest. Restart Pi or run `/reload` after changing extension source.
@@ -142,15 +142,15 @@ Top-level fields:
 
 Each step supports:
 
-| Field         | Required | Description                                                             |
-| ------------- | -------- | ----------------------------------------------------------------------- |
-| `title`       | No       | Human-readable name. Defaults to the step identifier.                   |
-| `prompt`      | Yes      | Inline text or `{ "file": "relative/path.md" }`.                        |
-| `subagent`    | No       | Opt into pi-subagents delegation and configure its profile and budgets. |
-| `permissions` | No       | Resources callable during this step. Everything defaults to denied.     |
-| `requires`    | No       | Dependencies that must be detectable before the step starts.            |
-| `transitions` | Yes      | Exact outcome to next step, `$pause`, or `$done`.                       |
-| `gate`        | No       | Built-in prompt or Plannotator human-review gate.                       |
+| Field         | Required | Description                                                                          |
+| ------------- | -------- | ------------------------------------------------------------------------------------ |
+| `title`       | No       | Human-readable name. Defaults to the step identifier.                                |
+| `prompt`      | Yes      | Inline text or `{ "file": "relative/path.md" }`.                                     |
+| `subagent`    | No       | Opt into isolated delegation and configure the step specialty and execution budgets. |
+| `permissions` | No       | Resources callable during this step. Everything defaults to denied.                  |
+| `requires`    | No       | Dependencies that must be detectable before the step starts.                         |
+| `transitions` | Yes      | Exact outcome to next step, `$pause`, or `$done`.                                    |
+| `gate`        | No       | Built-in prompt or Plannotator human-review gate.                                    |
 
 Supported prompt variables:
 
@@ -198,9 +198,11 @@ steps:
 ```
 
 The expanded defaults are `agent: pi-workflows.step`, `context: fresh`,
-`timeoutMs: 900000`, and `artifacts: false`.
+`timeoutMs: 900000`, and `artifacts: false`. `fresh` is the only supported
+workflow-step context: each child receives the original workflow input and the
+previous step's compact handoff, never the parent or a sibling transcript.
 
-Use a Pi Subagents runtime name directly when only the agent changes:
+Use a specialty name directly when only the step's role changes:
 
 ```yaml
 steps:
@@ -211,8 +213,11 @@ steps:
       done: $done
 ```
 
-This name-only form inherits the same defaults. Use the object form when the
-step also needs a context, model, timeout, budget, or artifact override:
+This name-only form inherits the same execution defaults. The value is included
+in the generated child task and workflow status as the step's specialty; put
+the specialty's concrete instructions in that step's inline prompt or prompt
+file. Use the object form when the step also needs a model, timeout, budget, or
+artifact override:
 
 ```yaml
 subagent:
@@ -221,54 +226,48 @@ subagent:
   timeoutMs: 600000
 ```
 
-`agent` is the same runtime name Pi Subagents uses. For example,
-`subagent: worker` selects its builtin `worker`, then Pi Subagents applies the
-matching `subagents.agentOverrides.worker` entry from
-`~/.pi/agent/settings.json` and any higher-precedence project settings. Pi
-Workflows does not parse that file or reimplement agent discovery. An
-`agentOverrides` entry modifies a discovered builtin, package, user, or project
-agent; the entry alone does not create a new agent.
+All delegated workflow steps execute through the bundled
+`pi-workflows.step` Pi Subagents runtime. The configured `agent` value is a
+workflow specialty identity, not an upstream profile selector. Keeping the
+runtime fixed ensures that a general-purpose Pi Subagents profile's explicit
+tool allow-list cannot hide the dynamically registered
+`workflow_complete_step` contract.
 
-This is separate from `~/.pi/agent/workflows/settings.yaml`, which configures
-Pi Workflows project trust and permission ceilings. Use
-`/subagents-models worker` to inspect Pi Subagents' live resolved profile and
-`/subagents-doctor` to diagnose discovery or loading problems.
-
-The bundled `pi-workflows.step` remains the default for `subagent: {}`. It
-inherits project instructions but not the parent transcript or its skill
-catalog. A named agent contributes its Pi Subagents system prompt, thinking,
-model unless the step overrides it, extension loading, and initial tool
-visibility. The workflow sends its configured step prompt and explicit skill
-selection.
+The bundled runtime inherits project instructions but not the parent transcript
+or its skill catalog. Pi Workflows supplies the specialty identity, the
+step-specific prompt, the selected skills, and the previous compact handoff.
+Request-level model, timeout, turn-budget, tool-budget, and artifact options are
+still forwarded to Pi Subagents. Pi Subagents settings for the actual
+`pi-workflows.step` runtime still apply; use
+`/subagents-models pi-workflows.step` to inspect it and `/subagents-doctor` to
+diagnose discovery or loading problems. Workflow project trust and permission
+ceilings remain separately configured in
+`~/.pi/agent/workflows/settings.yaml`.
 
 Supported fields:
 
-| Field        | Default              | Description                                                                         |
-| ------------ | -------------------- | ----------------------------------------------------------------------------------- |
-| `agent`      | `pi-workflows.step`  | Any discovered Pi Subagents runtime name, such as `scout`, `worker`, or `reviewer`. |
-| `context`    | `fresh`              | `fresh` isolates the step; `fork` deliberately includes filtered parent context.    |
-| `model`      | Agent/default model  | Optional pi-subagents model override.                                               |
-| `timeoutMs`  | `900000`             | Child deadline, from 1 second through 24 hours.                                     |
-| `turnBudget` | pi-subagents default | `{ "maxTurns": n, "graceTurns": n }`.                                               |
-| `toolBudget` | pi-subagents default | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array. |
-| `artifacts`  | `false`              | Ask pi-subagents to retain its normal run artifacts.                                |
+| Field        | Default               | Description                                                                         |
+| ------------ | --------------------- | ----------------------------------------------------------------------------------- |
+| `agent`      | `pi-workflows.step`   | Step specialty identity, such as `scout`, `planner`, `worker`, or `reviewer`.       |
+| `context`    | `fresh`               | Always isolated; parent and sibling transcripts are never inherited.                |
+| `model`      | Runtime/default model | Optional pi-subagents model override for the bundled runtime.                       |
+| `timeoutMs`  | `900000`              | Child deadline, from 1 second through 24 hours.                                     |
+| `turnBudget` | pi-subagents default  | `{ "maxTurns": n, "graceTurns": n }`.                                               |
+| `toolBudget` | pi-subagents default  | `{ "soft": n, "hard": n, "block": "*" }`; `block` may instead be a tool-name array. |
+| `artifacts`  | `false`               | Ask pi-subagents to retain its normal run artifacts.                                |
 
-Builtin names are unqualified (`worker`); packaged names may be qualified, such
-as `pi-workflows.step`. Pi Workflows installs an inert listener in every
-Pi Subagents child. It registers `workflow_complete_step` and activates policy
-only after a valid, single-use workflow capability arrives, so ordinary
-subagent runs remain unchanged.
+Pi Workflows installs an inert listener in every Pi Subagents child. For the
+fixed `pi-workflows.step` runtime, it registers `workflow_complete_step` and
+activates policy only after a valid, single-use workflow capability arrives, so
+ordinary subagent runs remain unchanged.
 
-A selected profile's active tools and loaded extensions remain an outer
-boundary. Effective step tools are the intersection of that profile and
-`permissions`, plus the workflow completion tool. Pi Workflows can remove
-access but cannot grant a normal tool or load an extension excluded by the
-profile. If a custom profile declares `extensions`, it must keep the installed
-Pi Workflows extension available; otherwise the child never receives the
-policy runtime and the step fails closed.
+The bundled runtime's active tools and loaded extensions remain an outer
+boundary. Effective step tools are their intersection with `permissions`, plus
+the workflow completion tool. Pi Workflows can remove access but cannot grant a
+normal tool or load an extension excluded from the actual runtime.
 
 Workflow `permissions.skills` is sent as Pi Subagents' request-level skill
-selection, so it replaces the selected profile's normal skill list for that
+selection, so it replaces the bundled runtime's normal skill list for that
 step; an empty list disables injected skills. Pi Workflows also disables Pi
 Subagents' separate acceptance report for these requests because the harness
 already owns correlated completion, declared outcomes, and optional human
@@ -277,7 +276,7 @@ review gates.
 At runtime:
 
 1. The harness creates a correlated child policy and result channel.
-2. pi-subagents starts one foreground child for the current step.
+2. pi-subagents starts one foreground `pi-workflows.step` child for the current step.
 3. The child runtime enforces permissions and writes the validated result.
 4. The parent harness applies the configured transition, then launches the next step.
 
@@ -301,9 +300,9 @@ mcp:
 
 The harness requires an explicit `server` and `tool` on every proxy call. Proxy search, discovery, connection, and authentication modes are blocked while a workflow step is running.
 
-The generic `mcp` proxy is the portable choice for workflow steps. A custom
-subagent profile may expose direct MCP tools through its own `mcp:` frontmatter;
-Pi Workflows still requires each direct runtime name in `tools`.
+The generic `mcp` proxy is the portable choice for workflow steps. The bundled
+runtime may also expose direct MCP tools through Pi Subagents settings; Pi
+Workflows still requires each direct runtime name in `tools`.
 
 `extensions` contains case-insensitive fragments matched against tool source metadata. Tools registered by matching extensions become visible and callable:
 
@@ -524,6 +523,20 @@ the step's separate summary—becomes the authoritative handoff to the next step
 
 If review finishes while the workflow is paused, the result is checkpointed and applied only after `/workflow-resume`. Resume also queries Plannotator’s durable review status, so a decision made while Pi was closed is not lost.
 
+### Planning is the decision boundary
+
+For a delegated plan workflow, put every unresolved choice in the plan artifact
+with evidence, options, a recommendation, and an adopted default. The built-in
+review panel or Plannotator is where the user resolves those choices. Approval
+makes that reviewed artifact the final implementation contract and compact
+handoff.
+
+Post-approval implementation and verification children are non-interactive:
+they do not ask questions in the terminal or detach for supervisor input. If an
+approved contract is missing, stale, or contradictory, the child pauses with a
+declarative evidence summary instead of starting a replacement or opening a
+side channel.
+
 ## Pause, repair, resume
 
 Use:
@@ -574,7 +587,9 @@ In TUI mode, `/workflow-status` opens a read-only board for the current
 checkpoint. It refreshes once per second and shows run timing, the current
 execution or review, pause reasons, configuration drift, and the completed
 attempt path. Press `q`, `Esc`, `Ctrl-C`, or `Ctrl-D` to close it. Non-TUI modes
-receive the same checkpoint as text.
+receive the same checkpoint as text. Status glyphs are `↻` for a running step,
+`✓` for a completed step, `✕` for a failed or aborted run, and `◆` for a paused
+step or pending review.
 
 | Command                         | Purpose                                               |
 | ------------------------------- | ----------------------------------------------------- |
@@ -586,6 +601,17 @@ receive the same checkpoint as text.
 | `/workflow-resume`              | Reload, reconcile, and continue.                      |
 | `/workflow-abort [reason]`      | End the active run and restore baseline tools.        |
 | `/workflow-reload`              | Reload definitions while no workflow is running.      |
+
+Configured aliases also accept multiline input. For example, if `work` is a
+loaded workflow command, Pi Workflows normalizes:
+
+```text
+/work
+"""inspect and update this repository"""
+```
+
+to the same command with an argument instead of letting the raw multiline text
+start an unrelated parent-agent turn.
 
 ## User and project configuration
 
@@ -630,8 +656,8 @@ within this ceiling. The `subagent` ceiling is optional for main-only project
 workflows; if omitted, any project step that declares `subagent` is rejected.
 Each delegated project step must declare `turnBudget` and `toolBudget` with
 `"block": "*"`, so it cannot silently inherit unbounded child defaults or keep
-mutation tools after reaching the hard limit. The ceiling also controls child
-agent names, context inheritance, model overrides, timeouts, artifact
+mutation tools after reaching the hard limit. The ceiling also controls
+specialty names, fresh-context use, model overrides, timeouts, artifact
 retention, and the Bash rules and approved sources that a project workflow may
 request. Project workflows cannot override user workflow identifiers or
 commands.
@@ -671,7 +697,7 @@ process separation when a step opts into pi-subagents:
 - completion as the sole call in its tool batch;
 - optional separate pi-subagents child process per delegated step;
 - an idle, tool-isolated main agent while a delegated step runs;
-- a single-use, parent-created child capability tied to the selected workflow agent;
+- a single-use, parent-created child capability tied to the delegated step;
 - explicit MCP server and tool checks;
 - restricted Bash parsing;
 - exact Bash capabilities derived from a correlated human-reviewed artifact;
@@ -742,7 +768,7 @@ extensions, without hard-coding them into the orchestrator, are:
 
 - A delegated workflow step uses one foreground subagent. Parallel or chained children inside one step are not yet a workflow-level primitive.
 - Gate providers are built-in prompt and Plannotator; custom providers are not yet configurable.
-- A custom subagent profile can be narrower than a step, but Pi Workflows cannot widen that profile.
+- Delegated steps use the bundled `pi-workflows.step` runtime; `subagent.agent` selects a workflow specialty, not an arbitrary Pi Subagents profile.
 - Extension tools are enforced; autonomous extension event-handler side effects cannot be disabled per step.
 - Completion evidence is model-reported; use reviewed executable checks and a fresh verification step when correctness matters.
 - Workflow configuration uses YAML. Prompt bodies may live in separate Markdown files.

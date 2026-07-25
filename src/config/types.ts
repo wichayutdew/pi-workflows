@@ -43,7 +43,7 @@ export interface StepRequirements {
   skills: string[];
 }
 
-export type SubagentContext = 'fresh' | 'fork';
+export type SubagentContext = 'fresh';
 
 export interface SubagentTurnBudget {
   maxTurns: number;
@@ -57,9 +57,9 @@ export interface SubagentToolBudget {
 }
 
 export interface StepSubagent {
-  /** Configured pi-subagents agent name. */
+  /** Step specialty label embedded in the isolated child task. */
   agent: string;
-  /** Fresh keeps workflow work out of the parent transcript. */
+  /** Workflow steps always use a fresh context. */
   context: SubagentContext;
   model?: string;
   timeoutMs: number;

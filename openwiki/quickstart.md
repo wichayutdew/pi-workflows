@@ -103,6 +103,13 @@ Core commands:
 | `/workflow-abort [reason]`     | Abort active run.                   |
 | `/workflow-reload`             | Reload files when no run is active. |
 
+The live status board and footer use `↻` for running, `✓` for completed, `✕`
+for failed or aborted, and `◆` for paused or awaiting review.
+
+Configured workflow aliases accept multiline input. For example,
+`/work\n"""request"""` is normalized to `/work """request"""` and dispatched as
+the workflow command rather than as a normal parent-agent turn.
+
 ## Default Workflow Location
 
 ```mermaid

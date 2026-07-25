@@ -37,6 +37,7 @@ describe('when testing subagent protocol', () => {
         bash: { mode: 'read-only', allow: [] },
       },
       outcomes: ['ready', 'blocked', 'submit'],
+      pauseOutcomes: ['blocked'],
       summaryMaxChars: 500,
       gateSubmitOutcome: 'submit',
     };
@@ -59,14 +60,30 @@ describe('when testing subagent protocol', () => {
         );
         expect(extracted?.policy).toEqual(policy);
         expect(extracted?.task).toBe('Inspect the merge request.');
+        const upstreamWrapped = extractChildPolicy(
+          `Task: ${envelope}\n\nInspect the merge request.`,
+        );
+        expect(upstreamWrapped?.policy).toEqual(policy);
+        expect(upstreamWrapped?.task).toBe('Inspect the merge request.');
+        const taskFilePath = join(tmpdir(), 'pi-subagent-long-task', 'task.md');
+        const fileWrapped = extractChildPolicy(
+          `<file name="${taskFilePath}">\nTask: ${envelope}\n\nInspect the merge request.\n</file>\n`,
+        );
+        expect(fileWrapped?.policy).toEqual(policy);
+        expect(fileWrapped?.task).toBe('Inspect the merge request.');
         expect(extractChildPolicy(`Explain this literal: ${envelope}`)).toBe(
           undefined,
         );
         expect(
           extractChildPolicy(
             `Fork context\n\nTask:\n${envelope}\n\nInspect the merge request.`,
-          )?.task,
-        ).toBe('Fork context\n\nTask:\n\n\nInspect the merge request.');
+          ),
+        ).toBe(undefined);
+        expect(
+          extractChildPolicy(
+            `<file name="${join(tmpdir(), 'task.md')}">\nTask: ${envelope}\n\nInspect the merge request.\n</file>\n`,
+          ),
+        ).toBe(undefined);
         expect(isSafeStepCapabilityPath(policy.capabilityPath)).toBe(true);
         expect(isSafeStepResultPath(policy.resultPath)).toBe(true);
         expect(isSafeStepResultPath(join(tmpdir(), 'result.json'))).toBe(false);
@@ -166,6 +183,10 @@ describe('when testing subagent protocol', () => {
             /approved Bash commands/,
           ],
           [{ ...policy, outcomes: [] }, /outcomes are invalid/],
+          [
+            { ...policy, pauseOutcomes: ['missing'] },
+            /pause outcomes are invalid/,
+          ],
           [{ ...policy, summaryMaxChars: 1 }, /summaryMaxChars/],
           [{ ...policy, gateSubmitOutcome: 'missing' }, /gate outcome/],
         ];

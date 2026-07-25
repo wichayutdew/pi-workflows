@@ -43,7 +43,8 @@
     "format:check": "bunx --bun prettier . --check",
     "lint": "bun --bun eslint .",
     "lint:fix": "bun --bun eslint . --fix",
-    "test": "bun test --reporter=dots",
+    "test": "bun test --no-orphans --reporter=dots",
+    "test:e2e": "bun test --no-orphans test/e2e/workflow-runtime.test.ts --reporter=dots",
     "typecheck": "tsc --noEmit",
     "check": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run build"
   },
@@ -53,7 +54,7 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "pi-subagents": ">=0.36.0",
+    "pi-subagents": ">=0.35.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -69,7 +70,7 @@
     "@types/node": "^24.0.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
-    "pi-subagents": "^0.36.0",
+    "pi-subagents": "^0.35.1",
     "prettier": "^3.9.5",
     "typebox": "^1.1.38",
     "typescript": "^5.9.3",

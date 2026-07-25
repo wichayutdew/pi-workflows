@@ -23,8 +23,6 @@ import {
   SUBAGENT_DELEGATION_REQUEST_EVENT,
   SUBAGENT_DELEGATION_RESPONSE_EVENT,
   SUBAGENT_DELEGATION_STARTED_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
-  SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT,
   SUBAGENT_DELEGATION_UPDATE_EVENT,
   type ChildStepPolicy,
   type SubagentDelegationRequest,
@@ -90,6 +88,7 @@ describe('when testing harness subagent', () => {
     }>;
     customRenders: string[][];
     repaintRequests: Array<boolean | undefined>;
+    statusUpdates: Array<{ key: string; value: string | undefined }>;
     selectResponses: Array<string | undefined>;
     inputResponses: Array<string | undefined>;
     activeTools: () => string[];
@@ -117,6 +116,7 @@ describe('when testing harness subagent', () => {
     const notifications: HarnessFixture['notifications'] = [];
     const customRenders: string[][] = [];
     const repaintRequests: Array<boolean | undefined> = [];
+    const statusUpdates: HarnessFixture['statusUpdates'] = [];
     const selectResponses: Array<string | undefined> = [];
     const inputResponses: Array<string | undefined> = [];
     let activeTools = ['read', 'bash'];
@@ -138,7 +138,9 @@ describe('when testing harness subagent', () => {
       notify(message: string, type: 'info' | 'warning' | 'error' | undefined) {
         notifications.push({ message, type });
       },
-      setStatus() {},
+      setStatus(key: string, value: string | undefined) {
+        statusUpdates.push({ key, value });
+      },
       select: async () => selectResponses.shift(),
       input: async () => inputResponses.shift(),
       custom: async (factory: CustomFactory) =>
@@ -171,6 +173,7 @@ describe('when testing harness subagent', () => {
       waitForIdle: async () => {
         waitForIdleCount += 1;
       },
+      getSystemPrompt: () => '',
       getSystemPromptOptions: () => ({ skills: [] }),
       sessionManager: {
         getBranch: () => sessionBranch,
@@ -257,6 +260,7 @@ describe('when testing harness subagent', () => {
       notifications,
       customRenders,
       repaintRequests,
+      statusUpdates,
       selectResponses,
       inputResponses,
       activeTools: () => [...activeTools],
@@ -274,6 +278,7 @@ describe('when testing harness subagent', () => {
   async function writeWorkflow(
     directory: string,
     description = 'Delegate one step',
+    subagent: unknown = {},
   ): Promise<void> {
     await writeFile(
       join(directory, 'delegate.workflow.yaml'),
@@ -285,7 +290,7 @@ describe('when testing harness subagent', () => {
         start: 'inspect',
         steps: {
           inspect: {
-            subagent: {},
+            subagent,
             prompt: 'Inspect {{workflow.input}}.',
             permissions: {
               tools: ['read'],
@@ -371,8 +376,19 @@ describe('when testing harness subagent', () => {
               timeoutMs: 1_000,
             },
             transitions: {
-              approved: 'publish',
+              approved: 'verify',
               'changes-requested': 'plan',
+              blocked: '$pause',
+            },
+          },
+          verify: {
+            subagent: {},
+            prompt: 'Narrow reviewed actions from {{last.summary}}.',
+            permissions: {
+              tools: ['read'],
+            },
+            transitions: {
+              ready: 'publish',
               blocked: '$pause',
             },
           },
@@ -482,6 +498,88 @@ describe('when testing harness subagent', () => {
   }
 
   describe('should satisfy its behavioral contract', () => {
+    test('multiline workflow commands are redispatched instead of starting a parent turn', async () => {
+      // given
+      const directory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-multiline-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      // when
+      try {
+        await writeWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        let delegatedRequest: SubagentDelegationRequest | undefined;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          delegatedRequest = data as SubagentDelegationRequest;
+          const extracted = extractChildPolicy(delegatedRequest.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'done',
+              summary: 'Multiline workflow completed',
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: delegatedRequest.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: delegatedRequest.requestId,
+            status: 'completed',
+          });
+        });
+        await initialize(fixture);
+        const input = fixture.lifecycle.get('input')?.[0];
+        expectTruthy(input);
+        const eventContext = {
+          ...fixture.context,
+          getSystemPrompt: () => '',
+        } as unknown as Record<string, unknown>;
+        delete eventContext.getSystemPromptOptions;
+        delete eventContext.waitForIdle;
+
+        const result = await input(
+          {
+            type: 'input',
+            source: 'interactive',
+            text: '/delegate\n"""inspect the repository"""',
+          },
+          eventContext as unknown as ExtensionContext,
+        );
+
+        // then
+        expect(result).toEqual({ action: 'handled' });
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+        expect(delegatedRequest?.task).toContain(
+          '"""inspect the repository"""',
+        );
+        expect(fixture.sentUserMessages).toEqual([]);
+        expect(
+          await input(
+            {
+              type: 'input',
+              source: 'interactive',
+              text: '/unknown\nleave this alone',
+            },
+            eventContext as unknown as ExtensionContext,
+          ),
+        ).toBe(undefined);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     test('reports catalog diagnostics and reloads idle workflows', async () => {
       // given
       const directory = await mkdtemp(
@@ -922,6 +1020,12 @@ describe('when testing harness subagent', () => {
 
         expect(latestRun(fixture).status).toBe('completed');
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
+        expect(
+          fixture.statusUpdates.some(({ value }) => value?.startsWith('↻ ')),
+        ).toBe(true);
+        expect(
+          fixture.statusUpdates.some(({ value }) => value?.startsWith('✓ ')),
+        ).toBe(true);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1114,6 +1218,10 @@ describe('when testing harness subagent', () => {
         expect(
           (latestRun(fixture).pendingGate as { provider?: string }).provider,
         ).toBe('prompt');
+        expect(latestRun(fixture).failedStepId).toBe(undefined);
+        expect(
+          fixture.statusUpdates.some(({ value }) => value?.startsWith('◆ ')),
+        ).toBe(true);
 
         fixture.selectResponses.push('Approve');
         await resume('', fixture.context);
@@ -1129,7 +1237,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('the harness delegates a step and advances only from its correlated child result', async () => {
+    test('the harness advances from a correlated result despite an upstream no-output classification', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -1137,7 +1245,7 @@ describe('when testing harness subagent', () => {
       process.env.PI_WORKFLOWS_DIR = directory;
       // then
       try {
-        await writeWorkflow(directory);
+        await writeWorkflow(directory, 'Delegate one step', 'scout');
         const fixture = createHarnessFixture(directory);
         let delegatedRequest: SubagentDelegationRequest | undefined;
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
@@ -1172,7 +1280,8 @@ describe('when testing harness subagent', () => {
           fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
             version: 1,
             requestId: delegatedRequest.requestId,
-            status: 'completed',
+            status: 'failed',
+            error: 'Subagent produced no output',
           });
         });
 
@@ -1185,6 +1294,10 @@ describe('when testing harness subagent', () => {
           expect(latestRun(fixture).status).toBe('completed');
         });
         expect(delegatedRequest?.agent).toBe('pi-workflows.step');
+        expect(delegatedRequest?.task).toMatch(/Step specialty: scout/);
+        expect(
+          extractChildPolicy(delegatedRequest?.task ?? '')?.policy.agent,
+        ).toBe('pi-workflows.step');
         expect(delegatedRequest?.context).toBe('fresh');
         expect(delegatedRequest?.skill).toBe(false);
         expect(delegatedRequest?.acceptance).toEqual({
@@ -1201,75 +1314,41 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('replies in TUI and resumes the same delegated child', async () => {
-      const directory = await mkdtemp(
-        join(tmpdir(), 'pi-workflows-supervisor-'),
-      );
+    test('a completed delegation without a correlated child result pauses with an actionable error', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
       process.env.PI_WORKFLOWS_DIR = directory;
+
+      // when
       try {
         await writeWorkflow(directory);
         const fixture = createHarnessFixture(directory);
-        fixture.inputResponses.push('Use option A.');
-        let delegatedRequest: SubagentDelegationRequest | undefined;
-        let replies = 0;
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
-          delegatedRequest = data as SubagentDelegationRequest;
-          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+          const request = data as SubagentDelegationRequest;
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
             version: 1,
-            requestId: delegatedRequest.requestId,
-          });
-          fixture.events.emit(SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT, {
-            version: 1,
-            delegationRequestId: delegatedRequest.requestId,
-            runId: 'child-run-1',
-            agent: 'pi-workflows.step',
-            requestId: 'question-1',
-            reason: 'need_decision',
-            message: 'Which option should I use?',
+            requestId: request.requestId,
+            status: 'completed',
           });
         });
-        fixture.events.on(
-          SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
-          async () => {
-            replies += 1;
-            const extracted = extractChildPolicy(delegatedRequest?.task ?? '');
-            expectTruthy(extracted);
-            await writeFile(
-              extracted.policy.resultPath,
-              JSON.stringify({
-                version: 1,
-                policyDigest: extracted.policy.policyDigest,
-                outcome: 'done',
-                summary: 'Finished after supervisor reply',
-              }),
-            );
-            fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
-              version: 1,
-              requestId: delegatedRequest?.requestId,
-              status: 'completed',
-            });
-          },
-        );
 
         await initialize(fixture);
         const start = fixture.commands.get('delegate');
         expectTruthy(start);
         await start('the repository', fixture.context);
 
+        // then
         await eventually(() => {
-          expect(latestRun(fixture).status).toBe('completed');
+          expect(latestRun(fixture).status).toBe('paused');
         });
-        expect(replies).toBe(1);
+        expect(String(latestRun(fixture).pauseReason)).toMatch(
+          /without producing the required correlated workflow_complete_step result/,
+        );
+        expect(String(latestRun(fixture).pauseReason)).not.toMatch(/ENOENT/);
+        expect(fixture.activeTools()).toEqual(['read', 'bash']);
         expect(
-          fixture.checkpoints.some((checkpoint) => {
-            const run = checkpoint.data as {
-              pendingSupervisor?: { message?: string };
-            };
-            return (
-              run.pendingSupervisor?.message === 'Which option should I use?'
-            );
-          }),
+          fixture.statusUpdates.some(({ value }) => value?.startsWith('✕ ')),
         ).toBe(true);
       } finally {
         if (previousDirectory === undefined)
@@ -1328,6 +1407,7 @@ describe('when testing harness subagent', () => {
         });
 
         expect(delegatedPolicy?.outcomes).toEqual(['blocked', 'submit']);
+        expect(delegatedPolicy?.pauseOutcomes).toEqual(['blocked']);
         expect(gateRequests).toBe(0);
         expect(latestRun(fixture).currentStepId).toBe('plan');
         expect(latestRun(fixture).pendingGate).toBe(undefined);
@@ -1619,7 +1699,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('a reviewed gate artifact alone grants the next child exact remote commands', async () => {
+    test('a reviewed gate artifact grants only commands retained by the latest handoff', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -1631,11 +1711,15 @@ describe('when testing harness subagent', () => {
         const fixture = createHarnessFixture(directory);
         const approvedCommand =
           'glab api projects/1/merge_requests/2/notes -f body=approved';
+        const removedCommand =
+          'glab api projects/1/merge_requests/2/notes -f body=removed';
         const unreviewedCommand =
           'glab api projects/1/merge_requests/2/notes -f body=unreviewed';
         const policies: ChildStepPolicy[] = [];
+        const requests: SubagentDelegationRequest[] = [];
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
           const request = data as SubagentDelegationRequest;
+          requests.push(request);
           const extracted = extractChildPolicy(request.task);
           expectTruthy(extracted);
           policies.push(extracted.policy);
@@ -1667,6 +1751,36 @@ describe('when testing harness subagent', () => {
                       {
                         toolName: 'bash',
                         input: { command: approvedCommand },
+                      },
+                      {
+                        toolName: 'bash',
+                        input: { command: removedCommand },
+                      },
+                    ],
+                  }),
+                  '```',
+                ].join('\n'),
+              }),
+            );
+          } else if (extracted.policy.stepId === 'verify') {
+            await writeFile(
+              extracted.policy.resultPath,
+              JSON.stringify({
+                version: 1,
+                policyDigest: extracted.policy.policyDigest,
+                outcome: 'ready',
+                summary: [
+                  '# Narrowed actions',
+                  '```json',
+                  JSON.stringify({
+                    actions: [
+                      {
+                        toolName: 'bash',
+                        input: { command: approvedCommand },
+                      },
+                      {
+                        toolName: 'bash',
+                        input: { command: unreviewedCommand },
                       },
                     ],
                   }),
@@ -1722,12 +1836,21 @@ describe('when testing harness subagent', () => {
         });
         await eventually(() => {
           expect(latestRun(fixture).status).toBe('completed');
-          expect(policies.length).toBe(2);
+          expect(policies.length).toBe(3);
         });
-        expect(policies[1]?.approvedBashCommands).toEqual([approvedCommand]);
+        expect(policies[2]?.approvedBashCommands).toEqual([approvedCommand]);
         expect(
-          policies[1]?.approvedBashCommands?.includes(unreviewedCommand),
+          policies[2]?.approvedBashCommands?.includes(removedCommand),
         ).toBe(false);
+        expect(
+          policies[2]?.approvedBashCommands?.includes(unreviewedCommand),
+        ).toBe(false);
+        expect(requests[1]?.context).toBe('fresh');
+        expect(requests[1]?.task.match(/# Reviewed actions/g)).toHaveLength(1);
+        expect(requests[1]?.task).not.toContain('Unreviewed handoff');
+        expect(requests[2]?.context).toBe('fresh');
+        expect(requests[2]?.task.match(/# Narrowed actions/g)).toHaveLength(1);
+        expect(requests[2]?.task).not.toContain('# Reviewed actions');
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;

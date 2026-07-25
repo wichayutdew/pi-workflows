@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { extractApprovedBashCommands } from '../src/policy/approved-commands.ts';
+import {
+  extractApprovedBashCommands,
+  narrowApprovedBashCommands,
+} from '../src/policy/approved-commands.ts';
 
 describe('when testing approved commands', () => {
   describe('should satisfy its behavioral contract', () => {
@@ -134,6 +137,37 @@ describe('when testing approved commands', () => {
       // then
       expect(
         extractApprovedBashCommands(artifact, ['verification-worker']),
+      ).toEqual([]);
+    });
+
+    test('an unreviewed handoff can only narrow approved commands', () => {
+      // given
+      const command = (value: string) => ({
+        toolName: 'bash',
+        input: { command: value },
+      });
+      const retained =
+        'glab api projects/1/merge_requests/2/notes -f body=retained';
+      const removed =
+        'glab api projects/1/merge_requests/2/notes -f body=removed';
+      const injected =
+        'glab api projects/1/merge_requests/2/notes -f body=injected';
+      const artifact = JSON.stringify({
+        actions: [command(retained), command(removed)],
+      });
+      const handoff = JSON.stringify({
+        actions: [command(retained), command(injected)],
+      });
+
+      // when
+      const commands = narrowApprovedBashCommands(artifact, handoff, [
+        'remote-actions',
+      ]);
+
+      // then
+      expect(commands).toEqual([retained]);
+      expect(
+        narrowApprovedBashCommands(artifact, '', ['remote-actions']),
       ).toEqual([]);
     });
   });

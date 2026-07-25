@@ -23,6 +23,11 @@ import {
 } from './protocol.ts';
 
 export const CHILD_COMPLETION_TOOL = WORKFLOW_COMPLETION_TOOL;
+const CHILD_COORDINATION_TOOLS = new Set([
+  'contact_supervisor',
+  'subagent_supervisor',
+  'intercom',
+]);
 
 function policyStep(policy: ChildStepPolicy): WorkflowStep {
   return {
@@ -41,6 +46,7 @@ function policyStep(policy: ChildStepPolicy): WorkflowStep {
 }
 
 function childSystemPrompt(policy: ChildStepPolicy): string {
+  const hasPauseOutcome = policy.pauseOutcomes.length > 0;
   return [
     '# Pi Workflows delegated step',
     '',
@@ -52,13 +58,34 @@ function childSystemPrompt(policy: ChildStepPolicy): string {
     'Perform only this delegated step. Its child-side tool policy is enforced.',
     'When finished, call `workflow_complete_step` exactly once and as the only tool call in that message.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
+    `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     ...(policy.gateSubmitOutcome
       ? [
           `Outcome "${policy.gateSubmitOutcome}" requires the complete gate artifact.`,
         ]
       : []),
-    'If the workflow definition or environment is wrong, choose an outcome that transitions to $pause.',
+    ...(hasPauseOutcome
+      ? [
+          `If the workflow definition or environment is wrong, choose a pause outcome (${policy.pauseOutcomes.join(', ')}).`,
+        ]
+      : [
+          'If the workflow definition or environment is wrong, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step.',
+        ]),
+    'This is a non-interactive workflow child. Never call contact_supervisor, subagent_supervisor, or intercom.',
+    ...(policy.gateSubmitOutcome
+      ? [
+          'Put every unresolved decision in the gate artifact with evidence, options, a recommendation, and an adopted default; do not ask a terminal question.',
+        ]
+      : hasPauseOutcome
+        ? [
+            'Treat the step instructions and incoming handoff as the final execution contract.',
+            'If that contract is missing, stale, or contradictory, finish with a pause outcome and describe the unresolved contract and evidence declaratively in the summary; do not ask a terminal question.',
+          ]
+        : [
+            'Treat the step instructions and incoming handoff as the final execution contract.',
+            'If that contract is missing, stale, or contradictory, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step. Do not ask a terminal question.',
+          ]),
   ].join('\n');
 }
 
@@ -203,10 +230,12 @@ export function registerSubagentChildRuntime(
           pi.getAllTools(),
           policyStep(activePolicy),
           CHILD_COMPLETION_TOOL,
-        ).filter(
-          (toolName) =>
-            toolName === CHILD_COMPLETION_TOOL || profileTools.has(toolName),
-        ),
+        )
+          .filter((toolName) => !CHILD_COORDINATION_TOOLS.has(toolName))
+          .filter(
+            (toolName) =>
+              toolName === CHILD_COMPLETION_TOOL || profileTools.has(toolName),
+          ),
       );
     } catch (error) {
       policyError = error instanceof Error ? error.message : String(error);
@@ -277,6 +306,13 @@ export function registerSubagentChildRuntime(
       }
       freezeToolInput(event.input);
       return;
+    }
+    if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {
+      return {
+        block: true,
+        reason:
+          'workflow children are non-interactive; use workflow_complete_step with a pause outcome and describe the unresolved contract in summary',
+      };
     }
     if (!effectiveTools.has(event.toolName)) {
       return {
