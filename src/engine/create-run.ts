@@ -35,6 +35,7 @@ export const createRun = (
     startedAt: now,
     updatedAt: now,
     reviewedArtifact: '',
+    reviewedFeedback: '',
     stepHandoff: '',
     lastSummary: '',
     gateFeedback: '',

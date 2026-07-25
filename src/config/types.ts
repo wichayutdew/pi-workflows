@@ -11,7 +11,11 @@ export type StepTarget = string;
 
 export type BashMode = 'deny' | 'read-only' | 'allow-list' | 'unrestricted';
 export type BashApprovalSource =
-  'verification-worker' | 'verification-reviewer' | 'remote-actions';
+  | 'verification-worker'
+  | 'verification-reviewer'
+  | 'remote-actions'
+  | 'remote-push'
+  | 'remote-drafts';
 
 export type BashRule = {
   readonly executable: string;
@@ -26,6 +30,13 @@ export type BashPermission = {
    * They supplement `allow` only inside the correlated step execution.
    */
   readonly approvedSources?: ReadonlyArray<BashApprovalSource>;
+  /**
+   * Sources whose command-only retry handoffs may refine an already approved
+   * command. The original reviewed identity and safety envelope remain fixed.
+   */
+  readonly handoffSources?: ReadonlyArray<
+    'verification-worker' | 'verification-reviewer'
+  >;
 };
 
 export type StepPermissions = {

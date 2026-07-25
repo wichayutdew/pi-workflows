@@ -5,6 +5,8 @@ const PROMPT_VARIABLES = new Set([
   'step.id',
   'step.title',
   'last.summary',
+  'reviewed.artifact',
+  'reviewed.feedback',
   'gate.feedback',
 ]);
 

@@ -223,8 +223,17 @@
             "enum": [
               "verification-worker",
               "verification-reviewer",
-              "remote-actions"
+              "remote-actions",
+              "remote-push",
+              "remote-drafts"
             ]
+          }
+        },
+        "handoffSources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["verification-worker", "verification-reviewer"]
           }
         }
       }

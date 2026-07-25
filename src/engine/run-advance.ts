@@ -115,7 +115,7 @@ export const advanceRun = (
       stepHandoff: summary,
       lastSummary: summary,
       gateFeedback: '',
-      ...(nextStep.gate ? { reviewedArtifact: '' } : {}),
+      ...(nextStep.gate ? { reviewedArtifact: '', reviewedFeedback: '' } : {}),
     },
     now,
   );

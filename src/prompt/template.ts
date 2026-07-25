@@ -76,6 +76,8 @@ export function createTemplateValues({
     'step.id': run.currentStepId,
     'step.title': step.title,
     'last.summary': currentStepHandoff(run),
+    'reviewed.artifact': run.reviewedArtifact ?? '',
+    'reviewed.feedback': run.reviewedFeedback ?? '',
     'gate.feedback': run.gateFeedback,
   };
 }

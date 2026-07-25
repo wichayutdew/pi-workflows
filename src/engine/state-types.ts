@@ -49,6 +49,8 @@ export type WorkflowRun = {
    * source from which reviewed Bash capabilities may be derived.
    */
   readonly reviewedArtifact?: string | undefined;
+  /** Final feedback paired with the immutable approved artifact. */
+  readonly reviewedFeedback?: string | undefined;
   /**
    * Input inherited from the previous completed step. Unlike `lastSummary`,
    * this survives a paused attempt of the current step.

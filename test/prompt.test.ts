@@ -89,6 +89,8 @@ describe('when testing prompt', () => {
       const delegatedWorkflow = loadedWorkflow(delegatedRaw);
       const delegatedRun = {
         ...createRun(delegatedWorkflow, '', [], 'run-2', 1),
+        reviewedArtifact: 'immutable approved plan',
+        reviewedFeedback: 'ship it',
         stepHandoff: 'compact previous-step result',
         lastSummary: 'compact previous-step result',
       };
@@ -109,6 +111,23 @@ describe('when testing prompt', () => {
       );
       expect(delegatedTask).toMatch(/use a pause outcome \(blocked\)/i);
       expect(delegatedTask).toMatch(/Call `structured_output` exactly once/);
+
+      const reviewedRaw = baseWorkflow();
+      const reviewedSteps = reviewedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      reviewedSteps.inspect = {
+        ...reviewedSteps.inspect,
+        prompt: '{{reviewed.artifact}} / {{reviewed.feedback}}',
+      };
+      const reviewedWorkflow = loadedWorkflow(reviewedRaw);
+      const reviewedTask = buildMainStepTask(reviewedWorkflow, {
+        ...createRun(reviewedWorkflow, '', [], 'run-reviewed', 1),
+        reviewedArtifact: 'immutable approved plan',
+        reviewedFeedback: 'ship it',
+      });
+      expect(reviewedTask).toContain('immutable approved plan / ship it');
 
       const recoverableRaw = baseWorkflow();
       const recoverableSteps = recoverableRaw.steps as Record<

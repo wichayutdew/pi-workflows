@@ -174,6 +174,7 @@ describe('when testing config', () => {
           bash: {
             mode: 'allow-list',
             approvedSources: ['verification-worker'],
+            handoffSources: ['verification-worker', 'verification-reviewer'],
           },
         },
       };
@@ -184,6 +185,9 @@ describe('when testing config', () => {
       expect(
         result.value?.steps.inspect?.permissions.bash.approvedSources,
       ).toEqual(['verification-worker']);
+      expect(
+        result.value?.steps.inspect?.permissions.bash.handoffSources,
+      ).toEqual(['verification-worker', 'verification-reviewer']);
 
       const invalid = structuredClone(raw);
       const invalidSteps = invalid.steps as Record<
@@ -197,11 +201,15 @@ describe('when testing config', () => {
           bash: {
             mode: 'read-only',
             approvedSources: ['remote-actions'],
+            handoffSources: ['verification-worker'],
           },
         },
       };
       expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
         /approvedSources: only valid when mode is "allow-list"/,
+      );
+      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
+        /handoffSources: only valid when mode is "allow-list"/,
       );
     });
 
