@@ -41,7 +41,7 @@ pi install npm:@plannotator/pi-extension
 
 Neither integration is required, but both are highly recommended together for
 the best isolation and review experience. Pi Workflows targets
-pi-subagents `0.35.1` or newer. Run `/subagents-doctor` if an explicitly
+pi-subagents `0.36.0` or newer. Run `/subagents-doctor` if an explicitly
 delegated step cannot start.
 
 Pi loads `src/index.ts` through the package manifest. Restart Pi or run `/reload` after changing extension source.

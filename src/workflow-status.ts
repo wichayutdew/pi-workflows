@@ -66,6 +66,12 @@ export function formatWorkflowStatusText(
   if (run.pendingGate?.reviewId) {
     lines.push(`Review: ${run.pendingGate.reviewId}`);
   }
+  if (run.pendingSupervisor) {
+    lines.push(
+      `Supervisor request: ${run.pendingSupervisor.reason} from ${run.pendingSupervisor.agent}`,
+      `Question: ${run.pendingSupervisor.message}`,
+    );
+  }
   if (snapshot.execution?.kind === 'subagent') {
     lines.push(
       `Subagent: ${snapshot.execution.agent} (${snapshot.execution.requestId})`,
@@ -312,6 +318,17 @@ function renderSummaryLines(
       ? `${run.pendingGate.provider} · ${run.pendingGate.reviewId}`
       : `${run.pendingGate.provider} · opening`;
     lines.push(...keyValueLines(theme, 'review', review, width, 'warning'));
+  }
+  if (run.pendingSupervisor) {
+    lines.push(
+      ...keyValueLines(
+        theme,
+        'supervisor',
+        `${run.pendingSupervisor.agent} · ${run.pendingSupervisor.reason}: ${run.pendingSupervisor.message}`,
+        width,
+        'warning',
+      ),
+    );
   }
   if (!workflow) {
     lines.push(

@@ -81,6 +81,7 @@ export function abortRun(
       pauseReason: reason || 'Aborted by user',
       pausedFrom: undefined,
       pendingGate: undefined,
+      pendingSupervisor: undefined,
     },
     now,
   );

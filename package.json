@@ -53,7 +53,7 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "pi-subagents": ">=0.35.1",
+    "pi-subagents": ">=0.36.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -69,7 +69,7 @@
     "@types/node": "^24.0.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
-    "pi-subagents": "^0.35.1",
+    "pi-subagents": "^0.36.0",
     "prettier": "^3.9.5",
     "typebox": "^1.1.38",
     "typescript": "^5.9.3",

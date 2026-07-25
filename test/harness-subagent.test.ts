@@ -23,6 +23,8 @@ import {
   SUBAGENT_DELEGATION_REQUEST_EVENT,
   SUBAGENT_DELEGATION_RESPONSE_EVENT,
   SUBAGENT_DELEGATION_STARTED_EVENT,
+  SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
+  SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT,
   SUBAGENT_DELEGATION_UPDATE_EVENT,
   type ChildStepPolicy,
   type SubagentDelegationRequest,
@@ -1191,6 +1193,84 @@ describe('when testing harness subagent', () => {
             'Pi Workflows owns correlated step completion and human-review gates',
         });
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('replies in TUI and resumes the same delegated child', async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-supervisor-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+      try {
+        await writeWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        fixture.inputResponses.push('Use option A.');
+        let delegatedRequest: SubagentDelegationRequest | undefined;
+        let replies = 0;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
+          delegatedRequest = data as SubagentDelegationRequest;
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: delegatedRequest.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT, {
+            version: 1,
+            delegationRequestId: delegatedRequest.requestId,
+            runId: 'child-run-1',
+            agent: 'pi-workflows.step',
+            requestId: 'question-1',
+            reason: 'need_decision',
+            message: 'Which option should I use?',
+          });
+        });
+        fixture.events.on(
+          SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT,
+          async () => {
+            replies += 1;
+            const extracted = extractChildPolicy(delegatedRequest?.task ?? '');
+            expectTruthy(extracted);
+            await writeFile(
+              extracted.policy.resultPath,
+              JSON.stringify({
+                version: 1,
+                policyDigest: extracted.policy.policyDigest,
+                outcome: 'done',
+                summary: 'Finished after supervisor reply',
+              }),
+            );
+            fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+              version: 1,
+              requestId: delegatedRequest?.requestId,
+              status: 'completed',
+            });
+          },
+        );
+
+        await initialize(fixture);
+        const start = fixture.commands.get('delegate');
+        expectTruthy(start);
+        await start('the repository', fixture.context);
+
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+        expect(replies).toBe(1);
+        expect(
+          fixture.checkpoints.some((checkpoint) => {
+            const run = checkpoint.data as {
+              pendingSupervisor?: { message?: string };
+            };
+            return (
+              run.pendingSupervisor?.message === 'Which option should I use?'
+            );
+          }),
+        ).toBe(true);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;

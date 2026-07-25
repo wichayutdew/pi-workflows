@@ -24,6 +24,11 @@ sequenceDiagram
   Child-->>Sub: progress and terminal status
   Sub-->>Bus: prompt-template:subagent:update
   Bus-->>Harness: update status
+  Child-->>Sub: contact_supervisor
+  Sub-->>Bus: supervisor request v1
+  Bus-->>Harness: checkpoint paused request
+  Harness-->>Bus: supervisor reply v1 (TUI)
+  Bus-->>Sub: reply to same child
   Sub-->>Bus: prompt-template:subagent:response
   Bus-->>Harness: finish delegation
 ```
@@ -109,6 +114,22 @@ stateDiagram-v2
 ```
 
 While blocked, the harness keeps main tools isolated and refuses resume because a child may still be alive.
+
+## Supervisor Coordination
+
+Delegated steps support child `contact_supervisor` requests with
+pi-subagents `0.36.0` or newer. A correlated request pauses the workflow and
+persists the child agent, child run, request id, reason, message, and optional
+interview payload. The original delegation remains active: Pi Workflows never
+starts a replacement child while the request is pending.
+
+In Pi TUI, the workflow opens a reply input. A non-empty reply is sent through
+the delegation supervisor-reply event, returns the workflow to running, and
+waits for that original child’s terminal response. Dismissing the input keeps
+the checkpoint paused; `/workflow-resume` reopens it in TUI. RPC and non-TUI
+sessions intentionally keep the workflow paused and must be reopened in TUI
+to answer the child. Normal pause, abort, session change, and shutdown still
+cancel the child and wait for its terminal result before releasing isolation.
 
 ## Agent And Policy Boundary
 

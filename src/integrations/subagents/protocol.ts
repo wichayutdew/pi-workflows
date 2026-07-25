@@ -30,6 +30,11 @@ export const SUBAGENT_DELEGATION_RESPONSE_EVENT =
   'prompt-template:subagent:response';
 export const SUBAGENT_DELEGATION_CANCEL_EVENT =
   'prompt-template:subagent:cancel';
+/** Additive supervisor lifecycle events introduced by pi-subagents 0.36.0. */
+export const SUBAGENT_DELEGATION_SUPERVISOR_REQUEST_EVENT =
+  'prompt-template:subagent:supervisor-request';
+export const SUBAGENT_DELEGATION_SUPERVISOR_REPLY_EVENT =
+  'prompt-template:subagent:supervisor-reply';
 
 const CHILD_POLICY_OPEN = '<pi-workflows-policy-v1>';
 const CHILD_POLICY_CLOSE = '</pi-workflows-policy-v1>';
@@ -44,6 +49,30 @@ export type SubagentDelegationRequest = UpstreamDelegationRequest;
 export type SubagentDelegationUpdate = UpstreamDelegationUpdate;
 export type SubagentDelegationStatus = UpstreamDelegationStatus;
 export type SubagentDelegationResponse = UpstreamDelegationResponse;
+
+export type SubagentSupervisorReason =
+  'need_decision' | 'interview_request' | 'progress_update';
+
+/** A correlated request from a detached delegated child to its supervisor. */
+export interface SubagentDelegationSupervisorRequest {
+  version: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
+  delegationRequestId: string;
+  runId: string;
+  agent: string;
+  requestId: string;
+  reason: SubagentSupervisorReason;
+  message: string;
+  interview?: unknown;
+}
+
+export interface SubagentDelegationSupervisorReply {
+  version: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
+  delegationRequestId: string;
+  runId: string;
+  agent: string;
+  requestId: string;
+  message: string;
+}
 
 export interface ChildStepPolicy {
   version: 1;

@@ -61,6 +61,7 @@ import {
   type ChildStepPolicy,
   type SubagentDelegationRequest,
   type SubagentDelegationResponse,
+  type SubagentDelegationSupervisorRequest,
   type SubagentDelegationUpdate,
 } from './integrations/subagents/protocol.ts';
 import { preflightStep } from './preflight.ts';
@@ -98,6 +99,11 @@ interface ActiveDelegation {
   agent: string;
   progress?: string;
   cancelling?: boolean;
+}
+
+interface ActiveSupervisorRequest {
+  delegation: ActiveDelegation;
+  request: SubagentDelegationSupervisorRequest;
 }
 
 interface MainStepIdentity {
@@ -146,6 +152,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   private sessionActive = false;
   private sessionEpoch = 0;
   private activeDelegation: ActiveDelegation | undefined;
+  private activeSupervisorRequest: ActiveSupervisorRequest | undefined;
   private activePromptReview: ActivePromptReview | undefined;
   private registeredWorkflowCommands = new Set<string>();
   private catalogLoadSequence = 0;
@@ -330,6 +337,10 @@ export class WorkflowHarness implements WorkflowCommandController {
   private async resumeNow(ctx: ExtensionCommandContext): Promise<void> {
     if (!this.run || this.run.status !== 'paused') {
       ctx.ui.notify('No paused workflow to resume', 'warning');
+      return;
+    }
+    if (this.run.pendingSupervisor) {
+      this.reopenSupervisorRequest(ctx);
       return;
     }
     if (this.activeDelegation) {
@@ -801,6 +812,8 @@ export class WorkflowHarness implements WorkflowCommandController {
     void this.subagents
       .delegate(request, {
         onUpdate: (update) => this.handleDelegationUpdate(active, update),
+        onSupervisorRequest: (supervisorRequest) =>
+          this.queueSupervisorRequest(active, supervisorRequest),
         onLateTerminal: (response) =>
           this.queueDelegationResponse(active, response),
       })
@@ -951,6 +964,162 @@ export class WorkflowHarness implements WorkflowCommandController {
     this.updateStatus();
   }
 
+  private queueSupervisorRequest(
+    active: ActiveDelegation,
+    request: SubagentDelegationSupervisorRequest,
+  ): void {
+    void this.mutationQueue
+      .run(async () => this.handleSupervisorRequest(active, request))
+      .catch((error: unknown) => {
+        this.pauseForDelegationFailure(
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+  }
+
+  private handleSupervisorRequest(
+    active: ActiveDelegation,
+    request: SubagentDelegationSupervisorRequest,
+  ): void {
+    if (
+      this.activeDelegation !== active ||
+      !this.sessionActive ||
+      this.sessionEpoch !== active.sessionEpoch ||
+      !this.run ||
+      this.run.status !== 'running' ||
+      this.run.runId !== active.runId ||
+      this.run.currentStepId !== active.stepId ||
+      this.run.currentStepDigest !== active.stepDigest
+    ) {
+      return;
+    }
+    if (this.activeSupervisorRequest) return;
+    this.activeSupervisorRequest = { delegation: active, request };
+    active.progress = 'waiting for supervisor reply';
+    this.run = pauseRun(
+      this.run,
+      `Subagent "${active.agent}" requested supervisor input`,
+      Date.now(),
+    );
+    this.run = {
+      ...this.run,
+      pendingSupervisor: {
+        delegationRequestId: request.delegationRequestId,
+        runId: request.runId,
+        agent: request.agent,
+        requestId: request.requestId,
+        reason: request.reason,
+        message: request.message,
+        ...(request.interview === undefined
+          ? {}
+          : { interview: request.interview }),
+      },
+      updatedAt: Date.now(),
+    };
+    this.persist();
+    this.isolateMainSessionTools();
+    this.updateStatus();
+    this.latestContext?.ui.notify(
+      `Workflow paused: subagent "${request.agent}" needs supervisor input`,
+      'warning',
+    );
+    if (this.latestContext?.hasUI && this.latestContext.mode === 'tui') {
+      this.openSupervisorReplyDialog(this.activeSupervisorRequest);
+    } else {
+      this.latestContext?.ui.notify(
+        'Reopen this workflow session in Pi TUI and run /workflow-resume to reply.',
+        'warning',
+      );
+    }
+  }
+
+  private reopenSupervisorRequest(ctx: ExtensionCommandContext): void {
+    const active = this.activeSupervisorRequest;
+    if (!active || this.activeDelegation !== active.delegation) {
+      ctx.ui.notify(
+        'The delegated child is no longer available; abort this paused workflow.',
+        'warning',
+      );
+      return;
+    }
+    if (!ctx.hasUI || ctx.mode !== 'tui') {
+      ctx.ui.notify(
+        'This supervisor request must be reopened in Pi TUI.',
+        'warning',
+      );
+      return;
+    }
+    this.openSupervisorReplyDialog(active);
+  }
+
+  private openSupervisorReplyDialog(active: ActiveSupervisorRequest): void {
+    const context = this.latestContext;
+    if (!context?.hasUI || context.mode !== 'tui') return;
+    void context.ui
+      .input(
+        `Reply to ${active.request.agent} (${active.request.reason})`,
+        active.request.message,
+      )
+      .then(
+        (message) => this.queueSupervisorReply(active, message),
+        (error: unknown) => {
+          this.latestContext?.ui.notify(
+            `Cannot open supervisor reply: ${error instanceof Error ? error.message : String(error)}`,
+            'error',
+          );
+        },
+      );
+  }
+
+  private queueSupervisorReply(
+    active: ActiveSupervisorRequest,
+    message: string | undefined,
+  ): void {
+    void this.mutationQueue
+      .run(async () => this.finishSupervisorReply(active, message))
+      .catch((error: unknown) => {
+        this.latestContext?.ui.notify(
+          `Cannot send supervisor reply: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        );
+      });
+  }
+
+  private finishSupervisorReply(
+    active: ActiveSupervisorRequest,
+    message: string | undefined,
+  ): void {
+    if (
+      !message?.trim() ||
+      this.activeSupervisorRequest !== active ||
+      this.activeDelegation !== active.delegation ||
+      !this.run ||
+      this.run.status !== 'paused' ||
+      this.run.pendingSupervisor?.requestId !== active.request.requestId
+    ) {
+      return;
+    }
+    const sent = this.subagents.replyToSupervisor({
+      version: 1,
+      delegationRequestId: active.request.delegationRequestId,
+      runId: active.request.runId,
+      agent: active.request.agent,
+      requestId: active.request.requestId,
+      message: message.trim(),
+    });
+    if (!sent) return;
+    this.activeSupervisorRequest = undefined;
+    active.delegation.progress = 'running after supervisor reply';
+    this.run = {
+      ...resumeRun(this.run, Date.now()),
+      pendingSupervisor: undefined,
+      updatedAt: Date.now(),
+    };
+    this.persist();
+    this.isolateMainSessionTools();
+    this.updateStatus();
+  }
+
   private queueDelegationResponse(
     active: ActiveDelegation,
     response: SubagentDelegationResponse,
@@ -997,9 +1166,34 @@ export class WorkflowHarness implements WorkflowCommandController {
       await this.cleanupDelegation(active);
       return;
     }
+    const hadPendingSupervisor =
+      this.activeSupervisorRequest?.delegation === active;
+    if (hadPendingSupervisor) {
+      this.activeSupervisorRequest = undefined;
+    }
     this.activeDelegation = undefined;
 
     try {
+      if (
+        hadPendingSupervisor &&
+        this.run?.status === 'paused' &&
+        this.run.pendingSupervisor?.delegationRequestId === active.requestId
+      ) {
+        this.run = {
+          ...this.run,
+          pendingSupervisor: undefined,
+          pauseReason: `Subagent "${active.agent}" terminated before its supervisor request was answered`,
+          updatedAt: Date.now(),
+        };
+        this.persist();
+        this.restoreBaselineTools();
+        this.updateStatus();
+        this.latestContext?.ui.notify(
+          `Workflow remains paused: subagent "${active.agent}" terminated before receiving a supervisor reply`,
+          'warning',
+        );
+        return;
+      }
       if (
         !this.sessionActive ||
         this.sessionEpoch !== active.sessionEpoch ||
@@ -1070,6 +1264,17 @@ export class WorkflowHarness implements WorkflowCommandController {
     const active = this.activeDelegation;
     if (!active) return true;
     active.cancelling = true;
+    if (this.activeSupervisorRequest?.delegation === active) {
+      this.activeSupervisorRequest = undefined;
+    }
+    if (this.run?.pendingSupervisor?.delegationRequestId === active.requestId) {
+      this.run = {
+        ...this.run,
+        pendingSupervisor: undefined,
+        updatedAt: Date.now(),
+      };
+      this.persist();
+    }
     active.progress = 'cancelling';
     this.updateStatus();
     if (this.subagents.activeRequestId !== active.requestId) {
