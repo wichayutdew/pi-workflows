@@ -131,6 +131,44 @@ describe('when testing example', () => {
         'ticket',
         'work',
       ]);
+      expect(
+        Object.fromEntries(
+          [...catalog.workflows.entries()].map(([workflowId, workflow]) => [
+            workflowId,
+            Object.fromEntries(
+              Object.entries(workflow.definition.steps).map(
+                ([stepId, step]) => [stepId, step.subagent?.agent],
+              ),
+            ),
+          ]),
+        ),
+      ).toEqual({
+        'mr-comment': {
+          fetch: 'scout',
+          plan: 'planner',
+          implement: 'worker',
+          verify: 'reviewer',
+          publish: 'worker',
+        },
+        'mr-review': {
+          fetch: 'scout',
+          review: 'reviewer',
+          publish: 'worker',
+          verify: 'reviewer',
+        },
+        ticket: {
+          'prepare-workspace': 'worker',
+          plan: 'planner',
+          implement: 'worker',
+          verify: 'reviewer',
+        },
+        work: {
+          'prepare-workspace': 'worker',
+          plan: 'planner',
+          implement: 'worker',
+          verify: 'reviewer',
+        },
+      });
 
       for (const loaded of catalog.workflows.values()) {
         expect(JSON.stringify(loaded.definition)).not.toMatch(/\/Users\//);

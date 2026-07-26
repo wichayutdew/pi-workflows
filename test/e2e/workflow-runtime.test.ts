@@ -217,7 +217,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
           plan: {
             title: 'Plan',
             prompt: planPrompt,
-            subagent: 'scout',
+            subagent: 'planner',
             transitions: {
               planned: 'implement',
               blocked: '$pause',
@@ -394,7 +394,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
           {
             step: 'plan',
             visit: 1,
-            runtimeAgent: 'scout',
+            runtimeAgent: 'planner',
             runtimeCwd: expectedWorkspaceDirectory,
             promptLength: expect.any(Number),
             userMessageCount: 1,

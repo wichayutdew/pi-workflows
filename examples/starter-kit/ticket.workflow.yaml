@@ -11,7 +11,7 @@ steps:
     prompt:
       file: steps/shared/prepare-workspace.md
     subagent:
-      agent: pi-workflows.step
+      agent: worker
       context: fresh
       timeoutMs: 900000
     workspace:
@@ -32,7 +32,7 @@ steps:
     prompt:
       file: steps/ticket/plan.md
     subagent:
-      agent: pi-workflows.step
+      agent: planner
       context: fresh
       timeoutMs: 1200000
     permissions:
@@ -64,7 +64,7 @@ steps:
     prompt:
       file: steps/ticket/implement.md
     subagent:
-      agent: pi-workflows.step
+      agent: worker
       context: fresh
       timeoutMs: 7200000
       artifacts: true
@@ -84,7 +84,7 @@ steps:
     prompt:
       file: steps/ticket/verify.md
     subagent:
-      agent: pi-workflows.step
+      agent: reviewer
       context: fresh
       timeoutMs: 3600000
     permissions:

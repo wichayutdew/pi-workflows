@@ -11,7 +11,7 @@ steps:
     prompt:
       file: steps/mr-review/fetch.md
     subagent:
-      agent: pi-workflows.step
+      agent: scout
       context: fresh
       timeoutMs: 1800000
     permissions:
@@ -49,7 +49,7 @@ steps:
     prompt:
       file: steps/mr-review/review.md
     subagent:
-      agent: pi-workflows.step
+      agent: reviewer
       context: fresh
       timeoutMs: 1800000
     permissions:
@@ -84,7 +84,7 @@ steps:
     prompt:
       file: steps/mr-review/publish.md
     subagent:
-      agent: pi-workflows.step
+      agent: worker
       context: fresh
       timeoutMs: 900000
     permissions:
@@ -109,7 +109,7 @@ steps:
     prompt:
       file: steps/mr-review/verify.md
     subagent:
-      agent: pi-workflows.step
+      agent: reviewer
       context: fresh
       timeoutMs: 900000
     permissions:
