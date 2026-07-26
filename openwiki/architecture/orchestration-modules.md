@@ -44,7 +44,7 @@ The refactor separates three kinds of modules:
 | `src/config/load-types.ts`        | Defines filesystem, environment, loader, and intermediate-result ports used by configuration DI.                                            |
 | `src/config/load-workflows.ts`    | Enumerates a workflow directory, constrains prompt paths to that directory, validates YAML, loads prompts, and computes digests.            |
 | `src/config/load.ts`              | Node-backed compatibility facade and default `loadCatalog`/`loadSettings` functions.                                                        |
-| `src/config/step-digests.ts`      | Computes per-step digests with prompt text and structural digests without prompt text for reconciliation and approval provenance.            |
+| `src/config/step-digests.ts`      | Computes per-step digests with prompt text and structural digests without prompt text for reconciliation and approval provenance.           |
 | `src/config/types.ts`             | Canonical configuration constants and types, including workflows, steps, gates, permissions, subagents, settings, and diagnostics.          |
 | `src/config/validate.ts`          | Compatibility facade for validators plus a mutable requirements clone for parser assembly.                                                  |
 | `src/config/yaml.ts`              | Parses YAML and turns parser failures into document-specific errors.                                                                        |
@@ -67,24 +67,24 @@ The refactor separates three kinds of modules:
 All engine transitions return new run values; they do not perform Pi, file, UI,
 timer, or subagent effects.
 
-| Module                                 | Responsibility                                                                                                            |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `src/engine/checkpoint.ts`             | Finds and validates the newest workflow checkpoint in session entries.                                                    |
-| `src/engine/create-run.ts`             | Creates the first immutable run state from a loaded workflow and baseline tools.                                          |
-| `src/engine/gate-transitions.ts`       | Begins review, attaches review IDs, records review failures/resolutions, and applies approved or rejected outcomes.       |
-| `src/engine/reconciliation-history.ts` | Rebuilds visit counts and preserves valid reviewed artifacts while history is reconciled.                                 |
-| `src/engine/resume.ts`                 | Captures and compares run/session identity around asynchronous resume work so stale results cannot overwrite newer state. |
-| `src/engine/run-advance.ts`            | Validates an ordinary outcome, appends step history, and moves to the next, completed, or paused state.                   |
-| `src/engine/run-lifecycle.ts`          | Computes allowed outcomes and immutable pause, failure, resume, and abort transitions.                                    |
-| `src/engine/run-reconciliation.ts`     | Reconciles a checkpoint with changed workflow digests and rewinds to the earliest affected step when required.            |
-| `src/engine/run-validation.ts`         | Runtime type guard for persisted, untrusted workflow checkpoint values.                                                   |
-| `src/engine/run-workflow-validation.ts` | Validates persisted control-flow, approvals, workspace binding, visits, and pending gates against the active workflow.     |
-| `src/engine/state-types.ts`            | Versioned run, history, gate, status, workspace, and step-trace types.                                                    |
-| `src/engine/state.ts`                  | Compatibility facade for state creation, validation, constants, and types.                                                |
-| `src/engine/step-trace.ts`             | Records and compacts bounded attempt tasks, results, gate decisions, main logs, and child transcript references.          |
-| `src/engine/transition-helpers.ts`     | Looks up the current step and applies timestamped run patches without mutation.                                           |
-| `src/engine/transition-types.ts`       | Result type for configuration reconciliation.                                                                             |
-| `src/engine/transitions.ts`            | Compatibility facade for run, gate, lifecycle, and reconciliation transitions.                                            |
+| Module                                  | Responsibility                                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `src/engine/checkpoint.ts`              | Finds and validates the newest workflow checkpoint in session entries.                                                    |
+| `src/engine/create-run.ts`              | Creates the first immutable run state from a loaded workflow and baseline tools.                                          |
+| `src/engine/gate-transitions.ts`        | Begins review, attaches review IDs, records review failures/resolutions, and applies approved or rejected outcomes.       |
+| `src/engine/reconciliation-history.ts`  | Rebuilds visit counts and preserves valid reviewed artifacts while history is reconciled.                                 |
+| `src/engine/resume.ts`                  | Captures and compares run/session identity around asynchronous resume work so stale results cannot overwrite newer state. |
+| `src/engine/run-advance.ts`             | Validates an ordinary outcome, appends step history, and moves to the next, completed, or paused state.                   |
+| `src/engine/run-lifecycle.ts`           | Computes allowed outcomes and immutable pause, failure, resume, and abort transitions.                                    |
+| `src/engine/run-reconciliation.ts`      | Reconciles a checkpoint with changed workflow digests and rewinds to the earliest affected step when required.            |
+| `src/engine/run-validation.ts`          | Runtime type guard for persisted, untrusted workflow checkpoint values.                                                   |
+| `src/engine/run-workflow-validation.ts` | Validates persisted control-flow, approvals, workspace binding, visits, and pending gates against the active workflow.    |
+| `src/engine/state-types.ts`             | Versioned run, history, gate, status, workspace, and step-trace types.                                                    |
+| `src/engine/state.ts`                   | Compatibility facade for state creation, validation, constants, and types.                                                |
+| `src/engine/step-trace.ts`              | Records and compacts bounded attempt tasks, results, gate decisions, main logs, and child transcript references.          |
+| `src/engine/transition-helpers.ts`      | Looks up the current step and applies timestamped run patches without mutation.                                           |
+| `src/engine/transition-types.ts`        | Result type for configuration reconciliation.                                                                             |
+| `src/engine/transitions.ts`             | Compatibility facade for run, gate, lifecycle, and reconciliation transitions.                                            |
 
 ## Parent Harness
 
