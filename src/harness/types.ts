@@ -45,6 +45,7 @@ export type DelegationFailureDetails = {
 };
 
 export type MainStepIdentity = {
+  requestId: string;
   runId: string;
   stepId: string;
   stepDigest: string;

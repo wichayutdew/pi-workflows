@@ -1,0 +1,149 @@
+version: 1
+id: mr-comment
+command: mr-comment
+description: Fetch review comments, approve fixes, edit the current checkout, verify, push, and reply
+start: fetch
+maxStepVisits: 4
+summaryMaxChars: 50000
+steps:
+  fetch:
+    title: Fetch merge-request or pull-request comments
+    prompt:
+      file: steps/mr-comment/fetch.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1800000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [
+                [status],
+                [diff],
+                [log],
+                [show],
+                [grep],
+                [ls-files],
+                [remote, -v],
+                [remote, get-url],
+                [rev-parse],
+              ]
+          - executable: glab
+            argsPrefixes: [[mr, view], [mr, diff], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
+          - executable: curl
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      ready: plan
+      blocked: $pause
+
+  plan:
+    title: Propose a complete comment-fix plan
+    prompt:
+      file: steps/mr-comment/plan.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1800000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: glab
+            argsPrefixes: [[mr, view], [mr, diff], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
+          - executable: curl
+    requires:
+      tools: [read, ls, bash]
+    gate:
+      provider: plannotator
+      submitOutcome: submit
+      approvedOutcome: approved
+      rejectedOutcome: changes-requested
+      timeoutMs: 30000
+    transitions:
+      approved: implement
+      changes-requested: $pause
+      blocked: $pause
+
+  implement:
+    title: Implement the approved comment fixes
+    prompt:
+      file: steps/mr-comment/implement.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 7200000
+      artifacts: true
+    permissions:
+      tools: [read, ls, bash, edit, write]
+      mcp: [gitlab, github]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash, edit, write]
+    transitions:
+      ready: verify
+      blocked: $pause
+
+  verify:
+    title: Independently verify comment handling
+    prompt:
+      file: steps/mr-comment/verify.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 3600000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      ready: publish
+      no-actions: $done
+      failed: implement
+      blocked: $pause
+
+  publish:
+    title: Push verified work and reply to comments
+    prompt:
+      file: steps/mr-comment/publish.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1800000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes: [[status], [rev-parse], [show], [ls-remote], [push]]
+          - executable: glab
+            argsPrefixes: [[mr, view], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [api]]
+          - executable: curl
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      published: $done
+      no-actions: $done
+      blocked: $pause

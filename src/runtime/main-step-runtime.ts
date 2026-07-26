@@ -5,6 +5,7 @@ import { authorizeToolCall, resolveActiveTools } from '../policy/tools.ts';
 import { registerMainStepCompletion } from './main-step-completion.ts';
 import { registerMainStepLifecycle } from './main-step-lifecycle.ts';
 import { registerMainStepPolicy } from './main-step-policy.ts';
+import { registerMainStepTrace } from './main-step-trace.ts';
 import type {
   MainStepExecution,
   MainStepRuntimeController,
@@ -84,6 +85,7 @@ export function createMainStepRuntime({
 
   registerMainStepLifecycle({ pi, state });
   registerMainStepPolicy({ pi, state, dependencies });
+  registerMainStepTrace({ pi, state });
   registerMainStepCompletion({ pi, state, dependencies });
 
   return {

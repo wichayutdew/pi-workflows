@@ -1,0 +1,100 @@
+version: 1
+id: ticket
+command: ticket
+description: Prepare a dedicated workspace, approve a ticket plan, implement, and verify
+start: prepare-workspace
+maxStepVisits: 4
+summaryMaxChars: 30000
+steps:
+  prepare-workspace:
+    title: Prepare or reuse a dedicated worktree
+    prompt:
+      file: steps/shared/prepare-workspace.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 900000
+    workspace:
+      bindOn: [ready]
+      allowedRoots: ['..']
+    permissions:
+      tools: [read, ls, bash]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      ready: plan
+      blocked: $pause
+
+  plan:
+    title: Read the ticket and propose a plan
+    prompt:
+      file: steps/ticket/plan.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1200000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [atlassian]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: rg
+          - executable: grep
+    requires:
+      tools: [read, ls, bash, mcp]
+    gate:
+      provider: plannotator
+      submitOutcome: submit
+      approvedOutcome: approved
+      rejectedOutcome: changes-requested
+      timeoutMs: 30000
+    transitions:
+      approved: implement
+      changes-requested: $pause
+      blocked: $pause
+
+  implement:
+    title: Implement the approved ticket plan
+    prompt:
+      file: steps/ticket/implement.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 7200000
+      artifacts: true
+    permissions:
+      tools: [read, ls, bash, edit, write]
+      mcp: [atlassian]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash, edit, write, mcp]
+    transitions:
+      ready: verify
+      blocked: $pause
+
+  verify:
+    title: Independently verify the ticket work
+    prompt:
+      file: steps/ticket/verify.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 3600000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [atlassian]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash, mcp]
+    transitions:
+      passed: $done
+      failed: implement
+      blocked: $pause

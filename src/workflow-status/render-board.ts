@@ -12,6 +12,7 @@ export function renderBoard(
   width: number,
   shouldShowCloseHint: boolean,
   statusShortcutLabel: string,
+  selectedIndex?: number,
 ): Array<string> {
   const header = boxed(
     theme,
@@ -23,8 +24,8 @@ export function renderBoard(
 
   const body =
     width >= WIDE_LAYOUT_MIN_COLUMNS
-      ? renderWideBody(theme, snapshot, width)
-      : renderNarrowBody(theme, snapshot, width);
+      ? renderWideBody(theme, snapshot, width, selectedIndex)
+      : renderNarrowBody(theme, snapshot, width, selectedIndex);
   const lines = [...header, '', ...body];
   return shouldShowCloseHint
     ? [
@@ -39,6 +40,7 @@ function renderWideBody(
   theme: WorkflowStatusTheme,
   snapshot: WorkflowStatusSnapshot,
   width: number,
+  selectedIndex?: number,
 ): Array<string> {
   const gap = 2;
   const summaryWidth = Math.min(42, Math.max(36, Math.floor(width * 0.36)));
@@ -53,7 +55,7 @@ function renderWideBody(
     theme,
     'Execution Path',
     pathWidth,
-    renderPathLines(theme, snapshot, pathWidth - 4),
+    renderPathLines(theme, snapshot, pathWidth - 4, selectedIndex),
     'borderAccent',
   );
   return joinPanels(summary, summaryWidth, path, pathWidth, gap);
@@ -63,6 +65,7 @@ function renderNarrowBody(
   theme: WorkflowStatusTheme,
   snapshot: WorkflowStatusSnapshot,
   width: number,
+  selectedIndex?: number,
 ): Array<string> {
   return [
     ...boxed(
@@ -76,7 +79,7 @@ function renderNarrowBody(
       theme,
       'Execution Path',
       width,
-      renderPathLines(theme, snapshot, width - 4),
+      renderPathLines(theme, snapshot, width - 4, selectedIndex),
       'borderAccent',
     ),
   ];

@@ -3,6 +3,7 @@ import type {
   RecordedCompletion,
   RecordedToolCall,
   RecordedToolFailure,
+  RecordedTranscriptWarning,
   ToolFailureDiagnostic,
 } from './diagnostic-types.ts';
 import { parseFailureTranscript } from './failure-transcript.ts';
@@ -40,6 +41,17 @@ const latestMatching = (
   return undefined;
 };
 
+const latestWarningAfter = (
+  warnings: ReadonlyArray<RecordedTranscriptWarning>,
+  order: number,
+): RecordedTranscriptWarning | undefined => {
+  for (let index = warnings.length - 1; index >= 0; index -= 1) {
+    const warning = warnings[index];
+    if (warning && warning.order > order) return warning;
+  }
+  return undefined;
+};
+
 const finalCompletion = (
   completions: ReadonlyArray<RecordedCompletion>,
   latestFailureOrder: number,
@@ -60,6 +72,7 @@ const publicDiagnostic = (
   diagnostics: ReadonlyArray<RecordedToolFailure>,
   recordedCalls: ReadonlyArray<RecordedToolCall>,
   successfulCompletions: ReadonlyArray<RecordedCompletion>,
+  postCompletionWarning: RecordedTranscriptWarning | undefined,
   lastInteractionOrder: number,
   allowCompletionProof: boolean,
   correlation?: ToolFailureDiagnostic['correlation'],
@@ -78,6 +91,9 @@ const publicDiagnostic = (
   );
   return {
     ...result,
+    ...(postCompletionWarning
+      ? { postCompletionWarning: postCompletionWarning.content }
+      : {}),
     ...(isFailureTranscriptReplaySafe({
       calls: recordedCalls,
       diagnostics,
@@ -110,17 +126,30 @@ const hiddenFalsePositiveDiagnostic = (
     resultCallIds,
     successfulCompletions,
     successfulResults,
+    transcriptWarnings,
   } = transcript;
-  if (diagnostics.length > 0) return undefined;
+  const completionOrder = successfulCompletions.at(-1)?.order ?? 0;
+  const postCompletionWarning = latestWarningAfter(
+    transcriptWarnings,
+    completionOrder,
+  );
 
   const falsePositive = reproduceHiddenBashFalsePositive(
     recordedMessages,
     successfulResults,
   );
+  const hasLaterFailure =
+    falsePositive !== undefined &&
+    diagnostics.some(
+      (diagnostic) => diagnostic.order > falsePositive.result.order,
+    );
   const completion = falsePositive
     ? finalCompletion(
         successfulCompletions,
-        falsePositive.result.order,
+        Math.max(
+          falsePositive.result.order,
+          diagnostics.at(-1)?.order ?? falsePositive.result.order,
+        ),
         lastInteractionOrder,
         allowCompletionProof,
       )
@@ -133,6 +162,8 @@ const hiddenFalsePositiveDiagnostic = (
       1 ||
     expectedTool?.toLowerCase() !== 'bash' ||
     !falsePositive ||
+    hasLaterFailure ||
+    postCompletionWarning !== undefined ||
     terminalError !== falsePositive.terminalError ||
     !completion
   ) {
@@ -170,7 +201,13 @@ export const parseToolFailureDiagnostic = (
     lastInteractionOrder,
     recordedCalls,
     successfulCompletions,
+    transcriptWarnings,
   } = parsed;
+  const completionOrder = successfulCompletions.at(-1)?.order ?? 0;
+  const postCompletionWarning = latestWarningAfter(
+    transcriptWarnings,
+    completionOrder,
+  );
   const matchesExpectedTool = (
     diagnostic: Pick<RecordedToolFailure, 'tool'>,
   ): boolean =>
@@ -203,6 +240,7 @@ export const parseToolFailureDiagnostic = (
           diagnostics,
           recordedCalls,
           successfulCompletions,
+          postCompletionWarning,
           lastInteractionOrder,
           allowCompletionProof,
           'latest-before-completion',
@@ -222,12 +260,24 @@ export const parseToolFailureDiagnostic = (
     selected = latestMatching(diagnostics, matchesExpectedTool);
   }
 
+  if (!selected && postCompletionWarning) {
+    selected =
+      latestMatching(diagnostics, matchesExpectedTool) ?? diagnostics.at(-1);
+    if (!selected) {
+      return {
+        tool: expectedTool ?? 'subagent',
+        postCompletionWarning: postCompletionWarning.content,
+      };
+    }
+  }
+
   return selected
     ? publicDiagnostic(
         selected,
         diagnostics,
         recordedCalls,
         successfulCompletions,
+        postCompletionWarning,
         lastInteractionOrder,
         allowCompletionProof,
       )

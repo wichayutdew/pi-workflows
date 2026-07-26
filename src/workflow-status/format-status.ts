@@ -1,5 +1,10 @@
 import { DEFAULT_STATUS_SHORTCUT } from '../config/types.ts';
-import { formatShortcutLabel } from './formatting.ts';
+import {
+  formatShortcutLabel,
+  formatStepName,
+  stepTitle,
+  workflowStatusIcon,
+} from './formatting.ts';
 import { renderBoard } from './render-board.ts';
 import type { WorkflowStatusSnapshot, WorkflowStatusTheme } from './types.ts';
 
@@ -9,18 +14,42 @@ const UNSTYLED_THEME = {
   bold: (value: string) => value,
 } as const satisfies WorkflowStatusTheme;
 
+/** Format the persistent main-UI progress line for a running workflow. */
+export function formatWorkflowProgressStatus(
+  snapshot: WorkflowStatusSnapshot,
+  statusShortcutLabel: string,
+): string {
+  const { run, workflow } = snapshot;
+  const currentStep = formatStepName(
+    stepTitle(workflow, run.currentStepId),
+    run.currentStepId,
+  );
+  const activity =
+    run.status === 'awaiting-gate' ? 'awaiting review' : 'working';
+  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity} · ${statusShortcutLabel}`;
+}
+
 /** Format a plain-text workflow status suitable for fallback notifications. */
 export function formatWorkflowStatusText(
   snapshot: WorkflowStatusSnapshot,
 ): string {
-  const { run } = snapshot;
+  const { run, workflow } = snapshot;
   const lines = [
-    `Workflow: ${run.workflowId}`,
+    `Workflow ID: ${run.workflowId}`,
+    ...(workflow
+      ? [
+          `Command: /${workflow.definition.command}`,
+          `Description: ${workflow.definition.description}`,
+        ]
+      : []),
     `Run: ${run.runId}`,
     `Status: ${run.status}`,
     `Step: ${run.currentStepId}`,
     `Completed steps: ${run.history.length}`,
   ];
+  if (run.cwd && run.startCwd && run.cwd !== run.startCwd) {
+    lines.push(`Workspace: ${run.cwd}`);
+  }
   if (run.pendingGate?.reviewId) {
     lines.push(`Review: ${run.pendingGate.reviewId}`);
   }

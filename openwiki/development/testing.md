@@ -7,13 +7,16 @@ flowchart LR
   Install[bun install] --> Check[bun run check]
   Check --> Typecheck[tsc --noEmit]
   Typecheck --> Tests[bun run test:coverage]
-  Tests --> Coverage[LCOV lines and functions above 90%<br/>plus Bun coverage thresholds]
+  Tests --> Coverage[aggregate LCOV lines and functions at least 90%]
   Coverage --> E2E[bun run test:e2e<br/>real Pi RPC /work]
   E2E --> Build[bun run build]
 ```
 
-The E2E run uses `bunfig.e2e.toml` with coverage disabled so it cannot replace
-the unit suite's `coverage/lcov.info` before CI uploads that report to Codecov.
+Ordinary and focused tests use `bunfig.toml` with coverage disabled.
+`bun run test:coverage` instead uses `bunfig.coverage.toml`, preserving the 90%
+lines, functions, and statements thresholds while writing release evidence to
+`coverage/full/lcov.info`. The E2E run also keeps coverage disabled, so neither
+focused nor E2E tests can replace that report before CI uploads it to Codecov.
 
 ## Test Coverage Map
 
@@ -23,20 +26,19 @@ flowchart TD
   Tests --> Config[test/config.test.ts<br/>YAML loading, validation, ceilings]
   Tests --> Engine[test/engine.test.ts<br/>state, transitions, gates]
   Tests --> Policy[test/policy.test.ts<br/>Bash, MCP, tool selection]
-  Tests --> Approved[test/approved-commands.test.ts<br/>reviewed exact-command filtering]
+  Tests --> Doctor[test/workflow-doctor.test.ts<br/>graph liveness and deterministic diagnostics]
   Tests --> Protocol[test/subagent-protocol.test.ts<br/>policy envelope, result validation]
   Tests --> Client[test/subagent-client.test.ts<br/>events, timeout, cancellation]
   Tests --> Child[test/subagent-child-runtime.test.ts<br/>runtime enforcement]
   Tests --> Harness[test/harness-subagent.test.ts<br/>main, delegation, pause/resume, gates]
-  Tests --> E2E[test/e2e/workflow-runtime.test.ts<br/>real Pi RPC /work flow and actual profiles]
+  Tests --> E2E[test/e2e/workflow-runtime.test.ts<br/>real Pi RPC revisit, captured cwd, and actual profiles]
   Tests --> Misc[checkpoint, completion batch, immutable input, queue, examples, extension, preflight, Plannotator]
 ```
 
-Reviewed command fixtures include an absolute `repositories[].cwd`. Harness
-tests verify existing-target launch, reviewed-source bootstrap for a missing
-target, and fail-closed malformed or ambiguous paths. Child-runtime tests
-confine edits and writes to the reviewed target while exact command tests reject
-any unreviewed Bash string.
+Harness tests verify that a run captures its starting absolute cwd and reuses it
+across steps, revisits, recovery attempts, and resume. Policy tests treat command
+families and argument placement as opaque while enforcing generic tokenization
+and the exact executable/argument-prefix rules declared in YAML.
 
 ## Where To Change Code
 
@@ -77,7 +79,7 @@ flowchart TD
   Install --> Reload["/reload"]
   Reload --> WorkflowReload["/workflow-reload"]
   WorkflowReload --> List["/workflow-list"]
-  List --> Start["/workflow-start mr-comments input"]
+  List --> Start["/workflow-start mr-comment input"]
   Start --> Doctor{delegated step cannot start?}
   Doctor -- yes --> SubDoctor["/subagents-doctor"]
   Doctor -- no --> Done[workflow running]

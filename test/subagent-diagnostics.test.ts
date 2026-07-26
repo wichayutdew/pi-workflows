@@ -43,6 +43,7 @@ function replayPolicy(
     runId: 'diagnostic-run',
     stepId: 'inspect',
     stepTitle: 'Inspect',
+    cwd: '/repository',
     policyDigest: 'a'.repeat(64),
     capabilityPath: join(directory, 'capability'),
     capabilityToken: 'b'.repeat(64),
@@ -77,7 +78,6 @@ function replayExpectation(
   return {
     task: persistedDelegationTask(policy),
     bashPermission: policy.permissions.bash,
-    approvedBashCommands: policy.approvedBashCommands ?? [],
   };
 }
 
@@ -186,6 +186,61 @@ function transcriptWithCompletion(): string {
   ].join('\n');
 }
 
+function transcriptWithBenignTerminalAssistant(): string {
+  return [
+    transcriptWithCompletion(),
+    JSON.stringify({
+      type: 'custom_message',
+      customType: 'subagent_runtime_state',
+      content: 'Completion recorded.',
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: '',
+            textSignature: '{"v":1,"phase":"final_answer"}',
+          },
+        ],
+        stopReason: 'stop',
+      },
+    }),
+  ].join('\n');
+}
+
+function transcriptWithPostCompletionWatchdogWarning(): string {
+  return [
+    transcriptWithCompletion(),
+    JSON.stringify({
+      type: 'custom_message',
+      customType: 'subagent_watchdog_warning',
+      content: 'Watchdog warning',
+      details: {
+        summary: 'Generated files changed outside the reported scope.',
+        evidence: 'The turn delta contains twelve unexpected paths.',
+        recommendedAction: 'Inspect and resolve the unexpected changes.',
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: '',
+            textSignature: '{"v":1,"phase":"final_answer"}',
+          },
+        ],
+        stopReason: 'stop',
+      },
+    }),
+  ].join('\n');
+}
+
 function transcriptWithSuccessfulOutputCompletion(): string {
   return [
     JSON.stringify({
@@ -289,6 +344,33 @@ describe('when testing subagent failure diagnostics', () => {
       completionValue: { outcome: 'done', summary: 'Recovered' },
       correlation: 'latest-before-completion',
     });
+    expect(
+      parseToolFailureDiagnostic(
+        transcriptWithBenignTerminalAssistant(),
+        'bash',
+        'bash failed (exit 1): unrelated terminal summary',
+      ),
+    ).toEqual({
+      tool: 'bash',
+      call: 'rg -n "class WorkflowHarness|constructor\\(" src/harness.ts',
+      output: 'substitutions and escapes are not allowed inside double quotes',
+      completionAfterFailure: true,
+      completionValue: { outcome: 'done', summary: 'Recovered' },
+      correlation: 'latest-before-completion',
+    });
+    expect(
+      parseToolFailureDiagnostic(
+        transcriptWithPostCompletionWatchdogWarning(),
+        'bash',
+        'bash failed (exit 1): unrelated terminal summary',
+      ),
+    ).toEqual({
+      tool: 'bash',
+      call: 'rg -n "class WorkflowHarness|constructor\\(" src/harness.ts',
+      output: 'substitutions and escapes are not allowed inside double quotes',
+      postCompletionWarning:
+        'Generated files changed outside the reported scope. The turn delta contains twelve unexpected paths. Recommended action: Inspect and resolve the unexpected changes.',
+    });
 
     const laterFailure = [
       transcriptWithCompletion(),
@@ -334,7 +416,7 @@ describe('when testing subagent failure diagnostics', () => {
   });
 
   test('does not mark an unknown-effect Bash transcript as replay-safe', () => {
-    const command = 'bun install --cwd /tmp/worktree --frozen-lockfile';
+    const command = 'package-tool check --project /tmp/project';
     const candidate = [
       JSON.stringify({
         type: 'message',
@@ -376,7 +458,10 @@ describe('when testing subagent failure diagnostics', () => {
   });
 
   test('audits the whole attempt before authorizing automatic recovery', () => {
-    const policy = replayPolicy({ mode: 'read-only', allow: [] });
+    const policy = replayPolicy({
+      mode: 'allow-list',
+      allow: [{ executable: 'rg', argsPrefix: [] }],
+    });
     const validReadAttempt = transcript().split('\n').slice(1).join('\n');
     expect(
       parseDelegationReplayAudit(
@@ -443,7 +528,7 @@ describe('when testing subagent failure diagnostics', () => {
               type: 'toolCall',
               id: 'install',
               name: 'bash',
-              arguments: { command: 'bun install' },
+              arguments: { command: 'package-tool install' },
             },
           ],
         },
@@ -458,7 +543,7 @@ describe('when testing subagent failure diagnostics', () => {
           content: [
             {
               type: 'text',
-              text: 'command does not match this step',
+              text: 'Bash is disabled for this workflow step',
             },
           ],
         },
@@ -485,19 +570,30 @@ describe('when testing subagent failure diagnostics', () => {
       replaySafe: true,
       toolCount: 1,
     });
-
-    const approvedPolicy = {
-      ...replayPolicy({
-        mode: 'allow-list',
-        allow: [],
-        approvedSources: ['verification-worker'],
-      }),
-      approvedBashCommands: ['bun install'],
-    } satisfies ChildStepPolicy;
     expect(
       parseDelegationReplayAudit(
-        boundTranscript(approvedPolicy, unknownEffect),
-        replayExpectation(approvedPolicy),
+        boundTranscript(
+          deniedPolicy,
+          unknownEffect.replace(
+            'Bash is disabled for this workflow step',
+            "command does not match this step's Bash allow-list",
+          ),
+        ),
+        replayExpectation(deniedPolicy),
+      ),
+    ).toEqual({
+      replaySafe: false,
+      toolCount: 1,
+    });
+
+    const allowListedPolicy = replayPolicy({
+      mode: 'allow-list',
+      allow: [{ executable: 'package-tool', argsPrefix: ['install'] }],
+    });
+    expect(
+      parseDelegationReplayAudit(
+        boundTranscript(allowListedPolicy, unknownEffect),
+        replayExpectation(allowListedPolicy),
       ),
     ).toEqual({
       replaySafe: false,
@@ -673,6 +769,7 @@ describe('when testing subagent failure diagnostics', () => {
     const sessionFile = join(runDirectory, 'session.jsonl');
     const siblingDirectory = join(trustedRoot!, 'sibling-run', 'run-0');
     const siblingSession = join(siblingDirectory, 'session.jsonl');
+    const redirectedRun = join(trustedRoot!, 'redirected-run');
     const outsideDirectory = join(directory, 'outside', 'run-0');
     const outsideSession = join(outsideDirectory, 'session.jsonl');
     const symlinkDirectory = join(trustedRoot!, 'child-run', 'run-1');
@@ -687,6 +784,7 @@ describe('when testing subagent failure diagnostics', () => {
         siblingSession,
         transcript().replaceAll('rg -n', 'SIBLING_SECRET'),
       );
+      await symlink(join(trustedRoot!, 'sibling-run'), redirectedRun);
       await writeFile(
         outsideSession,
         transcript().replaceAll('rg -n', 'SECRET'),
@@ -731,7 +829,7 @@ describe('when testing subagent failure diagnostics', () => {
           },
         ),
       ).toMatchObject({ tool: 'bash' });
-      expect(fileSystemCalls).toHaveLength(4);
+      expect(fileSystemCalls).toHaveLength(6);
       expect(
         await readDelegationReplayAudit(
           sessionFile,
@@ -774,6 +872,14 @@ describe('when testing subagent failure diagnostics', () => {
           siblingSession,
           trustedRoot,
           identity,
+          'bash',
+        ),
+      ).toBe(undefined);
+      expect(
+        await readToolFailureDiagnostic(
+          join(redirectedRun, 'run-0', 'session.jsonl'),
+          trustedRoot,
+          { runId: 'redirected-run', childIndex: 0 },
           'bash',
         ),
       ).toBe(undefined);
@@ -926,13 +1032,13 @@ describe('when testing subagent failure diagnostics', () => {
     expect(
       formatToolFailureDiagnostic({
         tool: 'bash',
-        call: 'git worktree list',
-        output: 'git subcommand "worktree" is not read-only',
+        call: 'package-tool inspect',
+        output: 'command does not match this step allow-list',
       }),
     ).toEqual([
       'Failed tool: bash',
-      'Command: git worktree list',
-      'Tool error: git subcommand "worktree" is not read-only',
+      'Command: package-tool inspect',
+      'Tool error: command does not match this step allow-list',
     ]);
     expect(
       formatToolFailureDiagnostic({

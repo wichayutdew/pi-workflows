@@ -25,6 +25,7 @@ describe('when testing subagent protocol', () => {
       runId: 'run-1',
       stepId: 'inspect',
       stepTitle: 'Inspect',
+      cwd: '/repository',
       policyDigest: 'a'.repeat(64),
       capabilityPath: join(directory, 'capability'),
       capabilityToken: 'c'.repeat(64),
@@ -34,12 +35,19 @@ describe('when testing subagent protocol', () => {
         mcp: ['gitlab/get_merge_request'],
         extensions: [],
         skills: ['planning'],
-        bash: { mode: 'read-only', allow: [] },
+        bash: {
+          mode: 'allow-list',
+          allow: [{ executable: 'git', argsPrefix: ['status'] }],
+        },
       },
-      outcomes: ['ready', 'blocked', 'submit'],
+      outcomes: ['ready', 'blocked', 'submit', 'bound'],
       pauseOutcomes: ['blocked'],
       summaryMaxChars: 500,
       gateSubmitOutcome: 'submit',
+      workspace: {
+        bindOn: ['bound'],
+        allowedRoots: ['../worktrees'],
+      },
     };
     try {
       await run(policy);
@@ -174,6 +182,35 @@ describe('when testing subagent protocol', () => {
             policy,
           ),
         ).toThrow(/must not be empty/);
+        expect(
+          parseDelegatedStepResult(
+            {
+              version: 1,
+              policyDigest: policy.policyDigest,
+              outcome: 'bound',
+              summary: 'prepared',
+              workspace: { cwd: '/tmp/worktree' },
+            },
+            policy,
+          ),
+        ).toEqual({
+          version: 1,
+          policyDigest: policy.policyDigest,
+          outcome: 'bound',
+          summary: 'prepared',
+          workspace: { cwd: '/tmp/worktree' },
+        });
+        expect(() =>
+          parseDelegatedStepResult(
+            {
+              version: 1,
+              policyDigest: policy.policyDigest,
+              outcome: 'bound',
+              summary: 'prepared',
+            },
+            policy,
+          ),
+        ).toThrow(/requires workspace\.cwd/);
       });
     });
 
@@ -191,6 +228,8 @@ describe('when testing subagent protocol', () => {
           [null, /must be an object/],
           [{ ...policy, extra: true }, /unknown property/],
           [{ ...policy, requestId: '' }, /requestId must be/],
+          [{ ...policy, cwd: '' }, /cwd must be/],
+          [{ ...policy, cwd: 'relative/path' }, /cwd must be an absolute path/],
           [{ ...policy, version: 2 }, /unsupported child policy version/],
           [{ ...policy, policyDigest: 'bad' }, /digest is invalid/],
           [{ ...policy, agent: 'Bad Agent' }, /runtime name/],
@@ -208,26 +247,6 @@ describe('when testing subagent protocol', () => {
             /must share one temporary directory/,
           ],
           [{ ...policy, permissions: {} }, /permissions are invalid/],
-          [
-            { ...policy, approvedBashCommands: ['same', 'same'] },
-            /approved Bash commands/,
-          ],
-          [
-            { ...policy, repositoryCwd: 'relative/repository' },
-            /repository cwd is invalid/,
-          ],
-          [
-            { ...policy, bootstrapCwd: join(tmpdir(), 'source') },
-            /bootstrap cwd is invalid/,
-          ],
-          [
-            {
-              ...policy,
-              repositoryCwd: join(tmpdir(), 'same'),
-              bootstrapCwd: join(tmpdir(), 'same'),
-            },
-            /bootstrap cwd is invalid/,
-          ],
           [{ ...policy, outcomes: [] }, /outcomes are invalid/],
           [
             { ...policy, pauseOutcomes: ['missing'] },
@@ -235,6 +254,60 @@ describe('when testing subagent protocol', () => {
           ],
           [{ ...policy, summaryMaxChars: 1 }, /summaryMaxChars/],
           [{ ...policy, gateSubmitOutcome: 'missing' }, /gate outcome/],
+          [
+            {
+              ...policy,
+              workspace: {
+                bindOn: ['missing'],
+                allowedRoots: ['../worktrees'],
+              },
+            },
+            /workspace bindOn outcomes are invalid/,
+          ],
+          [
+            {
+              ...policy,
+              workspace: {
+                bindOn: ['bound'],
+                allowedRoots: ['/tmp/worktrees'],
+              },
+            },
+            /workspace allowed roots are invalid/,
+          ],
+          [
+            {
+              ...policy,
+              workspace: {
+                bindOn: ['bound'],
+                allowedRoots: ['C:..\\outside'],
+              },
+            },
+            /workspace allowed roots are invalid/,
+          ],
+          [
+            {
+              ...policy,
+              workspace: {
+                bindOn: ['bound'],
+                allowedRoots: Array.from(
+                  { length: 33 },
+                  (_, index) => `../worktrees-${index}`,
+                ),
+              },
+            },
+            /workspace allowed roots are invalid/,
+          ],
+          [
+            {
+              ...policy,
+              workspace: {
+                bindOn: ['bound'],
+                allowedRoots: ['../worktrees'],
+                extra: true,
+              },
+            },
+            /workspace is invalid/,
+          ],
         ];
 
         // when
@@ -270,26 +343,24 @@ describe('when testing subagent protocol', () => {
           },
         };
         expect(extract(allowListPolicy)?.policy).toEqual(allowListPolicy);
-        const approvedSourcePolicy: ChildStepPolicy = {
-          ...allowListPolicy,
-          permissions: {
-            ...allowListPolicy.permissions,
-            bash: {
-              mode: 'allow-list',
-              allow: [],
-              approvedSources: ['verification-worker'],
+        expect(() =>
+          extract({
+            ...allowListPolicy,
+            permissions: {
+              ...allowListPolicy.permissions,
+              bash: {
+                ...allowListPolicy.permissions.bash,
+                approvedSources: ['verification-worker'],
+              },
             },
-          },
-        };
-        expect(extract(approvedSourcePolicy)?.policy).toEqual(
-          approvedSourcePolicy,
-        );
-        const rootedPolicy: ChildStepPolicy = {
-          ...policy,
-          repositoryCwd: join(tmpdir(), 'reviewed-repository'),
-          bootstrapCwd: join(tmpdir(), 'reviewed-source'),
-        };
-        expect(extract(rootedPolicy)?.policy).toEqual(rootedPolicy);
+          } as unknown as ChildStepPolicy),
+        ).toThrow(/permissions are invalid/);
+        expect(() =>
+          extract({
+            ...policy,
+            repositoryCwd: join(tmpdir(), 'reviewed-repository'),
+          } as unknown as ChildStepPolicy),
+        ).toThrow(/unknown property "repositoryCwd"/);
         await rm(otherDirectory, { recursive: true, force: true });
       });
     });

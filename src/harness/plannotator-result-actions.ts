@@ -9,6 +9,7 @@ import {
   PLANNOTATOR_RESULT_CHANNEL,
 } from '../integrations/plannotator.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import { reportFailedStep } from './step-reporting.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -85,31 +86,39 @@ async function handlePlannotatorResult(
 
   const workflow = this.catalog.workflows.get(this.run.workflowId);
   if (!workflow) {
-    this.run = failRun(
-      this.run,
-      'Gate result arrived, but workflow configuration is unavailable',
-      this.dependencies.now(),
-    );
+    const reason =
+      'Gate result arrived, but workflow configuration is unavailable';
+    this.run = failRun(this.run, reason, this.dependencies.now());
     this.persist();
+    reportFailedStep(this.pi, undefined, this.run, reason);
     this.restoreBaselineTools();
     this.updateStatus();
     return;
   }
   try {
+    const stepId = this.run.currentStepId;
+    const gate = workflow.definition.steps[stepId]?.gate;
+    if (!gate) throw new Error(`gated step "${stepId}" no longer exists`);
     this.run = resolveGate(
       workflow,
       this.run,
       resolution,
       this.dependencies.now(),
     );
-    this.settleAfterTransition(workflow);
+    this.settleAfterTransition(workflow, {
+      stepId,
+      outcome: resolution.approved
+        ? gate.approvedOutcome
+        : gate.rejectedOutcome,
+      summary: this.run.lastSummary,
+    });
   } catch (error) {
-    this.run = failRun(
-      this.run,
-      `Cannot apply gate result: ${error instanceof Error ? error.message : String(error)}`,
-      this.dependencies.now(),
-    );
+    const reason = `Cannot apply gate result: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    this.run = failRun(this.run, reason, this.dependencies.now());
     this.persist();
+    reportFailedStep(this.pi, workflow, this.run, reason);
     this.restoreBaselineTools();
     this.updateStatus();
   }

@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { SUBAGENT_RUNTIME_NAME_PATTERN } from '../../config/types.ts';
 import {
   DEFAULT_CHILD_POLICY_ENVIRONMENT,
@@ -19,18 +19,17 @@ const POLICY_KEYS: ReadonlySet<string> = new Set([
   'runId',
   'stepId',
   'stepTitle',
+  'cwd',
   'policyDigest',
   'capabilityPath',
   'capabilityToken',
   'resultPath',
   'permissions',
-  'approvedBashCommands',
-  'repositoryCwd',
-  'bootstrapCwd',
   'outcomes',
   'pauseOutcomes',
   'summaryMaxChars',
   'gateSubmitOutcome',
+  'workspace',
 ]);
 
 type RequiredStringField =
@@ -40,6 +39,7 @@ type RequiredStringField =
   | 'runId'
   | 'stepId'
   | 'stepTitle'
+  | 'cwd'
   | 'policyDigest'
   | 'capabilityPath'
   | 'capabilityToken'
@@ -85,6 +85,7 @@ type IdentityAndPaths = Pick<
   | 'runId'
   | 'stepId'
   | 'stepTitle'
+  | 'cwd'
   | 'policyDigest'
   | 'capabilityPath'
   | 'capabilityToken'
@@ -101,12 +102,16 @@ const parseIdentityAndPaths = (
   const runId = requiredString(value, 'runId');
   const stepId = requiredString(value, 'stepId');
   const stepTitle = requiredString(value, 'stepTitle');
+  const cwd = requiredString(value, 'cwd');
   const policyDigest = requiredString(value, 'policyDigest');
   const capabilityPath = requiredString(value, 'capabilityPath');
   const capabilityToken = requiredString(value, 'capabilityToken');
   const resultPath = requiredString(value, 'resultPath');
 
   if (value.version !== 1) throw new Error('unsupported child policy version');
+  if (!isAbsolute(cwd)) {
+    throw new Error('child policy cwd must be an absolute path');
+  }
   if (!POLICY_DIGEST_PATTERN.test(policyDigest)) {
     throw new Error('child policy digest is invalid');
   }
@@ -137,6 +142,7 @@ const parseIdentityAndPaths = (
     runId,
     stepId,
     stepTitle,
+    cwd,
     policyDigest,
     capabilityPath,
     capabilityToken,

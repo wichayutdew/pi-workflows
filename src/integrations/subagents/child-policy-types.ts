@@ -1,4 +1,7 @@
-import type { StepPermissions } from '../../config/types.ts';
+import type {
+  StepPermissions,
+  StepWorkspaceBinding,
+} from '../../config/types.ts';
 
 export type ChildStepPolicy = {
   readonly version: 1;
@@ -8,22 +11,19 @@ export type ChildStepPolicy = {
   readonly runId: string;
   readonly stepId: string;
   readonly stepTitle: string;
+  /** Effective run directory: the captured start cwd or accepted binding. */
+  readonly cwd: string;
   readonly policyDigest: string;
   readonly capabilityPath: string;
   readonly capabilityToken: string;
   readonly resultPath: string;
   readonly permissions: StepPermissions;
-  /** Exact Bash command strings extracted from a reviewed gate artifact. */
-  readonly approvedBashCommands?: ReadonlyArray<string>;
-  /** Reviewed repository root that file mutations must remain inside. */
-  readonly repositoryCwd?: string;
-  /** Existing reviewed source directory used only to bootstrap repositoryCwd. */
-  readonly bootstrapCwd?: string;
   readonly outcomes: ReadonlyArray<string>;
   /** Outcomes that pause instead of advancing to another workflow step. */
   readonly pauseOutcomes: ReadonlyArray<string>;
   readonly summaryMaxChars: number;
   readonly gateSubmitOutcome?: string;
+  readonly workspace?: StepWorkspaceBinding;
 };
 
 export type ExtractedChildPolicy = {

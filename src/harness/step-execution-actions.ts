@@ -1,16 +1,22 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { LoadedWorkflow, WorkflowStep } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
+import {
+  appendMainStepLog,
+  beginMainStepAttempt,
+  beginSubagentStepAttempt,
+  recordCurrentStepResult,
+} from '../engine/step-trace.ts';
 import { advanceRun, allowedOutcomes } from '../engine/transitions.ts';
 import { digest } from '../digest.ts';
 import type { SubagentDelegationResponse } from '../integrations/subagents/protocol.ts';
 import { buildMainStepTask } from '../prompt.ts';
-import { narrowApprovedBashCommands } from '../policy/approved-commands.ts';
 import type { MainStepExecution } from '../runtime/main-step-runtime.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { createDelegationPlan } from './delegation-plan.ts';
 import type { DelegationRecovery, MainStepIdentity } from './types.ts';
+import { resolveStepEffects } from './step-effects.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -25,10 +31,13 @@ type HarnessActionContext = Pick<
   | 'mainSteps'
   | 'mutationQueue'
   | 'pauseForExecutionFailure'
+  | 'persist'
   | 'pi'
   | 'queueDelegationFailure'
   | 'queueDelegationResponse'
+  | 'queueMainStepLog'
   | 'queueMainStepResult'
+  | 'recordMainStepLog'
   | 'run'
   | 'sessionEpoch'
   | 'settleAfterTransition'
@@ -49,6 +58,18 @@ export type StepExecutionActions = {
     run: WorkflowRun,
     step: WorkflowStep,
   ) => void;
+  queueMainStepLog: (
+    this: HarnessActionContext,
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void>;
+  recordMainStepLog: (
+    this: HarnessActionContext,
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void>;
   queueMainStepResult: (
     this: HarnessActionContext,
     identity: MainStepIdentity,
@@ -107,6 +128,18 @@ function launchCurrentStep(
   }
   const { active, request } = plan;
 
+  try {
+    this.run = beginSubagentStepAttempt(
+      run,
+      active.requestId,
+      active.agent,
+      active.transcriptTask,
+      this.dependencies.now(),
+    );
+    this.persist();
+  } catch {
+    // Status evidence is best-effort and must never block step execution.
+  }
   this.activeDelegation = active;
   this.updateStatus();
   this.latestContext?.ui.notify(
@@ -149,17 +182,38 @@ function launchMainStep(
   run: WorkflowRun,
   step: WorkflowStep,
 ): void {
-  const approvedBashCommands = narrowApprovedBashCommands(
-    run.reviewedArtifact ?? '',
-    run.stepHandoff ?? '',
-    step.permissions.bash.approvedSources ?? [],
-  );
-  const identity: MainStepIdentity = {
-    runId: run.runId,
-    stepId: run.currentStepId,
-    stepDigest: run.currentStepDigest,
-    sessionEpoch: this.sessionEpoch,
-  };
+  const actualCwd = this.latestContext?.cwd;
+  if (!run.cwd || !actualCwd) {
+    this.pauseForExecutionFailure(
+      'Main-agent step',
+      'Workflow working directory is unavailable; abort it and start a new run',
+    );
+    return;
+  }
+  try {
+    const expectedCanonicalCwd = this.dependencies.resolveWorkspaceDirectory({
+      candidateCwd: run.cwd,
+      startCwd: run.cwd,
+      allowedRoots: ['.'],
+    });
+    const actualCanonicalCwd = this.dependencies.resolveWorkspaceDirectory({
+      candidateCwd: actualCwd,
+      startCwd: actualCwd,
+      allowedRoots: ['.'],
+    });
+    if (actualCanonicalCwd !== expectedCanonicalCwd) {
+      throw new Error(
+        `current session cwd "${actualCwd}" does not match captured workflow cwd "${run.cwd}"`,
+      );
+    }
+  } catch (error) {
+    this.pauseForExecutionFailure(
+      'Main-agent step',
+      error instanceof Error ? error.message : String(error),
+    );
+    return;
+  }
+
   const policyDigest = digest({
     version: 1,
     execution: 'main',
@@ -168,32 +222,52 @@ function launchMainStep(
     stepId: run.currentStepId,
     stepDigest: run.currentStepDigest,
     permissions: step.permissions,
-    approvedBashCommands,
     nonce: this.dependencies.createRequestId(),
   });
+  const task = buildMainStepTask(workflow, run);
+  const identity: MainStepIdentity = {
+    requestId: policyDigest,
+    runId: run.runId,
+    stepId: run.currentStepId,
+    stepDigest: run.currentStepDigest,
+    sessionEpoch: this.sessionEpoch,
+  };
   const execution: MainStepExecution = {
     workflowId: workflow.definition.id,
     runId: run.runId,
     stepId: run.currentStepId,
     stepDigest: run.currentStepDigest,
     policyDigest,
+    task,
     step: structuredClone(step),
-    approvedBashCommands,
     outcomes: allowedOutcomes(workflow, run),
     summaryMaxChars: workflow.definition.summaryMaxChars,
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
+    onTrace: (lines, context) =>
+      this.queueMainStepLog(identity, lines, context),
     onSettled: (result, context) =>
       this.queueMainStepResult(identity, result, context),
   };
 
   try {
+    try {
+      this.run = beginMainStepAttempt(
+        run,
+        policyDigest,
+        task,
+        this.dependencies.now(),
+      );
+      this.persist();
+    } catch {
+      // Status evidence is best-effort and must never block step execution.
+    }
     this.mainSteps.activate(execution);
     this.updateStatus();
     this.latestContext?.ui.notify(
       `Started "${run.currentStepId}" in the main agent`,
       'info',
     );
-    this.pi.sendUserMessage(buildMainStepTask(workflow, run), {
+    this.pi.sendUserMessage(task, {
       deliverAs: 'followUp',
     });
   } catch (error) {
@@ -203,6 +277,73 @@ function launchMainStep(
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+function hasCurrentMainStepIdentity(
+  context: HarnessActionContext,
+  identity: MainStepIdentity,
+): context is HarnessActionContext & { run: WorkflowRun } {
+  return (
+    context.isSessionActive &&
+    context.sessionEpoch === identity.sessionEpoch &&
+    context.run?.status === 'running' &&
+    context.run.runId === identity.runId &&
+    context.run.currentStepId === identity.stepId &&
+    context.run.currentStepDigest === identity.stepDigest
+  );
+}
+
+function matchesLatestMainStepAttempt(
+  run: WorkflowRun,
+  identity: MainStepIdentity,
+): boolean {
+  const attempt = run.currentStepAttempts?.at(-1);
+  return (
+    attempt === undefined ||
+    (attempt.kind === 'main' && attempt.requestId === identity.requestId)
+  );
+}
+
+function queueMainStepLog(
+  this: HarnessActionContext,
+  identity: MainStepIdentity,
+  lines: ReadonlyArray<string>,
+  context: ExtensionContext,
+): Promise<void> {
+  return this.mutationQueue
+    .run(() => this.recordMainStepLog(identity, lines, context))
+    .catch(() => {
+      // Status evidence is best-effort and must never pause step execution.
+    });
+}
+
+async function recordMainStepLog(
+  this: HarnessActionContext,
+  identity: MainStepIdentity,
+  lines: ReadonlyArray<string>,
+  context: ExtensionContext,
+): Promise<void> {
+  if (
+    !hasCurrentMainStepIdentity(this, identity) ||
+    !matchesLatestMainStepAttempt(this.run, identity)
+  ) {
+    return;
+  }
+  const attempt = this.run.currentStepAttempts?.at(-1);
+  if (attempt?.kind !== 'main' || attempt.requestId !== identity.requestId) {
+    return;
+  }
+  this.latestContext = context;
+  const traced = appendMainStepLog(
+    this.run,
+    identity.requestId,
+    lines,
+    this.dependencies.now(),
+  );
+  if (traced === this.run) return;
+  this.run = traced;
+  this.persist();
+  this.updateStatus();
 }
 
 function queueMainStepResult(
@@ -227,18 +368,13 @@ async function finishMainStep(
   result: WorkflowStepResult | undefined,
   context: ExtensionContext,
 ): Promise<void> {
-  this.latestContext = context;
   if (
-    !this.isSessionActive ||
-    this.sessionEpoch !== identity.sessionEpoch ||
-    !this.run ||
-    this.run.status !== 'running' ||
-    this.run.runId !== identity.runId ||
-    this.run.currentStepId !== identity.stepId ||
-    this.run.currentStepDigest !== identity.stepDigest
+    !hasCurrentMainStepIdentity(this, identity) ||
+    !matchesLatestMainStepAttempt(this.run, identity)
   ) {
     return;
   }
+  this.latestContext = context;
   if (!result) {
     throw new Error(
       'agent settled without calling workflow_complete_step exactly once',
@@ -251,23 +387,41 @@ async function finishMainStep(
     throw new Error('Active workflow configuration is unavailable');
   }
   if (step.gate?.submitOutcome === result.outcome) {
+    this.run = recordCurrentStepResult(
+      this.run,
+      result,
+      this.dependencies.now(),
+    );
     await this.submitGate(
       workflow,
       this.run,
       result.outcome,
+      result.summary,
       result.artifact ?? '',
     );
     return;
   }
 
+  const effects = resolveStepEffects(this.run, step, result, this.dependencies);
+  const tracedRun = recordCurrentStepResult(
+    this.run,
+    result,
+    this.dependencies.now(),
+    effects.workspaceCwd,
+  );
   this.run = advanceRun(
     workflow,
-    this.run,
+    tracedRun,
     result.outcome,
     result.summary,
     this.dependencies.now(),
+    effects,
   );
-  this.settleAfterTransition(workflow);
+  this.settleAfterTransition(workflow, {
+    stepId: identity.stepId,
+    outcome: result.outcome,
+    summary: result.summary,
+  });
 }
 
 /**
@@ -277,6 +431,8 @@ export function createStepExecutionActions(): StepExecutionActions {
   return {
     launchCurrentStep,
     launchMainStep,
+    queueMainStepLog,
+    recordMainStepLog,
     queueMainStepResult,
     finishMainStep,
   };

@@ -10,6 +10,7 @@ import type { WorkflowRun } from './state-types.ts';
  * @param baselineTools - Tool names available before workflow restrictions.
  * @param runId - Stable run identifier.
  * @param now - Creation timestamp.
+ * @param cwd - Canonical working directory captured at workflow start.
  * @returns A new running workflow state.
  */
 export const createRun = (
@@ -18,6 +19,7 @@ export const createRun = (
   baselineTools: ReadonlyArray<string>,
   runId: string,
   now: number,
+  cwd?: string,
 ): WorkflowRun => {
   const startStepId = workflow.definition.start;
   return {
@@ -36,6 +38,7 @@ export const createRun = (
     updatedAt: now,
     reviewedArtifact: '',
     reviewedFeedback: '',
+    ...(cwd ? { startCwd: cwd, cwd } : {}),
     stepHandoff: '',
     lastSummary: '',
     gateFeedback: '',

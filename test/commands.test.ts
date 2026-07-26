@@ -35,9 +35,10 @@ describe('when testing commands', () => {
       const controller: WorkflowCommandController = {
         workflowIds: () => ['deploy', 'demo'],
         list: async () => void calls.push(['list']),
+        doctor: async (id) => void calls.push(['doctor', id]),
         start: async (id, input) => void calls.push(['start', id, input]),
         pause: async (reason) => void calls.push(['pause', reason]),
-        resume: async () => void calls.push(['resume']),
+        resume: async (input) => void calls.push(['resume', input]),
         abort: async (reason) => void calls.push(['abort', reason]),
         reload: async () => void calls.push(['reload']),
       };
@@ -66,13 +67,25 @@ describe('when testing commands', () => {
       expect(
         commands.get('workflow-start')?.getArgumentCompletions?.('x'),
       ).toBe(null);
+      expect(
+        commands.get('workflow-doctor')?.getArgumentCompletions?.('de'),
+      ).toEqual([
+        { value: 'deploy', label: 'deploy' },
+        { value: 'demo', label: 'demo' },
+      ]);
+      expect(
+        commands.get('workflow-doctor')?.getArgumentCompletions?.('x'),
+      ).toBe(null);
       await commands
         .get('workflow-start')!
         .handler('  deploy  --dry-run ', context);
       await commands.get('workflow-start')!.handler('   ', context);
       await commands.get('workflow-list')!.handler('', context);
+      await commands.get('workflow-doctor')!.handler('  demo  ', context);
       await commands.get('workflow-pause')!.handler('  later  ', context);
-      await commands.get('workflow-resume')!.handler('', context);
+      await commands
+        .get('workflow-resume')!
+        .handler('  use the existing cache  ', context);
       await commands.get('workflow-abort')!.handler('  stop  ', context);
       await commands.get('workflow-reload')!.handler('', context);
 
@@ -80,8 +93,9 @@ describe('when testing commands', () => {
         ['start', 'deploy', '--dry-run'],
         ['notify', 'Usage: /workflow-start <id> [input]', 'warning'],
         ['list'],
+        ['doctor', 'demo'],
         ['pause', 'later'],
-        ['resume'],
+        ['resume', 'use the existing cache'],
         ['abort', 'stop'],
         ['reload'],
       ]);

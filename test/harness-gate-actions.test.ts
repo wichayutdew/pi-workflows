@@ -51,6 +51,7 @@ function awaitingGateRun(
     '# Plan',
     'gate-request',
     2,
+    'Plan ready',
   );
   if (reviewId) run = attachGateReviewId(run, reviewId, 3);
   return run;
@@ -167,6 +168,7 @@ describe('when testing gate actions', () => {
         workflow,
         originalRun,
         'submit',
+        'Plan ready',
         '# Plan',
       ),
     ).rejects.toThrow('Plannotator is offline');
@@ -198,6 +200,7 @@ describe('when testing gate actions', () => {
         workflow,
         originalRun,
         'submit',
+        'Plan ready',
         '# Plan',
       ),
     ).rejects.toThrow('superseded');

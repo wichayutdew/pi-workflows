@@ -25,6 +25,7 @@ export function completionMatchesResult(
     'outcome',
     'summary',
     ...(result.artifact === undefined ? [] : ['artifact']),
+    ...(result.workspace === undefined ? [] : ['workspace']),
   ].sort();
   const actualKeys = Object.keys(value).sort();
   if (
@@ -45,7 +46,8 @@ export function completionMatchesResult(
     return (
       completion.outcome === result.outcome &&
       completion.summary === result.summary &&
-      completion.artifact === result.artifact
+      completion.artifact === result.artifact &&
+      completion.workspace?.cwd === result.workspace?.cwd
     );
   } catch {
     return false;

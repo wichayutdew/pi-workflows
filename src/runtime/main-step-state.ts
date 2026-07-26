@@ -14,6 +14,8 @@ export function createMainStepRuntimeState(): MainStepRuntimeState {
     active: undefined,
     pendingResult: undefined,
     invalidCompletionCalls: new Set(),
+    traceArmed: false,
+    traceClosed: false,
     isSuspended: false,
   };
 }
@@ -43,6 +45,8 @@ export function activateMainStep({
   state.active = execution;
   state.pendingResult = undefined;
   state.invalidCompletionCalls = new Set();
+  state.traceArmed = false;
+  state.traceClosed = false;
 }
 
 /**
@@ -56,6 +60,8 @@ export function deactivateMainStep(state: MainStepRuntimeState): boolean {
   state.active = undefined;
   state.pendingResult = undefined;
   state.invalidCompletionCalls = new Set();
+  state.traceArmed = false;
+  state.traceClosed = false;
   return wasActive;
 }
 

@@ -1,4 +1,5 @@
 export {
+  formatWorkflowProgressStatus,
   formatWorkflowStatusBoard,
   formatWorkflowStatusText,
 } from './workflow-status/format-status.ts';
@@ -14,7 +15,12 @@ export {
 export type {
   SnapshotProvider,
   StatusViewTui,
+  StepTranscriptLoader,
   WorkflowStatusExecution,
   WorkflowStatusSnapshot,
   WorkflowStatusTheme,
 } from './workflow-status/types.ts';
+export {
+  readStepTranscript,
+  type StepTranscriptLog,
+} from './workflow-status/transcript-reader.ts';

@@ -8,7 +8,13 @@ permissionCeiling:
   extensions: []
   skills: []
   bash:
-    mode: read-only
+    mode: allow-list
+    allow:
+      - executable: git
+        argsPrefixes:
+          [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+      - executable: rg
+        argsPrefix: []
   subagent:
     agents: [scout, planner, worker, reviewer]
     contexts: [fresh]

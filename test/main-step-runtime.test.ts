@@ -55,8 +55,10 @@ describe('when testing main step runtime', () => {
         stepId: 'step',
         stepDigest: 'step-digest',
         policyDigest: 'policy-digest',
+        task: 'Do exact work',
         outcomes: ['done'],
         summaryMaxChars: 20,
+        workspace: { bindOn: ['done'], allowedRoots: ['.'] },
         step: {
           title: 'Step',
           prompt: { inline: 'Do work' },
@@ -69,8 +71,9 @@ describe('when testing main step runtime', () => {
           },
           requires: { tools: [], extensions: [], skills: [] },
           transitions: { done: '$done' },
+          workspace: { bindOn: ['done'], allowedRoots: ['.'] },
         },
-        approvedBashCommands: [],
+        onTrace: () => undefined,
         onSettled: (result) => {
           settled.push(result);
         },
@@ -121,6 +124,7 @@ describe('when testing main step runtime', () => {
       const result = await completion!.execute('complete-1', {
         outcome: 'done',
         summary: ' finished ',
+        workspace: { cwd: '/tmp/worktree' },
       });
       expect(result).toEqual({
         content: [
@@ -141,9 +145,219 @@ describe('when testing main step runtime', () => {
           policyDigest: 'policy-digest',
           outcome: 'done',
           summary: 'finished',
+          workspace: { cwd: '/tmp/worktree' },
         },
       ]);
       expect(runtime.activeStepId).toBe(undefined);
+    });
+
+    test('main step trace arms on its exact task, captures ordered safe turns, and closes after completion', async () => {
+      const handlers = new Map<string, Handler>();
+      let completion:
+        | {
+            execute: (
+              id: string,
+              params: Record<string, unknown>,
+            ) => Promise<unknown>;
+          }
+        | undefined;
+      const availableTools = [
+        { name: 'read', sourceInfo: { source: 'builtin' } },
+      ];
+      const pi = {
+        on(name: string, handler: Handler) {
+          handlers.set(name, handler);
+        },
+        registerTool(tool: typeof completion) {
+          completion = tool;
+          availableTools.push({
+            name: WORKFLOW_COMPLETION_TOOL,
+            sourceInfo: { source: 'extension' },
+          });
+        },
+        getAllTools: () => availableTools,
+        getActiveTools: () => ['read'],
+        setActiveTools() {},
+      } as unknown as ExtensionAPI;
+      const turns: Array<ReadonlyArray<string>> = [];
+      const runtime = new MainStepRuntime(pi);
+      runtime.activate({
+        workflowId: 'workflow',
+        runId: 'run',
+        stepId: 'step',
+        stepDigest: 'digest',
+        policyDigest: 'policy',
+        task: 'Exact workflow task',
+        outcomes: ['done'],
+        summaryMaxChars: 100,
+        step: {
+          title: 'Step',
+          prompt: { inline: 'Do work' },
+          permissions: {
+            tools: ['read'],
+            extensions: [],
+            mcp: [],
+            skills: [],
+            bash: { mode: 'deny', allow: [] },
+          },
+          requires: { tools: [], extensions: [], skills: [] },
+          transitions: { done: '$done' },
+        },
+        onTrace: (lines) => {
+          turns.push(lines);
+          if (
+            lines.some((line) =>
+              line.startsWith(`tool call · ${WORKFLOW_COMPLETION_TOOL}`),
+            )
+          ) {
+            throw new Error('simulated trace checkpoint failure');
+          }
+        },
+        onSettled: () => undefined,
+      });
+
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'unrelated parent response' }],
+          },
+          toolResults: [],
+        },
+        {},
+      );
+      handlers.get('message_end')!({
+        message: { role: 'user', content: 'Different user message' },
+      });
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'still unrelated' }],
+          },
+          toolResults: [],
+        },
+        {},
+      );
+      expect(turns).toEqual([]);
+
+      handlers.get('message_end')!({
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'Exact workflow task' }],
+        },
+      });
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'private reasoning' },
+              {
+                type: 'text',
+                text: 'Inspect with Authorization: Bearer assistant-secret',
+              },
+              {
+                type: 'toolCall',
+                id: 'read-1',
+                name: 'read',
+                arguments: {
+                  path: 'README.md',
+                  password: 'argument-secret',
+                },
+              },
+            ],
+          },
+          toolResults: [
+            {
+              role: 'toolResult',
+              toolCallId: 'read-1',
+              toolName: 'read',
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: 'authorization=tool-result-secret',
+                },
+              ],
+            },
+          ],
+        },
+        {},
+      );
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage:
+              'Retry failed with Authorization: Bearer retry-secret',
+          },
+          toolResults: [],
+        },
+        {},
+      );
+
+      await completion!.execute('complete', {
+        outcome: 'done',
+        summary: 'finished',
+      });
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'complete',
+                name: WORKFLOW_COMPLETION_TOOL,
+                arguments: { outcome: 'done', summary: 'finished' },
+              },
+            ],
+          },
+          toolResults: [
+            {
+              role: 'toolResult',
+              toolCallId: 'complete',
+              toolName: WORKFLOW_COMPLETION_TOOL,
+              isError: false,
+              content: [{ type: 'text', text: 'Captured outcome' }],
+            },
+          ],
+        },
+        {},
+      );
+      await handlers.get('turn_end')!(
+        {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'queued unrelated continuation' }],
+          },
+          toolResults: [],
+        },
+        {},
+      );
+
+      expect(turns).toHaveLength(3);
+      expect(turns[0]?.map((line) => line.split('\n')[0])).toEqual([
+        'assistant',
+        'tool call · read',
+        'tool error · read',
+      ]);
+      expect(turns[1]?.[0]).toMatch(/^assistant error\nRetry failed/);
+      expect(turns[2]?.map((line) => line.split('\n')[0])).toEqual([
+        `tool call · ${WORKFLOW_COMPLETION_TOOL}`,
+        `tool result · ${WORKFLOW_COMPLETION_TOOL}`,
+      ]);
+      const output = turns.flat().join('\n');
+      expect(output).toContain('[redacted]');
+      expect(output).not.toContain('private reasoning');
+      expect(output).not.toContain('assistant-secret');
+      expect(output).not.toContain('argument-secret');
+      expect(output).not.toContain('tool-result-secret');
+      expect(output).not.toContain('retry-secret');
+      expect(output).not.toContain('queued unrelated continuation');
     });
 
     test('suspending blocks tools until released and lifecycle reset restores ordinary tools', () => {
@@ -169,6 +383,7 @@ describe('when testing main step runtime', () => {
         stepId: 'step',
         stepDigest: 'digest',
         policyDigest: 'policy',
+        task: 'Do exact work',
         outcomes: ['done'],
         summaryMaxChars: 20,
         step: {
@@ -184,7 +399,7 @@ describe('when testing main step runtime', () => {
           requires: { tools: [], extensions: [], skills: [] },
           transitions: { done: '$done' },
         },
-        approvedBashCommands: [],
+        onTrace: () => undefined,
         onSettled: () => undefined,
       });
       // then

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { createRun, isWorkflowRun } from '../src/engine/state.ts';
+import {
+  createRun,
+  isWorkflowRun,
+  MAX_RESUME_INPUT_CHARS,
+} from '../src/engine/state.ts';
 import {
   advanceRun,
   abortRun,
@@ -10,6 +14,7 @@ import {
   reconcileRun,
   resolveGate,
   resumeRun,
+  setResumeInput,
   storeGateResolution,
 } from '../src/engine/transitions.ts';
 import { buildDelegatedStepTask } from '../src/prompt.ts';
@@ -44,6 +49,27 @@ describe('when testing engine', () => {
       expect(run.currentStepId).toBe('inspect');
       expect(run.history.length).toBe(0);
       expect(resumeRun(run, 3).status).toBe('running');
+    });
+
+    test('resume guidance is replaced per resume and consumed by a step result', () => {
+      const workflow = loadedWorkflow();
+      const initial = createRun(workflow, '', ['read'], 'guided-resume', 1);
+      const paused = pauseRun(initial, 'repair the failure', 2);
+      const guided = setResumeInput(
+        paused,
+        '  Use the already-created cache before retrying.  ',
+        3,
+      );
+
+      expect(guided.resumeInput).toBe(
+        'Use the already-created cache before retrying.',
+      );
+      const resumed = resumeRun(guided, 4);
+      expect(resumed.resumeInput).toBe(guided.resumeInput);
+      expect(
+        advanceRun(workflow, resumed, 'ready', 'Recovered', 5).resumeInput,
+      ).toBeUndefined();
+      expect(setResumeInput(paused, '', 6).resumeInput).toBeUndefined();
     });
 
     test('paused attempts preserve the incoming step handoff for resume', () => {
@@ -83,7 +109,7 @@ describe('when testing engine', () => {
       const resumed = resumeRun(run, 4);
       const task = buildDelegatedStepTask(workflow, resumed, 'policy');
       expect(task).toMatch(
-        /Incoming approved or previous-step handoff:\nApproved implementation contract/,
+        /Incoming previous-step handoff:\nApproved implementation contract/,
       );
       expect(task).toMatch(
         /Latest paused attempt:\nTooling failed after partial work/,
@@ -117,7 +143,15 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       const workflow = loadedWorkflow(raw);
       let run = createRun(workflow, '', [], 'run-3', 1);
-      run = beginGate(workflow, run, 'submit', '# Plan', 'request-1', 2);
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        '# Plan',
+        'request-1',
+        2,
+        'Plan ready',
+      );
       // when
       run = pauseRun(run, 'repair integration', 3);
       // then
@@ -156,8 +190,15 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       const workflow = loadedWorkflow(raw);
       let run = createRun(workflow, '', [], 'run-4', 1);
-      run = beginGate(workflow, run, 'submit', '# Plan', 'request-2', 2);
-      run.pendingGate!.summary = 'Unreviewed child summary';
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        '# Plan',
+        'request-2',
+        2,
+        'Unreviewed child summary',
+      );
       // when
       run = resolveGate(
         workflow,
@@ -171,7 +212,7 @@ describe('when testing engine', () => {
       expect(run.gateFeedback).toBe('Add rollback');
     });
 
-    test('gate approval uses the reviewed artifact as the delegated step handoff', () => {
+    test('gate approval preserves summary and opaque artifact separately', () => {
       // given
       const raw = baseWorkflow();
       raw.steps = {
@@ -198,7 +239,15 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       const workflow = loadedWorkflow(raw);
       let run = createRun(workflow, '', [], 'run-gate-handoff', 1);
-      run = beginGate(workflow, run, 'submit', '# Plan', 'request-handoff', 2);
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        '# Plan',
+        'request-handoff',
+        2,
+        'Plan is ready for implementation',
+      );
       // when
       run = resolveGate(
         workflow,
@@ -208,14 +257,105 @@ describe('when testing engine', () => {
       );
       // then
       expect(run.status).toBe('completed');
-      expect(run.lastSummary).toBe('# Plan');
-      expect(run.stepHandoff).toBe('# Plan');
+      expect(run.lastSummary).toBe('Plan is ready for implementation');
+      expect(run.stepHandoff).toBe('Plan is ready for implementation');
       expect(run.reviewedArtifact).toBe('# Plan');
       expect(run.reviewedFeedback).toBe('');
-      expect(run.history.at(-1)?.summary).toBe('# Plan');
+      expect(run.history.at(-1)?.summary).toBe(
+        'Plan is ready for implementation',
+      );
+      expect(run.history.at(-1)?.artifact).toBe('# Plan');
+      expect(run.history.at(-1)?.approval).toEqual({
+        requestId: 'request-handoff',
+        artifact: '# Plan',
+        feedback: '',
+        stepStructuralDigest: workflow.stepStructuralDigests.plan!,
+      });
+      expect(isWorkflowRun(run)).toBe(true);
+      const approvedEntry = run.history.at(-1);
+      if (!approvedEntry?.approval)
+        throw new Error('approval was not recorded');
+      expect(
+        isWorkflowRun({
+          ...run,
+          history: [
+            {
+              ...approvedEntry,
+              approval: {
+                ...approvedEntry.approval,
+                artifact: '# Different plan',
+              },
+            },
+          ],
+        }),
+      ).toBe(false);
+      expect(
+        isWorkflowRun({
+          ...run,
+          history: [
+            {
+              ...approvedEntry,
+              approval: {
+                ...approvedEntry.approval,
+                stepStructuralDigest: '',
+              },
+            },
+          ],
+        }),
+      ).toBe(false);
     });
 
-    test('replanning clears stale reviewed authority before the next gate', () => {
+    test('gate approval to $pause remains a valid incomplete checkpoint', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          gate: {
+            provider: 'prompt',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: '$pause',
+            rejected: '$pause',
+            finish: '$done',
+          },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      let run = createRun(workflow, '', [], 'paused-approval', 1);
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        '# Approved but incomplete plan',
+        'paused-approval-request',
+        2,
+        'Approval requires a later resume',
+      );
+
+      run = resolveGate(
+        workflow,
+        run,
+        { approved: true, feedback: 'Approved', resolvedAt: 3 },
+        3,
+      );
+
+      expect(run.status).toBe('paused');
+      expect(run.currentStepId).toBe('plan');
+      expect(run.history).toEqual([]);
+      expect(run.reviewedArtifact).toBe('');
+      expect(run.reviewedFeedback).toBe('');
+      expect(isWorkflowRun(run)).toBe(true);
+      expect(reconcileRun(run, workflow, 4)).toEqual({
+        run,
+        changed: false,
+      });
+    });
+
+    test('revisiting a gate keeps the starting cwd and treats artifacts as opaque', () => {
       const raw = baseWorkflow();
       raw.start = 'plan';
       raw.steps = {
@@ -237,16 +377,30 @@ describe('when testing engine', () => {
         implement: {
           prompt: 'Implement',
           transitions: {
-            replan: 'plan',
+            revise: 'plan',
             done: '$done',
           },
         },
       };
       const workflow = loadedWorkflow(raw);
-      const artifact =
-        '{"repositories":[{"worker":[{"command":"bun install"}]}]}';
-      let run = createRun(workflow, '', [], 'run-replan', 1);
-      run = beginGate(workflow, run, 'submit', artifact, 'request-replan', 2);
+      const artifact = 'user-defined artifact: repository=/somewhere-else';
+      let run = createRun(
+        workflow,
+        '',
+        [],
+        'run-revisit',
+        1,
+        '/tmp/existing-worktree',
+      );
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        artifact,
+        'request-first-review',
+        2,
+        'First review summary',
+      );
       run = resolveGate(
         workflow,
         run,
@@ -254,21 +408,37 @@ describe('when testing engine', () => {
         3,
       );
       expect(run.reviewedArtifact).toBe(artifact);
+      expect(run.stepHandoff).toBe('First review summary');
 
       run = advanceRun(
         workflow,
         run,
-        'replan',
-        'The approved command is invalid',
+        'revise',
+        'Revise the user-defined artifact',
         4,
       );
 
       expect(run.currentStepId).toBe('plan');
-      expect(run.reviewedArtifact).toBe('');
-      expect(run.stepHandoff).toBe('The approved command is invalid');
+      expect(run.reviewedArtifact).toBe(artifact);
+      expect(run.cwd).toBe('/tmp/existing-worktree');
+      expect(run.stepHandoff).toBe('Revise the user-defined artifact');
+
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        'a completely different user-defined format',
+        'request-second-review',
+        5,
+        'Second review summary',
+      );
+      expect(run.pendingGate?.artifact).toBe(
+        'a completely different user-defined format',
+      );
+      expect(run.cwd).toBe('/tmp/existing-worktree');
     });
 
-    test('configuration rewind never promotes legacy gate summaries to reviewed artifacts', () => {
+    test('configuration rewind retains only authoritative reviewed artifacts', () => {
       // given
       const raw = baseWorkflow();
       raw.steps = {
@@ -300,10 +470,17 @@ describe('when testing engine', () => {
       };
       raw.start = 'plan';
       const original = loadedWorkflow(raw);
-      const artifact =
-        '{"repositories":[{"worker":[{"command":"npm publish"}]}]}';
+      const artifact = 'opaque user-defined review artifact';
       let run = createRun(original, '', [], 'run-legacy-rewind', 1);
-      run = beginGate(original, run, 'submit', artifact, 'request-rewind', 2);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        artifact,
+        'request-rewind',
+        2,
+        'Review complete',
+      );
       run = resolveGate(
         original,
         run,
@@ -328,10 +505,195 @@ describe('when testing engine', () => {
       expect(reconcileRun(run, changed, 5).run?.reviewedArtifact).toBe(
         artifact,
       );
-      const legacyRun = { ...run };
-      delete legacyRun.reviewedArtifact;
-      expect(reconcileRun(legacyRun, changed, 5).run?.reviewedArtifact).toBe(
-        '',
+    });
+
+    test('configuration rewind retains or clears the reviewed approval pair together', () => {
+      // given
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          gate: {
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: 'plan',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            done: '$done',
+          },
+        },
+      };
+      const original = loadedWorkflow(raw);
+      const artifact = 'opaque approved artifact';
+      const feedback = 'Preserve this approval feedback';
+      let run = createRun(original, '', [], 'approval-pair-rewind', 1);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        artifact,
+        'approval-pair-review',
+        2,
+        'Plan ready',
+      );
+      run = resolveGate(
+        original,
+        run,
+        { approved: true, feedback, resolvedAt: 3 },
+        3,
+      );
+      run = advanceRun(original, run, 'done', 'Implemented', 4);
+
+      const retainedRaw = structuredClone(raw);
+      const retainedSteps = retainedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      retainedSteps.implement = {
+        ...retainedSteps.implement,
+        prompt: 'Changed implementation',
+      };
+
+      const invalidatedRaw = structuredClone(raw);
+      const invalidatedSteps = invalidatedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      invalidatedSteps.plan = {
+        ...invalidatedSteps.plan,
+        gate: {
+          submitOutcome: 'submit',
+          approvedOutcome: 'accepted',
+          rejectedOutcome: 'rejected',
+        },
+        transitions: {
+          accepted: 'implement',
+          rejected: 'plan',
+        },
+      };
+
+      // when
+      const retained = reconcileRun(run, loadedWorkflow(retainedRaw), 5);
+      const invalidated = reconcileRun(run, loadedWorkflow(invalidatedRaw), 5);
+
+      // then
+      expect(retained.run?.reviewedArtifact).toBe(artifact);
+      expect(retained.run?.reviewedFeedback).toBe(feedback);
+      expect(invalidated.run?.reviewedArtifact).toBe('');
+      expect(invalidated.run?.reviewedFeedback).toBe('');
+    });
+
+    test('configuration rewind restores feedback from the retained approval when artifacts are identical', () => {
+      // given
+      const raw = baseWorkflow();
+      raw.start = 'gate-a';
+      raw.steps = {
+        'gate-a': {
+          prompt: 'First gate',
+          gate: {
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'middle',
+            rejected: '$pause',
+          },
+        },
+        middle: {
+          prompt: 'Middle',
+          transitions: {
+            done: 'gate-b',
+          },
+        },
+        'gate-b': {
+          prompt: 'Second gate',
+          gate: {
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: '$pause',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            done: '$done',
+          },
+        },
+      };
+      const original = loadedWorkflow(raw);
+      const artifact = 'identical approved artifact';
+      let run = createRun(original, '', [], 'identical-approval-pairs', 1);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        artifact,
+        'first-review',
+        2,
+        'First gate ready',
+      );
+      run = resolveGate(
+        original,
+        run,
+        { approved: true, feedback: 'first feedback', resolvedAt: 3 },
+        3,
+      );
+      run = advanceRun(original, run, 'done', 'Middle complete', 4);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        artifact,
+        'second-review',
+        5,
+        'Second gate ready',
+      );
+      run = resolveGate(
+        original,
+        run,
+        { approved: true, feedback: 'second feedback', resolvedAt: 6 },
+        6,
+      );
+      expect(
+        run.history
+          .filter((entry) => entry.approval)
+          .map((entry) => entry.approval?.requestId),
+      ).toEqual(['first-review', 'second-review']);
+
+      const changedRaw = structuredClone(raw);
+      const changedSteps = changedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      changedSteps.middle = {
+        ...changedSteps.middle,
+        prompt: 'Changed middle',
+      };
+
+      // when
+      const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 7);
+
+      // then
+      expect(reconciled.run?.history.map((entry) => entry.stepId)).toEqual([
+        'gate-a',
+      ]);
+      expect(reconciled.run?.reviewedArtifact).toBe(artifact);
+      expect(reconciled.run?.reviewedFeedback).toBe('first feedback');
+      expect(reconciled.run?.history[0]?.approval?.requestId).toBe(
+        'first-review',
       );
     });
 
@@ -386,7 +748,15 @@ describe('when testing engine', () => {
       const original = loadedWorkflow(raw);
       const artifact = '# Human-approved plan';
       let run = createRun(original, '', [], 'approved-plan-reload', 1);
-      run = beginGate(original, run, 'submit', artifact, 'review-request', 2);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        artifact,
+        'review-request',
+        2,
+        'Plan ready',
+      );
       run = resolveGate(
         original,
         run,
@@ -415,8 +785,175 @@ describe('when testing engine', () => {
       expect(result.run?.status).toBe('paused');
       expect(result.run?.reviewedArtifact).toBe(artifact);
       expect(result.run?.history).toHaveLength(1);
-      expect(result.run?.history[0]?.summary).toBe(artifact);
+      expect(result.run?.history[0]?.summary).toBe('Plan ready');
       expect(result.run?.history[0]?.stepDigest).toBe(changed.stepDigests.plan);
+      expect(result.run?.history[0]?.approval?.stepStructuralDigest).toBe(
+        original.stepStructuralDigests.plan,
+      );
+      expect(changed.stepStructuralDigests.plan).toBe(
+        original.stepStructuralDigests.plan,
+      );
+    });
+
+    test('approved gate structural changes restart instead of refreshing history', () => {
+      // given
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          permissions: {
+            tools: ['read'],
+            extensions: ['plannotator'],
+          },
+          requires: {
+            extensions: ['plannotator'],
+          },
+          gate: {
+            provider: 'prompt',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: '$pause',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: {
+            done: '$done',
+          },
+        },
+        audit: {
+          prompt: 'Audit',
+          transitions: {
+            done: '$done',
+          },
+        },
+      };
+      const original = loadedWorkflow(raw);
+      let run = createRun(original, '', [], 'structural-gate-reload', 1);
+      run = beginGate(
+        original,
+        run,
+        'submit',
+        'approved artifact',
+        'structural-review',
+        2,
+        'Plan ready',
+      );
+      run = resolveGate(
+        original,
+        run,
+        { approved: true, feedback: 'approved feedback', resolvedAt: 3 },
+        3,
+      );
+
+      const approvedTargetChanged = structuredClone(raw);
+      const approvedTargetSteps = approvedTargetChanged.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      approvedTargetSteps.plan = {
+        ...approvedTargetSteps.plan,
+        transitions: {
+          approved: 'audit',
+          rejected: '$pause',
+        },
+      };
+
+      const providerChanged = structuredClone(raw);
+      const providerSteps = providerChanged.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      providerSteps.plan = {
+        ...providerSteps.plan,
+        gate: {
+          provider: 'plannotator',
+          submitOutcome: 'submit',
+          approvedOutcome: 'approved',
+          rejectedOutcome: 'rejected',
+        },
+      };
+
+      const gateConfigChanged = structuredClone(raw);
+      const gateConfigSteps = gateConfigChanged.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      gateConfigSteps.plan = {
+        ...gateConfigSteps.plan,
+        gate: {
+          provider: 'prompt',
+          submitOutcome: 'submit',
+          approvedOutcome: 'approved',
+          rejectedOutcome: 'changes-requested',
+        },
+        transitions: {
+          approved: 'implement',
+          'changes-requested': '$pause',
+        },
+      };
+
+      const permissionsChanged = structuredClone(raw);
+      const permissionSteps = permissionsChanged.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      permissionSteps.plan = {
+        ...permissionSteps.plan,
+        permissions: {
+          tools: ['read', 'grep'],
+          extensions: ['plannotator'],
+        },
+      };
+
+      // when
+      const changedWorkflows = [
+        approvedTargetChanged,
+        providerChanged,
+        gateConfigChanged,
+        permissionsChanged,
+      ].map(loadedWorkflow);
+
+      // then
+      expect(
+        changedWorkflows.map(
+          (changed) =>
+            changed.stepStructuralDigests.plan ===
+            original.stepStructuralDigests.plan,
+        ),
+      ).toEqual([false, false, false, false]);
+      const reconciled = changedWorkflows.map((changed) =>
+        reconcileRun(run, changed, 4),
+      );
+      expect(reconciled.map((result) => result.restartedStep)).toEqual([
+        'plan',
+        'plan',
+        'plan',
+        'plan',
+      ]);
+      expect(reconciled.map((result) => result.run?.currentStepId)).toEqual([
+        'plan',
+        'plan',
+        'plan',
+        'plan',
+      ]);
+      expect(reconciled.map((result) => result.run?.history)).toEqual([
+        [],
+        [],
+        [],
+        [],
+      ]);
+      expect(reconciled.map((result) => result.run?.reviewedArtifact)).toEqual([
+        '',
+        '',
+        '',
+        '',
+      ]);
     });
 
     test('pauses a looping workflow after its maximum step visits', () => {
@@ -437,6 +974,7 @@ describe('when testing engine', () => {
 
       // then
       expect(run.status).toBe('paused');
+      expect(run.failedStepId).toBe('implement');
       expect(run.pauseReason).toMatch(/exceeded maxStepVisits/);
     });
 
@@ -501,6 +1039,181 @@ describe('when testing engine', () => {
       expect(historyRemoved.error).toMatch(/completed step was removed/);
     });
 
+    test('rejects semantically forged checkpoints before reconciliation', () => {
+      const workflow = loadedWorkflow();
+      const initial = createRun(workflow, '', [], 'forged-checkpoint', 1);
+      const afterInspect = advanceRun(
+        workflow,
+        initial,
+        'ready',
+        'Inspected',
+        2,
+      );
+      const completed = advanceRun(
+        workflow,
+        afterInspect,
+        'done',
+        'Implemented',
+        3,
+      );
+
+      const forgedVisits = reconcileRun(
+        { ...initial, visits: { inspect: 0 } },
+        workflow,
+        4,
+      );
+      const forgedHistory = reconcileRun(
+        {
+          ...afterInspect,
+          history: [{ ...afterInspect.history[0]!, outcome: 'invented' }],
+        },
+        workflow,
+        4,
+      );
+      const forgedCurrent = reconcileRun(
+        {
+          ...initial,
+          currentStepId: 'implement',
+          currentStepDigest: workflow.stepDigests.implement!,
+          visits: { implement: 1 },
+        },
+        workflow,
+        4,
+      );
+      const globalChange = {
+        ...workflow,
+        digest: 'global-configuration-change',
+      };
+      const forgedCompletedDigest = reconcileRun(
+        { ...completed, currentStepDigest: 'forged-current-digest' },
+        globalChange,
+        4,
+      );
+
+      expect(forgedVisits.error).toMatch(/visit counts/);
+      expect(forgedHistory.error).toMatch(/outcome "invented"/);
+      expect(forgedCurrent.error).toMatch(/does not match reachable step/);
+      expect(forgedCompletedDigest.error).toMatch(
+        /current-step digest does not match its terminal history/,
+      );
+      expect(forgedVisits.run).toBeUndefined();
+      expect(forgedHistory.run).toBeUndefined();
+      expect(forgedCurrent.run).toBeUndefined();
+      expect(forgedCompletedDigest.run).toBeUndefined();
+    });
+
+    test('rejects missing gate approval and a forged reviewed pair', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          gate: {
+            provider: 'prompt',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: {
+            approved: 'implement',
+            rejected: 'plan',
+          },
+        },
+        implement: {
+          prompt: 'Implement',
+          transitions: { done: '$done' },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      let approved = createRun(workflow, '', [], 'forged-gate-checkpoint', 1);
+      approved = beginGate(
+        workflow,
+        approved,
+        'submit',
+        '# Approved plan',
+        'approval-request',
+        2,
+        'Plan ready',
+      );
+      approved = resolveGate(
+        workflow,
+        approved,
+        { approved: true, feedback: 'Approved', resolvedAt: 3 },
+        3,
+      );
+      approved = pauseRun(approved, 'inspect checkpoint', 4);
+      const approvedEntry = approved.history[0]!;
+      const missingApproval = {
+        ...approved,
+        history: [
+          {
+            ...approvedEntry,
+            artifact: undefined,
+            approval: undefined,
+          },
+        ],
+        reviewedArtifact: '',
+        reviewedFeedback: '',
+      };
+      const forgedReviewedPair = {
+        ...approved,
+        reviewedArtifact: '# Unapproved replacement',
+        reviewedFeedback: 'Forged feedback',
+      };
+
+      expect(isWorkflowRun(missingApproval)).toBe(true);
+      expect(isWorkflowRun(forgedReviewedPair)).toBe(true);
+      const missingResult = reconcileRun(missingApproval, workflow, 5);
+      const forgedPairResult = reconcileRun(forgedReviewedPair, workflow, 5);
+      expect(missingResult.error).toMatch(
+        /missing authoritative gate approval/,
+      );
+      expect(forgedPairResult.error).toMatch(
+        /do not match authoritative approval history/,
+      );
+      expect(missingResult.run).toBeUndefined();
+      expect(forgedPairResult.run).toBeUndefined();
+    });
+
+    test('configuration rewind discards a removed suffix after an earlier change', () => {
+      const originalRaw = baseWorkflow();
+      const originalSteps = originalRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      originalSteps.implement = {
+        ...originalSteps.implement,
+        transitions: { ready: 'verify' },
+      };
+      originalSteps.verify = {
+        prompt: 'Verify',
+        transitions: { done: '$done' },
+      };
+      const original = loadedWorkflow(originalRaw);
+      let run = createRun(original, '', [], 'removed-suffix', 1);
+      run = advanceRun(original, run, 'ready', 'Inspected', 2);
+      run = advanceRun(original, run, 'ready', 'Implemented', 3);
+
+      const changedRaw = baseWorkflow();
+      changedRaw.steps = {
+        inspect: {
+          prompt: 'Changed inspection',
+          transitions: { ready: 'replacement' },
+        },
+        replacement: {
+          prompt: 'Replacement',
+          transitions: { done: '$done' },
+        },
+      };
+      const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 4);
+
+      expect(reconciled.error).toBeUndefined();
+      expect(reconciled.restartedStep).toBe('inspect');
+      expect(reconciled.run?.currentStepId).toBe('inspect');
+      expect(reconciled.run?.history).toEqual([]);
+      expect(reconciled.run?.status).toBe('paused');
+    });
+
     test('transition helpers reject invalid state and preserve gate lifecycle details', () => {
       // given
       const raw = baseWorkflow();
@@ -554,14 +1267,25 @@ describe('when testing engine', () => {
         /not valid/,
       );
       expect(() =>
-        beginGate(workflow, run, 'approved', '# Plan', 'request-1', 2),
+        beginGate(
+          workflow,
+          run,
+          'approved',
+          '# Plan',
+          'request-1',
+          2,
+          'Plan ready',
+        ),
       ).toThrow(/expects outcome/);
       expect(() =>
-        beginGate(workflow, run, 'submit', ' ', 'request-1', 2),
+        beginGate(workflow, run, 'submit', ' ', 'request-1', 2, 'Plan ready'),
       ).toThrow(/non-empty artifact/);
-      expect(() => beginGate(workflow, run, 'submit', '# Plan', '', 2)).toThrow(
-        /request id/,
-      );
+      expect(() =>
+        beginGate(workflow, run, 'submit', '# Plan', 'request-1', 2, ' '),
+      ).toThrow(/non-empty summary/);
+      expect(() =>
+        beginGate(workflow, run, 'submit', '# Plan', '', 2, 'Plan ready'),
+      ).toThrow(/request id/);
       expect(() =>
         beginGate(
           workflow,
@@ -570,6 +1294,7 @@ describe('when testing engine', () => {
           '# Plan',
           'request-1',
           2,
+          'Plan ready',
         ),
       ).toThrow(/requires a running workflow/);
       expect(() => attachGateReviewId(run, 'review-1', 2)).toThrow(
@@ -591,6 +1316,7 @@ describe('when testing engine', () => {
         '# Plan',
         'request-1',
         2,
+        'Plan ready',
       );
       expect(
         attachGateReviewId(pending, 'review-1', 3).pendingGate?.reviewId,
@@ -621,6 +1347,14 @@ describe('when testing engine', () => {
       ).toBe(true);
       expect(failGate(run, 'ignored', 3)).toBe(run);
       expect(failGate(pending, 'offline', 3).gateFeedback).toBe('offline');
+      const failedPausedGate = failGate(
+        pauseRun(pending, 'temporarily paused', 3),
+        'offline',
+        4,
+      );
+      expect(failedPausedGate.status).toBe('running');
+      expect(failedPausedGate.pausedFrom).toBeUndefined();
+      expect(isWorkflowRun(failedPausedGate)).toBe(true);
       expect(() =>
         resolveGate(
           workflow,
@@ -644,6 +1378,13 @@ describe('when testing engine', () => {
       expect(isWorkflowRun(legacyRun)).toBe(true);
       expect(isWorkflowRun({ ...run, stepHandoff: 42 })).toBe(false);
       expect(isWorkflowRun({ ...run, reviewedArtifact: 42 })).toBe(false);
+      expect(isWorkflowRun({ ...run, resumeInput: 'try again' })).toBe(true);
+      expect(
+        isWorkflowRun({
+          ...run,
+          resumeInput: 'x'.repeat(MAX_RESUME_INPUT_CHARS + 1),
+        }),
+      ).toBe(false);
       expect(isWorkflowRun({ ...run, history: [{}] })).toBe(false);
       expect(
         isWorkflowRun({
@@ -700,6 +1441,7 @@ describe('when testing engine', () => {
         'artifact',
         'request-valid',
         2,
+        'Review ready',
       );
       expect(isWorkflowRun(awaiting)).toBe(true);
     });

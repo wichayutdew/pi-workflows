@@ -75,7 +75,7 @@ flowchart TD
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
   Agents --> StepAgent[step.md<br/>default profile and child guidance]
-  Examples --> MR[mr-comments workflow]
+  Examples --> Starter[starter-kit<br/>work, ticket, mr-review, mr-comment]
   Tests --> TestSuite[Bun test suite]
 ```
 
@@ -89,7 +89,7 @@ flowchart TD
   InstallLocal -. optional .-> InstallPlan[pi install npm:@plannotator/pi-extension]
   InstallLocal --> Reload["/reload"]
   Reload --> WorkflowReload["/workflow-reload"]
-  WorkflowReload --> Start["/workflow-start mr-comments input"]
+  WorkflowReload --> Start["/workflow-start mr-comment input"]
 ```
 
 Core commands:
@@ -97,24 +97,38 @@ Core commands:
 | Command                        | Purpose                             |
 | ------------------------------ | ----------------------------------- |
 | `/workflow-list`               | List loaded workflows.              |
+| `/workflow-doctor [id]`        | Diagnose graph completion hazards.  |
 | `/workflow-start <id> [input]` | Start by workflow id.               |
 | `/<workflow command> [input]`  | Start through configured alias.     |
 | `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
-| `/workflow-resume`             | Reload, reconcile, and continue.    |
+| `/workflow-resume [guidance]`  | Reload and continue with a hint.    |
 | `/workflow-abort [reason]`     | Abort active run.                   |
 | `/workflow-reload`             | Reload files when no run is active. |
 
 The main surface has no task-viewer pane. Its footer shows only a compact
-`◐`/`◓`/`◑`/`◒` indicator while work is running, then clears it. The full
-overlay opens at workflow start; toggle it with `Ctrl+Alt+W` by default, or
-hide it with `q` or `Esc`. Configure another Pi key identifier with
+`◐`/`◓`/`◑`/`◒` indicator plus the workflow id and current step title/id while
+work is running, then clears it. The full verification/history overlay stays
+closed until you toggle it with `Ctrl+Alt+W` by default; hide it with `q` or
+`Esc`. Configure another Pi key identifier with
 `statusShortcut` in `settings.yaml`, then run Pi's `/reload` to register the
 change. `/workflow-reload` reloads workflow files but cannot rebind extension
 shortcuts. The overlay contains every step and diagnostic detail, using `✓` for
 completed, `✕` for failed or aborted, and `◆` for paused or awaiting review. It
 clamps long reasons to its available width while the checkpoint keeps the
-complete message. On short terminals, scroll with `↑`/`↓`, PgUp/PgDn, or
-Home/End.
+complete message. Select steps with `↑`/`↓` or `j`/`k`; inspect one with
+`Enter`, `→`, or `l`. Detail scroll uses `↑`/`↓` or `j`/`k`, and `←`, `h`, or
+`Esc` returns to the board. `q` or the configured shortcut closes it;
+PgUp/PgDn and Home/End page through long content. New checkpoints retain
+bounded attempt tasks/results, gate decisions, confined child transcript
+references, and redacted finalized main-agent assistant/tool events across
+pause, resume, and restart. Main-agent events remain part of the parent
+session, but capture arms only for the exact workflow task and closes after its
+completion turn. Older checkpoints without those events still show their
+bounded task and result.
+
+Each settled step posts its validated summary in the chat, and the final step
+also marks the workflow complete. Pauses are visible too. Failure messages stay
+concise and redacted; use the step explorer for the full retained diagnostic.
 
 Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`
 value selects the actual Pi Subagents profile, and each profile starts with a

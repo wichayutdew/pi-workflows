@@ -17,8 +17,14 @@ export type MainStepExecution = StepResultPolicy & {
   readonly runId: string;
   readonly stepId: string;
   readonly stepDigest: string;
+  /** Exact task whose finalized user message arms this attempt's trace. */
+  readonly task: string;
   readonly step: WorkflowStep;
-  readonly approvedBashCommands: ReadonlyArray<string>;
+  /** Persists one finalized, already-redacted turn before Pi begins a later turn. */
+  readonly onTrace: (
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void> | void;
   /** Handles the captured result after Pi fully settles the agent run. */
   readonly onSettled: (
     result: WorkflowStepResult | undefined,
@@ -60,5 +66,7 @@ export type MainStepRuntimeState = {
   active: MainStepExecution | undefined;
   pendingResult: WorkflowStepResult | undefined;
   invalidCompletionCalls: ReadonlySet<string>;
+  traceArmed: boolean;
+  traceClosed: boolean;
   isSuspended: boolean;
 };

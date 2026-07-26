@@ -3,6 +3,7 @@
  */
 export const HARNESS_COMMAND_NAMES = [
   'workflow-abort',
+  'workflow-doctor',
   'workflow-list',
   'workflow-pause',
   'workflow-reload',

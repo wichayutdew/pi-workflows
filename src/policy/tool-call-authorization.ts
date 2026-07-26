@@ -19,7 +19,6 @@ const reject = (reason: string): ToolAuthorization => ({
  * @param input - Requested tool input.
  * @param step - Active workflow step.
  * @param inventory - Registered tool inventory.
- * @param approvedBashCommands - Exact commands derived from human review.
  * @returns The authorization decision.
  */
 export const authorizeToolCall = (
@@ -27,7 +26,6 @@ export const authorizeToolCall = (
   input: Readonly<Record<string, unknown>>,
   step: WorkflowStep,
   inventory: ReadonlyArray<ToolInventoryItem>,
-  approvedBashCommands: ReadonlyArray<string> = [],
 ): ToolAuthorization => {
   if (toolName === 'mcp') {
     return authorizeMcpProxy(input, step.permissions.mcp);
@@ -47,11 +45,7 @@ export const authorizeToolCall = (
   if (typeof command !== 'string') {
     return reject('Bash call is missing command text');
   }
-  const result = authorizeBash(
-    command,
-    step.permissions.bash,
-    approvedBashCommands,
-  );
+  const result = authorizeBash(command, step.permissions.bash);
   return result.allowed
     ? { allowed: true }
     : reject(result.reason ?? 'Bash command is not allowed');

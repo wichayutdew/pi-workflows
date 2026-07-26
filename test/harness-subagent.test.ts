@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -11,12 +18,14 @@ import type {
 import type { Component, KeyId } from '@earendil-works/pi-tui';
 import { WorkflowHarness } from '../src/harness.ts';
 import { loadCatalog } from '../src/config/load.ts';
-import { createRun } from '../src/engine/state.ts';
+import { createRun, isWorkflowRun } from '../src/engine/state.ts';
 import { pauseRun } from '../src/engine/transitions.ts';
+import type { WorkflowHarnessDependencies } from '../src/harness/dependencies.ts';
 import {
   PLANNOTATOR_REQUEST_CHANNEL,
   PLANNOTATOR_RESULT_CHANNEL,
 } from '../src/integrations/plannotator.ts';
+import { auditCompletedDelegationTranscript } from '../src/integrations/subagents/diagnostics.ts';
 import {
   extractChildPolicy,
   SUBAGENT_DELEGATION_CANCEL_EVENT,
@@ -422,6 +431,69 @@ describe('when testing harness subagent', () => {
     );
   }
 
+  async function writeCompletedSession(
+    directory: string,
+    runId: string,
+    request: SubagentDelegationRequest,
+    warning?: string,
+  ): Promise<string> {
+    const sessionDirectory = join(directory, 'sessions', runId, 'run-0');
+    const sessionFile = join(sessionDirectory, 'session.jsonl');
+    const extracted = extractChildPolicy(request.task);
+    expectTruthy(extracted);
+    const entries: Array<Record<string, unknown>> = [
+      {
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: extracted.task }],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'completed-result',
+              name: 'structured_output',
+              arguments: {
+                value: {
+                  outcome: 'done',
+                  summary: 'Completed with correlated transcript evidence',
+                },
+              },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'completed-result',
+          toolName: 'structured_output',
+          isError: false,
+          content: [{ type: 'text', text: 'Structured output captured.' }],
+        },
+      },
+    ];
+    if (warning) {
+      entries.push({
+        type: 'custom_message',
+        customType: 'subagent_watchdog_warning',
+        content: warning,
+      });
+    }
+    await mkdir(sessionDirectory, { recursive: true });
+    await writeFile(
+      sessionFile,
+      entries.map((entry) => JSON.stringify(entry)).join('\n'),
+    );
+    return sessionFile;
+  }
+
   async function writeGatedWorkflow(directory: string): Promise<void> {
     await writeFile(
       join(directory, 'gated.workflow.yaml'),
@@ -453,71 +525,6 @@ describe('when testing harness subagent', () => {
             transitions: {
               approved: '$done',
               'changes-requested': 'plan',
-              blocked: '$pause',
-            },
-          },
-        },
-      }),
-    );
-  }
-
-  async function writeGatedPublishWorkflow(directory: string): Promise<void> {
-    await writeFile(
-      join(directory, 'gated-publish.workflow.yaml'),
-      JSON.stringify({
-        version: 1,
-        id: 'gated-publish',
-        command: 'gated-publish',
-        description: 'Approve and execute one exact remote action',
-        start: 'plan',
-        steps: {
-          plan: {
-            subagent: {},
-            prompt: 'Prepare exact actions for {{workflow.input}}.',
-            permissions: {
-              tools: ['read'],
-              extensions: ['plannotator'],
-            },
-            requires: {
-              tools: ['read'],
-              extensions: ['plannotator'],
-            },
-            gate: {
-              provider: 'plannotator',
-              submitOutcome: 'submit',
-              approvedOutcome: 'approved',
-              rejectedOutcome: 'changes-requested',
-              timeoutMs: 1_000,
-            },
-            transitions: {
-              approved: 'verify',
-              'changes-requested': 'plan',
-              blocked: '$pause',
-            },
-          },
-          verify: {
-            subagent: {},
-            prompt: 'Narrow reviewed actions from {{last.summary}}.',
-            permissions: {
-              tools: ['read'],
-            },
-            transitions: {
-              ready: 'publish',
-              blocked: '$pause',
-            },
-          },
-          publish: {
-            subagent: {},
-            prompt: 'Execute only {{last.summary}}.',
-            permissions: {
-              tools: ['bash'],
-              bash: {
-                mode: 'allow-list',
-                approvedSources: ['remote-actions'],
-              },
-            },
-            transitions: {
-              published: '$done',
               blocked: '$pause',
             },
           },
@@ -572,8 +579,12 @@ describe('when testing harness subagent', () => {
   async function initialize(
     fixture: HarnessFixture,
     statusShortcut?: KeyId,
+    dependencyOverrides: Partial<WorkflowHarnessDependencies> = {},
   ): Promise<WorkflowHarness> {
-    const harness = new WorkflowHarness(fixture.pi, statusShortcut);
+    const harness = new WorkflowHarness(fixture.pi, statusShortcut, {
+      auditCompletedDelegationTranscript: async () => ({ verified: true }),
+      ...dependencyOverrides,
+    });
     await emitLifecycle(fixture, 'session_start', { type: 'session_start' });
     return harness;
   }
@@ -1103,7 +1114,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('the shortcut toggles the full workflow status overlay', async () => {
+    test('the shortcut opens the full workflow status overlay on demand', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-status-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -1119,14 +1130,12 @@ describe('when testing harness subagent', () => {
 
         await start('inspect the repository', fixture.context);
 
-        await eventually(() => {
-          expect(fixture.customRenders.length).toBeGreaterThan(0);
-        });
+        expect(fixture.customRenders).toHaveLength(0);
         const shortcut = fixture.shortcuts.get('ctrl+shift+y');
         expectTruthy(shortcut);
         expect(fixture.shortcuts.has('ctrl+alt+w')).toBe(false);
         await shortcut(fixture.context as unknown as ExtensionContext);
-        expect(fixture.customRenders).toHaveLength(2);
+        expect(fixture.customRenders).toHaveLength(1);
         const board = fixture.customRenders.at(-1)?.join('\n') ?? '';
         expect(board).toMatch(/✦ Workflow Status/);
         expect(board).toMatch(/\[RUNNING\]/);
@@ -1147,7 +1156,9 @@ describe('when testing harness subagent', () => {
         ).toBe(true);
         expect(
           fixture.statusUpdates.some(({ value }) =>
-            /^[◐◓◑◒] main: working · Ctrl\+Shift\+Y$/.test(value ?? ''),
+            /^[◐◓◑◒] main · step plan · working · Ctrl\+Shift\+Y$/.test(
+              value ?? '',
+            ),
           ),
         ).toBe(true);
         expect(fixture.commands.has('workflow-status')).toBe(false);
@@ -1216,6 +1227,63 @@ describe('when testing harness subagent', () => {
           'workflow_complete_step',
         ]);
 
+        const task = fixture.sentUserMessages[0] ?? '';
+        await emitLifecycle(fixture, 'message_end', {
+          type: 'message_end',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: task }],
+          },
+        });
+        await emitLifecycle(fixture, 'turn_end', {
+          type: 'turn_end',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: 'Inspect with Authorization: Bearer harness-secret',
+              },
+              {
+                type: 'toolCall',
+                id: 'read-1',
+                name: 'read',
+                arguments: {
+                  path: 'README.md',
+                  password: 'harness-argument-secret',
+                },
+              },
+            ],
+          },
+          toolResults: [
+            {
+              role: 'toolResult',
+              toolCallId: 'read-1',
+              toolName: 'read',
+              isError: false,
+              content: [{ type: 'text', text: 'README is ready' }],
+            },
+          ],
+        });
+
+        const tracedRun = latestRun(fixture);
+        expect(isWorkflowRun(tracedRun)).toBe(true);
+        if (!isWorkflowRun(tracedRun)) {
+          throw new Error('Expected a valid traced workflow run');
+        }
+        const tracedAttempt = tracedRun.currentStepAttempts?.at(-1);
+        expect(
+          tracedAttempt?.kind === 'main'
+            ? tracedAttempt.log?.map((line) => line.split('\n')[0])
+            : undefined,
+        ).toEqual(['assistant', 'tool call · read', 'tool result · read']);
+        expect(JSON.stringify(tracedRun.currentStepAttempts)).not.toContain(
+          'harness-secret',
+        );
+        expect(JSON.stringify(tracedRun.currentStepAttempts)).not.toContain(
+          'harness-argument-secret',
+        );
+
         const completionResult = await completion.execute('completion-1', {
           outcome: 'done',
           summary: 'Main-agent inspection complete',
@@ -1223,11 +1291,79 @@ describe('when testing harness subagent', () => {
         expect((completionResult as { terminate?: boolean }).terminate).toBe(
           true,
         );
+        const completionMessage = {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'completion-1',
+              name: 'workflow_complete_step',
+              arguments: {
+                outcome: 'done',
+                summary: 'Main-agent inspection complete',
+              },
+            },
+          ],
+        };
+        await emitLifecycle(fixture, 'message_end', {
+          type: 'message_end',
+          message: completionMessage,
+        });
+        await emitLifecycle(fixture, 'turn_end', {
+          type: 'turn_end',
+          message: completionMessage,
+          toolResults: [
+            {
+              role: 'toolResult',
+              toolCallId: 'completion-1',
+              toolName: 'workflow_complete_step',
+              isError: false,
+              content: [{ type: 'text', text: 'Captured outcome' }],
+            },
+          ],
+        });
+        await emitLifecycle(fixture, 'turn_end', {
+          type: 'turn_end',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'unrelated queued parent turn' }],
+          },
+          toolResults: [],
+        });
         await emitLifecycle(fixture, 'agent_settled', {
           type: 'agent_settled',
         });
 
-        expect(latestRun(fixture).status).toBe('completed');
+        const completedRun = latestRun(fixture);
+        expect(isWorkflowRun(completedRun)).toBe(true);
+        if (!isWorkflowRun(completedRun)) {
+          throw new Error('Expected a valid completed workflow run');
+        }
+        expect(completedRun.status).toBe('completed');
+        const completedLog = completedRun.history[0]?.attempts?.at(-1);
+        expect(completedLog?.kind).toBe('main');
+        const completedLogText =
+          completedLog?.kind === 'main'
+            ? (completedLog.log?.join('\n') ?? '')
+            : '';
+        expect(completedLogText).toContain('tool call · read');
+        expect(completedLogText).toContain(
+          'tool call · workflow_complete_step',
+        );
+        expect(completedLogText).not.toContain('harness-secret');
+        expect(completedLogText).not.toContain('harness-argument-secret');
+        expect(completedLogText).not.toContain('unrelated queued parent turn');
+        const postedSummary = fixture.sentMessages.find(
+          ({ customType }) => customType === 'workflow-step-summary',
+        );
+        expect(postedSummary?.content).toContain(
+          'Main-agent inspection complete',
+        );
+        expect(postedSummary?.content).toContain('Workflow `main` completed.');
+        expect(postedSummary?.content).not.toContain('tool call · read');
+        expect(isWorkflowRun(JSON.parse(JSON.stringify(completedRun)))).toBe(
+          true,
+        );
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
         expect(
           fixture.statusUpdates.some(({ value }) =>
@@ -1273,6 +1409,9 @@ describe('when testing harness subagent', () => {
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
         expect(fixture.abortCount()).toBe(1);
         expect(fixture.waitForIdleCount()).toBe(1);
+        expect(fixture.sentMessages.at(-1)?.content).toContain(
+          'repair the workflow',
+        );
         await emitLifecycle(fixture, 'agent_settled', {
           type: 'agent_settled',
         });
@@ -1292,6 +1431,51 @@ describe('when testing harness subagent', () => {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('a main-agent step refuses resume from a different session cwd', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-main-cwd-'));
+      const alternateDirectory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-main-other-cwd-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeMainWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        await initialize(fixture);
+        const start = fixture.commands.get('main-workflow');
+        const pause = fixture.commands.get('workflow-pause');
+        const resume = fixture.commands.get('workflow-resume');
+        expectTruthy(start);
+        expectTruthy(pause);
+        expectTruthy(resume);
+
+        await start('the repository', fixture.context);
+        fixture.setIdle(false);
+        await pause('switch sessions', fixture.context);
+        await emitLifecycle(fixture, 'agent_settled', {
+          type: 'agent_settled',
+        });
+        (fixture.context as unknown as { cwd: string }).cwd =
+          alternateDirectory;
+
+        await resume('', fixture.context);
+
+        expect(fixture.sentUserMessages).toHaveLength(1);
+        expect(latestRun(fixture).status).toBe('paused');
+        expect(String(latestRun(fixture).pauseReason)).toMatch(
+          /current session cwd[\s\S]*does not match captured workflow cwd/,
+        );
+        expect(fixture.activeTools()).toEqual(['read', 'bash']);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(alternateDirectory, { recursive: true, force: true });
         await rm(directory, { recursive: true, force: true });
       }
     });
@@ -1319,6 +1503,9 @@ describe('when testing harness subagent', () => {
         expect(latestRun(fixture).status).toBe('paused');
         expect(String(latestRun(fixture).pauseReason)).toMatch(
           /without calling workflow_complete_step exactly once/,
+        );
+        expect(fixture.sentMessages.at(-1)?.content).toContain(
+          'agent settled without calling workflow_complete_step exactly once',
         );
       } finally {
         if (previousDirectory === undefined)
@@ -1383,6 +1570,13 @@ describe('when testing harness subagent', () => {
         expect(latestRun(fixture).reviewedArtifact).toBe('# Plan v2');
         expect(latestRun(fixture).gateFeedback).toBe('');
         expect(plannotatorRequests).toBe(0);
+        expect(
+          fixture.statusUpdates.some(({ value }) =>
+            /^◆ main · step plan · awaiting review · Ctrl\+Alt\+W$/.test(
+              value ?? '',
+            ),
+          ),
+        ).toBe(true);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1519,10 +1713,18 @@ describe('when testing harness subagent', () => {
         expect(fixture.activeTools()).toEqual(['read', 'bash']);
         expect(
           fixture.statusUpdates.some(({ value }) =>
-            /^[◐◓◑◒] delegate: working · Ctrl\+Alt\+W$/.test(value ?? ''),
+            /^[◐◓◑◒] delegate · step inspect · working · Ctrl\+Alt\+W$/.test(
+              value ?? '',
+            ),
           ),
         ).toBe(true);
         expect(fixture.statusUpdates.at(-1)?.value).toBe(undefined);
+        expect(fixture.sentMessages.at(-1)?.content).toContain(
+          'Inspected in the child',
+        );
+        expect(fixture.sentMessages.at(-1)?.content).toContain(
+          'Workflow `delegate` completed.',
+        );
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -2294,8 +2496,8 @@ describe('when testing harness subagent', () => {
           'run-0',
           'session.jsonl',
         );
-        const failedCommand = 'git log --oneline -- outside-file';
-        const toolError = 'fatal: outside-file is outside repository';
+        const failedPath = 'outside-file';
+        const toolError = 'outside-file is outside repository';
         const failedTranscript = [
           JSON.stringify({
             type: 'message',
@@ -2304,9 +2506,9 @@ describe('when testing harness subagent', () => {
               content: [
                 {
                   type: 'toolCall',
-                  id: 'failed-bash',
-                  name: 'bash',
-                  arguments: { command: failedCommand },
+                  id: 'failed-read',
+                  name: 'read',
+                  arguments: { path: failedPath },
                 },
               ],
             },
@@ -2315,8 +2517,8 @@ describe('when testing harness subagent', () => {
             type: 'message',
             message: {
               role: 'toolResult',
-              toolCallId: 'failed-bash',
-              toolName: 'bash',
+              toolCallId: 'failed-read',
+              toolName: 'read',
               isError: true,
               content: [{ type: 'text', text: toolError }],
             },
@@ -2378,7 +2580,7 @@ describe('when testing harness subagent', () => {
               version: 1,
               requestId: request.requestId,
               status: 'failed',
-              error: `bash failed (exit 1): ${toolError}`,
+              error: `read failed (exit 1): ${toolError}`,
               exitCode: 1,
               runId: firstRunId,
               childIndex: 0,
@@ -2402,14 +2604,14 @@ describe('when testing harness subagent', () => {
             version: 1,
             requestId: request.requestId,
             status: 'failed',
-            error: 'bash failed (exit 1): unrelated process summary',
+            error: 'read failed (exit 1): unrelated process summary',
             exitCode: 1,
             agent: 'scout',
             execution: {
               status: 'failed',
               success: false,
               exitCode: 1,
-              error: 'bash failed (exit 1): unrelated process summary',
+              error: 'read failed (exit 1): unrelated process summary',
             },
             runId: retryRunId,
             childIndex: 0,
@@ -2442,7 +2644,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('accepts a matching result when upstream mistakes successful output for a failure', async () => {
+    test('accepts a matching result after earlier tool errors when upstream mistakes successful output for a failure', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -2451,7 +2653,7 @@ describe('when testing harness subagent', () => {
       try {
         await writeWorkflow(
           directory,
-          'Delegate one read-only inspection',
+          'Delegate one non-mutating inspection',
           { agent: 'scout' },
           [],
           'unrestricted',
@@ -2475,6 +2677,30 @@ describe('when testing harness subagent', () => {
           await writeFile(
             sessionFile,
             [
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'toolCall',
+                      id: 'earlier-read-failure',
+                      name: 'read',
+                      arguments: { path: 'missing.md' },
+                    },
+                  ],
+                },
+              }),
+              JSON.stringify({
+                type: 'message',
+                message: {
+                  role: 'toolResult',
+                  toolCallId: 'earlier-read-failure',
+                  toolName: 'read',
+                  isError: true,
+                  content: [{ type: 'text', text: 'File not found' }],
+                },
+              }),
               JSON.stringify({
                 type: 'message',
                 message: {
@@ -2560,8 +2786,8 @@ describe('when testing harness subagent', () => {
               exitCode: 1,
               error: terminalError,
             },
-            toolCount: 2,
-            turns: 2,
+            toolCount: 3,
+            turns: 3,
             runId,
             childIndex: 0,
             sessionFile,
@@ -2615,14 +2841,14 @@ describe('when testing harness subagent', () => {
           'run-0',
         );
         const retrySession = join(retrySessionDirectory, 'session.jsonl');
-        const failedCommand = 'git log --oneline -- outside-file';
-        const toolError = 'fatal: outside-file is outside repository';
+        const failedPath = 'outside-file';
+        const toolError = 'outside-file is outside repository';
         const firstRunId = 'initial-missing-result';
         const firstSession = await writeFailureSession(
           directory,
           firstRunId,
-          'bash',
-          { command: failedCommand },
+          'read',
+          { path: failedPath },
           toolError,
         );
         await mkdir(retrySessionDirectory, { recursive: true });
@@ -2636,9 +2862,9 @@ describe('when testing harness subagent', () => {
                 content: [
                   {
                     type: 'toolCall',
-                    id: 'failed-bash',
-                    name: 'bash',
-                    arguments: { command: failedCommand },
+                    id: 'failed-read',
+                    name: 'read',
+                    arguments: { path: failedPath },
                   },
                 ],
               },
@@ -2647,8 +2873,8 @@ describe('when testing harness subagent', () => {
               type: 'message',
               message: {
                 role: 'toolResult',
-                toolCallId: 'failed-bash',
-                toolName: 'bash',
+                toolCallId: 'failed-read',
+                toolName: 'read',
                 isError: true,
                 content: [{ type: 'text', text: toolError }],
               },
@@ -2714,8 +2940,8 @@ describe('when testing harness subagent', () => {
             status: 'failed',
             error:
               requests === 1
-                ? `bash failed (exit 1): ${toolError}`
-                : 'bash failed (exit 1): unrelated process summary',
+                ? `read failed (exit 1): ${toolError}`
+                : 'read failed (exit 1): unrelated process summary',
             exitCode: 1,
             ...(requests === 2
               ? {
@@ -2724,7 +2950,7 @@ describe('when testing harness subagent', () => {
                     status: 'failed' as const,
                     success: false,
                     exitCode: 1,
-                    error: 'bash failed (exit 1): unrelated process summary',
+                    error: 'read failed (exit 1): unrelated process summary',
                   },
                   runId: retryRunId,
                   childIndex: 0,
@@ -2749,11 +2975,31 @@ describe('when testing harness subagent', () => {
         });
         expect(requests).toBe(2);
         expect(String(latestRun(fixture).pauseReason)).toContain(
-          `Command: ${failedCommand}`,
+          `Arguments: {"path":"${failedPath}"}`,
         );
         expect(String(latestRun(fixture).pauseReason)).toContain(
           'Recovery rejected: structured_output transcript value does not match the correlated result',
         );
+        const failureSummary = String(
+          fixture.sentMessages.at(-1)?.content ?? '',
+        );
+        expect(failureSummary).toContain(
+          'read failed (exit 1): unrelated process summary',
+        );
+        expect(failureSummary).not.toContain('Arguments:');
+        expect(failureSummary).not.toContain('Recovery rejected:');
+        expect(failureSummary).not.toContain('Diagnostic session:');
+        const failureNotification = [...fixture.notifications]
+          .reverse()
+          .find(({ message }) =>
+            message.startsWith('Workflow paused at'),
+          )?.message;
+        expect(failureNotification).toContain(
+          'read failed (exit 1): unrelated process summary',
+        );
+        expect(failureNotification).not.toContain('Arguments:');
+        expect(failureNotification).not.toContain('Recovery rejected:');
+        expect(failureNotification).not.toContain('Diagnostic session:');
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -2824,8 +3070,8 @@ describe('when testing harness subagent', () => {
           const firstSession = await writeFailureSession(
             directory,
             firstRunId,
-            'bash',
-            { command: 'git log --oneline -- missing' },
+            'read',
+            { path: 'missing' },
             'missing path',
           );
           await mkdir(retrySessionDirectory, { recursive: true });
@@ -2839,9 +3085,9 @@ describe('when testing harness subagent', () => {
                   content: [
                     {
                       type: 'toolCall',
-                      id: 'failed-bash',
-                      name: 'bash',
-                      arguments: { command: 'git log --oneline -- missing' },
+                      id: 'failed-read',
+                      name: 'read',
+                      arguments: { path: 'missing' },
                     },
                   ],
                 },
@@ -2850,8 +3096,8 @@ describe('when testing harness subagent', () => {
                 type: 'message',
                 message: {
                   role: 'toolResult',
-                  toolCallId: 'failed-bash',
-                  toolName: 'bash',
+                  toolCallId: 'failed-read',
+                  toolName: 'read',
                   isError: true,
                   content: [{ type: 'text', text: 'missing path' }],
                 },
@@ -2901,7 +3147,7 @@ describe('when testing harness subagent', () => {
                 version: 1,
                 requestId: request.requestId,
                 status: 'failed',
-                error: 'bash failed (exit 1): missing path',
+                error: 'read failed (exit 1): missing path',
                 exitCode: 1,
                 runId: firstRunId,
                 childIndex: 0,
@@ -2924,7 +3170,7 @@ describe('when testing harness subagent', () => {
             fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
               version: 1,
               requestId: request.requestId,
-              error: 'bash failed (exit 1): unrelated process summary',
+              error: 'read failed (exit 1): unrelated process summary',
               exitCode: 1,
               ...terminalState,
               agent: 'scout',
@@ -3083,7 +3329,7 @@ describe('when testing harness subagent', () => {
                     type: 'toolCall',
                     id: 'verification-bash',
                     name: 'bash',
-                    arguments: { command: 'bun run test' },
+                    arguments: { command: 'package-tool test' },
                   },
                 ],
               },
@@ -3135,7 +3381,7 @@ describe('when testing harness subagent', () => {
           ),
         ).toBe(false);
         expect(String(latestRun(fixture).pauseReason)).toContain(
-          'Command: bun run test',
+          'Command: package-tool test',
         );
         expect(String(latestRun(fixture).pauseReason)).toContain(
           'Subagent exit code: 1',
@@ -3249,6 +3495,25 @@ describe('when testing harness subagent', () => {
                 ],
               },
             }),
+            JSON.stringify({
+              type: 'custom_message',
+              customType: 'subagent_runtime_state',
+              content: 'Completion recorded.',
+            }),
+            JSON.stringify({
+              type: 'message',
+              message: {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'text',
+                    text: '',
+                    textSignature: '{"v":1,"phase":"final_answer"}',
+                  },
+                ],
+                stopReason: 'stop',
+              },
+            }),
           ].join('\n'),
         );
         const fixture = createHarnessFixture(directory);
@@ -3316,6 +3581,123 @@ describe('when testing harness subagent', () => {
       }
     });
 
+    test('accepts only a readable clean completed transcript and blocks later watchdog warnings', async () => {
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      const scenarios: ReadonlyArray<{
+        readonly name: string;
+        readonly warning?: string;
+        readonly omitSession?: boolean;
+        readonly expectedStatus: 'completed' | 'paused';
+        readonly expectedReason?: RegExp;
+      }> = [
+        {
+          name: 'clean',
+          expectedStatus: 'completed',
+        },
+        {
+          name: 'watchdog',
+          warning: 'Unexpected files changed after structured completion.',
+          expectedStatus: 'paused',
+          expectedReason: /unresolved post-completion watchdog warning/,
+        },
+        {
+          name: 'unreadable',
+          omitSession: true,
+          expectedStatus: 'paused',
+          expectedReason: /without a verifiable terminal transcript/,
+        },
+      ];
+
+      try {
+        for (const scenario of scenarios) {
+          const directory = await mkdtemp(
+            join(tmpdir(), `pi-workflows-completed-${scenario.name}-`),
+          );
+          process.env.PI_WORKFLOWS_DIR = directory;
+          try {
+            await writeWorkflow(directory);
+            const fixture = createHarnessFixture(directory);
+            const requests: SubagentDelegationRequest[] = [];
+            fixture.events.on(
+              SUBAGENT_DELEGATION_REQUEST_EVENT,
+              async (data) => {
+                const request = data as SubagentDelegationRequest;
+                requests.push(request);
+                const extracted = extractChildPolicy(request.task);
+                expectTruthy(extracted);
+                await writeFile(
+                  extracted.policy.resultPath,
+                  JSON.stringify({
+                    version: 1,
+                    policyDigest: extracted.policy.policyDigest,
+                    outcome: 'done',
+                    summary: 'Completed with correlated transcript evidence',
+                  }),
+                );
+                const childRunId = `child-${scenario.name}`;
+                const sessionFile = scenario.omitSession
+                  ? join(
+                      directory,
+                      'sessions',
+                      childRunId,
+                      'run-0',
+                      'session.jsonl',
+                    )
+                  : await writeCompletedSession(
+                      directory,
+                      childRunId,
+                      request,
+                      scenario.warning,
+                    );
+                fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+                  version: 1,
+                  requestId: request.requestId,
+                });
+                fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+                  version: 1,
+                  requestId: request.requestId,
+                  status: 'completed',
+                  agent: request.agent,
+                  runId: childRunId,
+                  childIndex: 0,
+                  sessionFile,
+                });
+              },
+            );
+
+            await initialize(fixture, undefined, {
+              auditCompletedDelegationTranscript,
+            });
+            const start = fixture.commands.get('delegate');
+            expectTruthy(start);
+            await start('the repository', fixture.context);
+            await eventually(() => {
+              expect(latestRun(fixture).status).toBe(scenario.expectedStatus);
+            });
+
+            expect(requests).toHaveLength(1);
+            if (scenario.expectedStatus === 'completed') {
+              expect(
+                (latestRun(fixture).history as ReadonlyArray<unknown>).length,
+              ).toBe(1);
+            } else {
+              expect(latestRun(fixture).history).toEqual([]);
+              expectTruthy(scenario.expectedReason);
+              expect(String(latestRun(fixture).pauseReason)).toMatch(
+                scenario.expectedReason,
+              );
+            }
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
+        }
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+      }
+    });
+
     test('a completed delegation without a correlated child result pauses with an actionable error', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
@@ -3358,7 +3740,7 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('rejects a malformed command contract and replans before review', async () => {
+    test('treats user-defined artifact content as opaque before review', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
@@ -3369,38 +3751,22 @@ describe('when testing harness subagent', () => {
         await writeGatedWorkflow(directory);
         const fixture = createHarnessFixture(directory);
         const requests: SubagentDelegationRequest[] = [];
+        const artifact =
+          'User-defined review document\n\nNo engine-owned format is required.';
         let gateRequests = 0;
         fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
           const request = data as SubagentDelegationRequest;
           requests.push(request);
           const extracted = extractChildPolicy(request.task);
           expectTruthy(extracted);
-          const firstAttempt = requests.length === 1;
           await writeFile(
             extracted.policy.resultPath,
             JSON.stringify({
               version: 1,
               policyDigest: extracted.policy.policyDigest,
-              outcome: firstAttempt ? 'submit' : 'blocked',
-              summary: firstAttempt
-                ? 'Malformed plan ready'
-                : 'No further attempt needed in this fixture',
-              ...(firstAttempt
-                ? {
-                    artifact: JSON.stringify({
-                      repositories: [
-                        {
-                          cwd: directory,
-                          worker: [
-                            {
-                              command: `bun --cwd ${directory} install --frozen-lockfile`,
-                            },
-                          ],
-                        },
-                      ],
-                    }),
-                  }
-                : {}),
+              outcome: 'submit',
+              summary: 'Plan ready for human review',
+              artifact,
             }),
           );
           fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
@@ -3413,8 +3779,21 @@ describe('when testing harness subagent', () => {
             status: 'completed',
           });
         });
-        fixture.events.on(PLANNOTATOR_REQUEST_CHANNEL, () => {
+        fixture.events.on(PLANNOTATOR_REQUEST_CHANNEL, (data) => {
           gateRequests += 1;
+          const request = data as {
+            action: string;
+            payload: { planContent?: string };
+            respond: (response: unknown) => void;
+          };
+          expect(request.payload.planContent).toBe(artifact);
+          request.respond({
+            status: 'handled',
+            result: {
+              status: 'pending',
+              reviewId: 'review-opaque-artifact',
+            },
+          });
         });
 
         await initialize(fixture);
@@ -3422,20 +3801,16 @@ describe('when testing harness subagent', () => {
         expectTruthy(start);
         await start('the change', fixture.context);
         await eventually(() => {
-          expect(latestRun(fixture).status).toBe('paused');
-          expect(requests).toHaveLength(2);
+          expect(latestRun(fixture).status).toBe('awaiting-gate');
         });
 
-        expect(gateRequests).toBe(0);
-        expect(latestRun(fixture).history).toMatchObject([
-          { stepId: 'plan', outcome: 'changes-requested' },
-        ]);
-        expect(latestRun(fixture).gateFeedback).toContain(
-          'Use `bun install --cwd <absolute-cwd> --frozen-lockfile`',
-        );
-        expect(requests[1]?.task).toContain(
-          'Use `bun install --cwd <absolute-cwd> --frozen-lockfile`',
-        );
+        expect(requests).toHaveLength(1);
+        expect(gateRequests).toBe(1);
+        expect(latestRun(fixture).history).toEqual([]);
+        expect(
+          (latestRun(fixture).pendingGate as { artifact?: string } | undefined)
+            ?.artifact,
+        ).toBe(artifact);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -3693,17 +4068,15 @@ describe('when testing harness subagent', () => {
       }
     });
 
-    test('resume bootstraps a missing reviewed target from its reviewed source cwd', async () => {
-      // given
+    test('resume reuses the captured cwd from a valid checkpoint', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
-      const sourceDirectory = await mkdtemp(
-        join(tmpdir(), 'pi-workflows-reviewed-source-'),
+      const runDirectory = await mkdtemp(
+        join(tmpdir(), 'pi-workflows-run-cwd-'),
       );
-      const repositoryCwd = join(directory, 'not-created-target');
+      const canonicalRunDirectory = await realpath(runDirectory);
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
       process.env.PI_WORKFLOWS_DIR = directory;
 
-      // when
       try {
         await writeWorkflow(directory);
         const catalog = await loadCatalog({
@@ -3714,22 +4087,22 @@ describe('when testing harness subagent', () => {
         const workflow = catalog.workflows.get('delegate');
         expectTruthy(workflow);
         const paused = pauseRun(
-          createRun(workflow, 'request', ['read', 'bash'], 'bootstrap-run', 1),
+          createRun(
+            workflow,
+            'request',
+            ['read', 'bash'],
+            'opaque-run',
+            1,
+            canonicalRunDirectory,
+          ),
           'restored',
           2,
         );
-        const fixture = createHarnessFixture(directory, [
+        const fixture = createHarnessFixture(canonicalRunDirectory, [
           {
             type: 'custom',
             customType: 'pi-workflows-state-v1',
-            data: {
-              ...paused,
-              reviewedArtifact: JSON.stringify({
-                repositories: [
-                  { cwd: repositoryCwd, sourceCwd: sourceDirectory },
-                ],
-              }),
-            },
+            data: paused,
           },
         ]);
         let delegatedRequest: SubagentDelegationRequest | undefined;
@@ -3737,15 +4110,15 @@ describe('when testing harness subagent', () => {
           delegatedRequest = data as SubagentDelegationRequest;
           const extracted = extractChildPolicy(delegatedRequest.task);
           expectTruthy(extracted);
-          expect(extracted.policy.repositoryCwd).toBe(repositoryCwd);
-          expect(extracted.policy.bootstrapCwd).toBe(sourceDirectory);
+          expect(extracted.policy).not.toHaveProperty('repositoryCwd');
+          expect(extracted.policy).not.toHaveProperty('approvedBashCommands');
           await writeFile(
             extracted.policy.resultPath,
             JSON.stringify({
               version: 1,
               policyDigest: extracted.policy.policyDigest,
               outcome: 'done',
-              summary: 'Bootstrapped the reviewed target',
+              summary: 'Completed in the captured directory',
             }),
           );
           fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
@@ -3764,344 +4137,14 @@ describe('when testing harness subagent', () => {
         expectTruthy(resume);
         await resume('', fixture.context);
         await eventually(() => {
-          expect(delegatedRequest?.cwd).toBe(sourceDirectory);
+          expect(delegatedRequest?.cwd).toBe(canonicalRunDirectory);
           expect(latestRun(fixture).status).toBe('completed');
         });
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
-        await rm(sourceDirectory, { recursive: true, force: true });
-        await rm(directory, { recursive: true, force: true });
-      }
-    });
-
-    test('resume pauses an invalid reviewed repository contract before delegation', async () => {
-      // given
-      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
-      const secondDirectory = await mkdtemp(
-        join(tmpdir(), 'pi-workflows-reviewed-target-'),
-      );
-      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
-      process.env.PI_WORKFLOWS_DIR = directory;
-
-      // when
-      try {
-        await writeWorkflow(directory);
-        const catalog = await loadCatalog({
-          cwd: directory,
-          projectTrusted: true,
-          userDirectory: directory,
-        });
-        const workflow = catalog.workflows.get('delegate');
-        expectTruthy(workflow);
-        const paused = pauseRun(
-          createRun(
-            workflow,
-            'request',
-            ['read', 'bash'],
-            'invalid-cwd-run',
-            1,
-          ),
-          'restored',
-          2,
-        );
-        const fixture = createHarnessFixture(directory, [
-          {
-            type: 'custom',
-            customType: 'pi-workflows-state-v1',
-            data: {
-              ...paused,
-              reviewedArtifact: JSON.stringify({
-                repositories: [{ cwd: directory }, { cwd: secondDirectory }],
-              }),
-            },
-          },
-        ]);
-        let delegationRequests = 0;
-        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, () => {
-          delegationRequests += 1;
-        });
-
-        await initialize(fixture);
-        const resume = fixture.commands.get('workflow-resume');
-        expectTruthy(resume);
-        await resume('', fixture.context);
-
-        expect(delegationRequests).toBe(0);
-        expect(latestRun(fixture).status).toBe('paused');
-        expect(String(latestRun(fixture).pauseReason)).toContain(
-          'expected exactly one repository cwd',
-        );
-        expect(fixture.notifications.at(-1)?.message).toContain(
-          'expected exactly one repository cwd',
-        );
-      } finally {
-        if (previousDirectory === undefined)
-          delete process.env.PI_WORKFLOWS_DIR;
-        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
-        await rm(secondDirectory, { recursive: true, force: true });
-        await rm(directory, { recursive: true, force: true });
-      }
-    });
-
-    test('legacy checkpoints do not derive approved Bash commands from lastSummary', async () => {
-      // given
-      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
-      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
-      // when
-      process.env.PI_WORKFLOWS_DIR = directory;
-      // then
-      try {
-        await writeFile(
-          join(directory, 'legacy.workflow.yaml'),
-          JSON.stringify({
-            version: 1,
-            id: 'legacy',
-            command: 'legacy',
-            description: 'Legacy checkpoint',
-            start: 'implement',
-            steps: {
-              implement: {
-                subagent: {},
-                prompt: 'Implement {{last.summary}}.',
-                permissions: {
-                  tools: ['read', 'bash'],
-                  bash: {
-                    mode: 'allow-list',
-                    approvedSources: ['verification-worker'],
-                  },
-                },
-                transitions: {
-                  done: '$done',
-                  blocked: '$pause',
-                },
-              },
-            },
-          }),
-        );
-        const catalog = await loadCatalog({
-          cwd: directory,
-          projectTrusted: true,
-          userDirectory: directory,
-        });
-        const workflow = catalog.workflows.get('legacy');
-        expectTruthy(workflow);
-        const paused = pauseRun(
-          createRun(workflow, 'request', ['read', 'bash'], 'legacy-run', 1),
-          'restored',
-          2,
-        );
-        const legacyRun = {
-          ...paused,
-          lastSummary:
-            '```json\n{"repositories":[{"worker":[{"command":"npm test"}]}]}\n```',
-        };
-        delete legacyRun.stepHandoff;
-        delete legacyRun.reviewedArtifact;
-        const fixture = createHarnessFixture(directory, [
-          {
-            type: 'custom',
-            customType: 'pi-workflows-state-v1',
-            data: legacyRun,
-          },
-        ]);
-        let delegatedPolicy: ChildStepPolicy | undefined;
-        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, (data) => {
-          const request = data as SubagentDelegationRequest;
-          delegatedPolicy = extractChildPolicy(request.task)?.policy;
-          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
-            version: 1,
-            requestId: request.requestId,
-          });
-          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
-            version: 1,
-            requestId: request.requestId,
-            status: 'cancelled',
-          });
-        });
-
-        await initialize(fixture);
-        const resume = fixture.commands.get('workflow-resume');
-        expectTruthy(resume);
-        await resume('', fixture.context);
-        await eventually(() => {
-          expectTruthy(delegatedPolicy);
-        });
-        expect(delegatedPolicy?.approvedBashCommands).toBe(undefined);
-      } finally {
-        if (previousDirectory === undefined)
-          delete process.env.PI_WORKFLOWS_DIR;
-        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
-        await rm(directory, { recursive: true, force: true });
-      }
-    });
-
-    test('a reviewed gate artifact grants only commands retained by the latest handoff', async () => {
-      // given
-      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
-      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
-      // when
-      process.env.PI_WORKFLOWS_DIR = directory;
-      // then
-      const approvedDirectory = await mkdtemp(
-        join(tmpdir(), 'pi-workflows-approved-cwd-'),
-      );
-      try {
-        await writeGatedPublishWorkflow(directory);
-        const fixture = createHarnessFixture(directory);
-        const approvedCommand =
-          'glab api projects/1/merge_requests/2/notes -f body=approved';
-        const removedCommand =
-          'glab api projects/1/merge_requests/2/notes -f body=removed';
-        const unreviewedCommand =
-          'glab api projects/1/merge_requests/2/notes -f body=unreviewed';
-        const policies: ChildStepPolicy[] = [];
-        const requests: SubagentDelegationRequest[] = [];
-        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
-          const request = data as SubagentDelegationRequest;
-          requests.push(request);
-          const extracted = extractChildPolicy(request.task);
-          expectTruthy(extracted);
-          policies.push(extracted.policy);
-          if (extracted.policy.stepId === 'plan') {
-            await writeFile(
-              extracted.policy.resultPath,
-              JSON.stringify({
-                version: 1,
-                policyDigest: extracted.policy.policyDigest,
-                outcome: 'submit',
-                summary: [
-                  'Unreviewed handoff',
-                  '```json',
-                  JSON.stringify({
-                    repositories: [{ cwd: approvedDirectory }],
-                    actions: [
-                      {
-                        toolName: 'bash',
-                        input: { command: unreviewedCommand },
-                      },
-                    ],
-                  }),
-                  '```',
-                ].join('\n'),
-                artifact: [
-                  '# Reviewed actions',
-                  '```json',
-                  JSON.stringify({
-                    repositories: [{ cwd: approvedDirectory }],
-                    actions: [
-                      {
-                        toolName: 'bash',
-                        input: { command: approvedCommand },
-                      },
-                      {
-                        toolName: 'bash',
-                        input: { command: removedCommand },
-                      },
-                    ],
-                  }),
-                  '```',
-                ].join('\n'),
-              }),
-            );
-          } else if (extracted.policy.stepId === 'verify') {
-            await writeFile(
-              extracted.policy.resultPath,
-              JSON.stringify({
-                version: 1,
-                policyDigest: extracted.policy.policyDigest,
-                outcome: 'ready',
-                summary: [
-                  '# Narrowed actions',
-                  '```json',
-                  JSON.stringify({
-                    actions: [
-                      {
-                        toolName: 'bash',
-                        input: { command: approvedCommand },
-                      },
-                      {
-                        toolName: 'bash',
-                        input: { command: unreviewedCommand },
-                      },
-                    ],
-                  }),
-                  '```',
-                ].join('\n'),
-              }),
-            );
-          } else {
-            await writeFile(
-              extracted.policy.resultPath,
-              JSON.stringify({
-                version: 1,
-                policyDigest: extracted.policy.policyDigest,
-                outcome: 'published',
-                summary: 'Exact reviewed action completed',
-              }),
-            );
-          }
-          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
-            version: 1,
-            requestId: request.requestId,
-          });
-          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
-            version: 1,
-            requestId: request.requestId,
-            status: 'completed',
-          });
-        });
-        fixture.events.on(PLANNOTATOR_REQUEST_CHANNEL, (data) => {
-          const request = data as {
-            action: string;
-            respond: (response: unknown) => void;
-          };
-          if (request.action === 'plan-review') {
-            request.respond({
-              status: 'handled',
-              result: { status: 'pending', reviewId: 'review-exact-command' },
-            });
-          }
-        });
-
-        await initialize(fixture);
-        const start = fixture.commands.get('gated-publish');
-        expectTruthy(start);
-        await start('the merge request', fixture.context);
-        await eventually(() => {
-          expect(latestRun(fixture).status).toBe('awaiting-gate');
-        });
-        fixture.events.emit(PLANNOTATOR_RESULT_CHANNEL, {
-          reviewId: 'review-exact-command',
-          approved: true,
-          feedback: 'Approved',
-        });
-        await eventually(() => {
-          expect(latestRun(fixture).status).toBe('completed');
-          expect(policies.length).toBe(3);
-        });
-        expect(policies[2]?.approvedBashCommands).toEqual([approvedCommand]);
-        expect(
-          policies[2]?.approvedBashCommands?.includes(removedCommand),
-        ).toBe(false);
-        expect(
-          policies[2]?.approvedBashCommands?.includes(unreviewedCommand),
-        ).toBe(false);
-        expect(requests[1]?.context).toBe('fresh');
-        expect(requests[0]?.cwd).toBe(directory);
-        expect(requests[1]?.cwd).toBe(approvedDirectory);
-        expect(requests[1]?.task.match(/# Reviewed actions/g)).toHaveLength(1);
-        expect(requests[1]?.task).not.toContain('Unreviewed handoff');
-        expect(requests[2]?.context).toBe('fresh');
-        expect(requests[2]?.cwd).toBe(approvedDirectory);
-        expect(requests[2]?.task.match(/# Narrowed actions/g)).toHaveLength(1);
-        expect(requests[2]?.task).not.toContain('# Reviewed actions');
-      } finally {
-        if (previousDirectory === undefined)
-          delete process.env.PI_WORKFLOWS_DIR;
-        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
-        await rm(approvedDirectory, { recursive: true, force: true });
+        await rm(runDirectory, { recursive: true, force: true });
         await rm(directory, { recursive: true, force: true });
       }
     });
@@ -4191,19 +4234,17 @@ describe('when testing harness subagent', () => {
         await eventually(() => {
           expect(latestRun(fixture).status).toBe('completed');
         });
-        expect(latestRun(fixture).stepHandoff).toBe(
-          '# Plan\n\nImplement carefully.',
-        );
+        expect(latestRun(fixture).stepHandoff).toBe('Plan ready');
         expect(latestRun(fixture).reviewedArtifact).toBe(
           '# Plan\n\nImplement carefully.',
         );
-        expect(latestRun(fixture).lastSummary).toBe(
-          '# Plan\n\nImplement carefully.',
-        );
+        expect(latestRun(fixture).lastSummary).toBe('Plan ready');
         const history = latestRun(fixture).history as Array<{
           summary: string;
+          artifact?: string;
         }>;
-        expect(history.at(-1)?.summary).toBe('# Plan\n\nImplement carefully.');
+        expect(history.at(-1)?.summary).toBe('Plan ready');
+        expect(history.at(-1)?.artifact).toBe('# Plan\n\nImplement carefully.');
         expect(childRequests).toBe(1);
       } finally {
         if (previousDirectory === undefined)

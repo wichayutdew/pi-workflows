@@ -7,7 +7,7 @@ import { createRun } from '../src/engine/state.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
 import { createStartActions } from '../src/harness/start-actions.ts';
 import type { WorkflowStartContext } from '../src/harness/types.ts';
-import { loadedWorkflow } from './helpers.ts';
+import { baseWorkflow, loadedWorkflow } from './helpers.ts';
 
 type Notice = {
   message: string;
@@ -28,6 +28,7 @@ function createCommandContext(
   let abortCount = 0;
   return {
     context: {
+      cwd: '/workspace/run',
       abort: () => {
         abortCount += 1;
       },
@@ -35,6 +36,7 @@ function createCommandContext(
         skills: [{ name: 'workflow-skill' }],
       }),
       isIdle: () => options.idle ?? true,
+      isProjectTrusted: () => true,
       waitForIdle: async () => {
         options.onWaitForIdle?.();
       },
@@ -53,8 +55,8 @@ function createStartFixture() {
   const workflow = loadedWorkflow();
   const calls = {
     capturedSkills: [] as Array<string>,
+    doctorLoads: 0,
     launched: 0,
-    opened: 0,
     persisted: 0,
     reloaded: 0,
     sentMessages: [] as Array<unknown>,
@@ -79,7 +81,13 @@ function createStartFixture() {
     },
     dependencies: {
       createRequestId: () => 'run-1',
+      loadCatalog: async () => {
+        calls.doctorLoads += 1;
+        return fixture.catalog;
+      },
       now: () => 10,
+      resolveWorkspaceDirectory: ({ candidateCwd }: { candidateCwd: string }) =>
+        candidateCwd,
     },
     isSessionActive: true,
     sessionEpoch: 3,
@@ -98,9 +106,6 @@ function createStartFixture() {
     },
     launchCurrentStep: () => {
       calls.launched += 1;
-    },
-    openWorkflowStatus: () => {
-      calls.opened += 1;
     },
     persist: () => {
       calls.persisted += 1;
@@ -167,6 +172,128 @@ describe('when testing start actions', () => {
       message: 'No workflows loaded from /workflows',
       level: 'warning',
     });
+  });
+
+  test('diagnoses one workflow, all workflows, and missing selections', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      'example',
+      command.context,
+    );
+    expect(calls.sentMessages.at(-1)).toMatchObject({
+      customType: 'workflow-doctor',
+      display: true,
+    });
+    expect(calls.sentMessages.at(-1)).toMatchObject({
+      content: expect.stringContaining('Result: PASS'),
+    });
+
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      '',
+      command.context,
+    );
+    expect(calls.sentMessages).toHaveLength(2);
+
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      'missing',
+      command.context,
+    );
+    expect(command.notices.at(-1)).toEqual({
+      message: 'Workflow "missing" is not loaded',
+      level: 'error',
+    });
+
+    fixture.catalog.workflows.clear();
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      '',
+      command.context,
+    );
+    expect(command.notices.at(-1)).toEqual({
+      message: 'No workflows loaded from /workflows',
+      level: 'info',
+    });
+    expect(calls.doctorLoads).toBe(4);
+  });
+
+  test('diagnoses workflow edits from a freshly loaded catalog', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+    const edited = baseWorkflow();
+    edited.steps = {
+      choose: {
+        prompt: 'Choose',
+        transitions: { finish: '$done', trap: 'trap' },
+      },
+      trap: {
+        prompt: 'Trap',
+        transitions: { wait: '$pause' },
+      },
+    };
+    edited.start = 'choose';
+    const freshWorkflow = loadedWorkflow(edited);
+    fixture.dependencies.loadCatalog = async () => {
+      calls.doctorLoads += 1;
+      return {
+        ...fixture.catalog,
+        workflows: new Map([[freshWorkflow.definition.id, freshWorkflow]]),
+      };
+    };
+
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      freshWorkflow.definition.id,
+      command.context,
+    );
+
+    expect(calls.doctorLoads).toBe(1);
+    const content = (calls.sentMessages.at(-1) as { readonly content: string })
+      .content;
+    expect(content).toContain('Result: ERROR');
+    expect(content).toContain('reachable step trap cannot reach $done');
+  });
+
+  test('reports diagnostics from the freshly loaded catalog', async () => {
+    const { calls, fixture } = createStartFixture();
+    const command = createCommandContext();
+    fixture.dependencies.loadCatalog = async () => {
+      calls.doctorLoads += 1;
+      return {
+        ...fixture.catalog,
+        workflows: new Map(),
+        diagnostics: [
+          {
+            level: 'error' as const,
+            path: '/workflows/example.workflow.yaml',
+            message: 'fresh validation failure',
+          },
+        ],
+      };
+    };
+
+    await actions.doctorWorkflows.call(
+      fixture as unknown as HarnessActionContext,
+      '',
+      command.context,
+    );
+
+    expect(calls.doctorLoads).toBe(1);
+    expect(command.notices).toContainEqual({
+      message:
+        'Workflow configuration errors:\n' +
+        '/workflows/example.workflow.yaml: fresh validation failure',
+      level: 'warning',
+    });
+    expect(command.notices.at(-1)).toEqual({
+      message: 'No workflows loaded from /workflows',
+      level: 'warning',
+    });
+    expect(calls.sentMessages).toEqual([]);
   });
 
   test('rejects delegation and active-run conflicts', async () => {
@@ -281,6 +408,42 @@ describe('when testing start actions', () => {
     );
   });
 
+  test('refuses a workflow with a reachable non-completing branch', async () => {
+    const raw = baseWorkflow();
+    raw.steps = {
+      choose: {
+        prompt: 'Choose',
+        transitions: { finish: '$done', trap: 'trap' },
+      },
+      trap: {
+        prompt: 'Trap',
+        transitions: { wait: '$pause' },
+      },
+    };
+    raw.start = 'choose';
+    const workflow = loadedWorkflow(raw);
+    const { calls, fixture } = createStartFixture();
+    fixture.catalog.workflows = new Map([[workflow.definition.id, workflow]]);
+    const command = createCommandContext();
+
+    await actions.startNow.call(
+      fixture as unknown as HarnessActionContext,
+      workflow.definition.id,
+      '',
+      startContext(command.context),
+      3,
+    );
+
+    expect(fixture.run).toBeUndefined();
+    expect(calls.persisted).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain(
+      '/workflow-doctor example',
+    );
+    expect(command.notices.at(-1)?.message).toContain(
+      'reachable step trap cannot reach $done',
+    );
+  });
+
   test('creates a trimmed run and launches its first step', async () => {
     const { calls, fixture } = createStartFixture();
     const command = createCommandContext();
@@ -297,11 +460,11 @@ describe('when testing start actions', () => {
       runId: 'run-1',
       input: 'inspect this',
       baselineTools: ['read', 'bash'],
+      cwd: '/workspace/run',
     });
     expect(calls).toMatchObject({
       capturedSkills: ['workflow-skill'],
       launched: 1,
-      opened: 1,
       persisted: 1,
       reloaded: 1,
       statusUpdates: 1,

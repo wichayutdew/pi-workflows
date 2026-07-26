@@ -48,6 +48,55 @@ describe('when testing plannotator', () => {
       });
     });
 
+    test('opens one plan review when reloads left duplicate listeners', async () => {
+      // given
+      let openedReviews = 0;
+      const duplicateListenerEvents = {
+        on: () => () => undefined,
+        emit: (_channel: string, data: unknown) => {
+          const request = data as {
+            payload: { planContent?: string };
+            respond: (response: unknown) => void;
+          };
+
+          for (let listener = 0; listener < 4; listener += 1) {
+            const planContent = request.payload.planContent;
+            if (typeof planContent !== 'string' || !planContent.trim()) {
+              request.respond({
+                status: 'error',
+                error: 'Missing planContent for plan-review request.',
+              });
+              continue;
+            }
+
+            openedReviews += 1;
+            queueMicrotask(() => {
+              request.respond({
+                status: 'handled',
+                result: { status: 'pending', reviewId: 'review-1' },
+              });
+            });
+          }
+        },
+      };
+
+      // when
+      const response = await requestPlannotatorReview(
+        duplicateListenerEvents,
+        'request-reloaded',
+        '# Plan',
+        'test',
+        1_000,
+      );
+
+      // then
+      expect(openedReviews).toBe(1);
+      expect(response).toEqual({
+        status: 'handled',
+        result: { status: 'pending', reviewId: 'review-1' },
+      });
+    });
+
     test('queries a durable Plannotator review result', async () => {
       // given
       // when

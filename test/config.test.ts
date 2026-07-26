@@ -29,6 +29,26 @@ describe('when testing config', () => {
     };
   }
 
+  function workspaceWorkflow(
+    allowedRoots?: ReadonlyArray<string>,
+  ): Record<string, unknown> {
+    const raw = baseWorkflow();
+    const steps = raw.steps as Record<string, Record<string, unknown>>;
+    steps.inspect = {
+      ...steps.inspect,
+      subagent: { agent: 'workspace-preparer' },
+      workspace: {
+        bindOn: ['ready'],
+        ...(allowedRoots ? { allowedRoots } : {}),
+      },
+    };
+    steps.implement = {
+      ...steps.implement,
+      subagent: { agent: 'worker' },
+    };
+    return raw;
+  }
+
   describe('should satisfy its behavioral contract', () => {
     test('validates a declarative workflow graph', () => {
       // given
@@ -38,9 +58,149 @@ describe('when testing config', () => {
       expect(result.errors).toEqual([]);
       expect(result.value?.start).toBe('inspect');
       expect(result.value?.steps.inspect?.permissions.bash.mode).toBe(
-        'read-only',
+        'allow-list',
       );
       expect(result.value?.steps.inspect?.subagent).toBe(undefined);
+    });
+
+    test('validates one-time workspace binding and permits delegated downstream cycles', () => {
+      const withDefaultRoot = workspaceWorkflow();
+      const defaultSteps = withDefaultRoot.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      defaultSteps.implement = {
+        ...defaultSteps.implement,
+        transitions: { retry: 'inspect', done: '$done' },
+      };
+
+      const defaultResult = validateWorkflow(withDefaultRoot);
+      expect(defaultResult.errors).toEqual([]);
+      expect(defaultResult.value?.steps.inspect?.workspace).toEqual({
+        bindOn: ['ready'],
+        allowedRoots: ['.'],
+      });
+
+      const withSiblingRoot = validateWorkflow(
+        workspaceWorkflow(['../worktrees', '.worktrees']),
+      );
+      expect(withSiblingRoot.errors).toEqual([]);
+      expect(
+        withSiblingRoot.value?.steps.inspect?.workspace?.allowedRoots,
+      ).toEqual(['../worktrees', '.worktrees']);
+    });
+
+    test('rejects malformed or unsafe workspace-binding graphs', () => {
+      const malformed = workspaceWorkflow([]);
+      const malformedSteps = malformed.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      malformedSteps.inspect = {
+        ...malformedSteps.inspect,
+        workspace: {
+          bindOn: ['missing', 'missing'],
+          allowedRoots: [],
+          unexpected: true,
+        },
+      };
+
+      const absoluteRoot = workspaceWorkflow(['/tmp/worktrees']);
+      const malformedRootBounds = [
+        workspaceWorkflow([' ../worktrees']),
+        workspaceWorkflow(['C:..\\outside']),
+        workspaceWorkflow(['x'.repeat(4_097)]),
+        workspaceWorkflow(
+          Array.from({ length: 33 }, (_, index) => `../worktrees-${index}`),
+        ),
+      ];
+      const mainBinder = workspaceWorkflow();
+      const mainBinderSteps = mainBinder.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      delete mainBinderSteps.inspect?.subagent;
+
+      const terminalBinder = workspaceWorkflow();
+      const terminalSteps = terminalBinder.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      terminalSteps.inspect = {
+        ...terminalSteps.inspect,
+        transitions: { ready: '$done' },
+      };
+
+      const gatedBinder = workspaceWorkflow();
+      const gatedSteps = gatedBinder.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      gatedSteps.inspect = {
+        ...gatedSteps.inspect,
+        gate: {
+          submitOutcome: 'submit',
+          approvedOutcome: 'ready',
+          rejectedOutcome: 'blocked',
+        },
+        transitions: { ready: 'implement', blocked: '$pause' },
+      };
+
+      const downstreamMain = workspaceWorkflow();
+      const downstreamSteps = downstreamMain.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      delete downstreamSteps.implement?.subagent;
+
+      const multipleBinders = workspaceWorkflow();
+      const multipleSteps = multipleBinders.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      multipleSteps.implement = {
+        ...multipleSteps.implement,
+        transitions: { done: 'finish' },
+        workspace: { bindOn: ['done'] },
+      };
+      multipleSteps.finish = {
+        prompt: 'Finish',
+        subagent: { agent: 'finisher' },
+        transitions: { done: '$done' },
+      };
+
+      const messages = [
+        validateWorkflow(malformed),
+        validateWorkflow(absoluteRoot),
+        ...malformedRootBounds.map((raw) => validateWorkflow(raw)),
+        validateWorkflow(mainBinder),
+        validateWorkflow(terminalBinder),
+        validateWorkflow(gatedBinder),
+        validateWorkflow(downstreamMain),
+        validateWorkflow(multipleBinders),
+      ]
+        .flatMap(({ errors }) => errors)
+        .join('\n');
+
+      expect(messages).toMatch(/unknown property "unexpected"/);
+      expect(messages).toMatch(/duplicate value "missing"/);
+      expect(messages).toMatch(/unknown transition outcome "missing"/);
+      expect(messages).toMatch(/at least one relative path is required/);
+      expect(messages).toMatch(/expected a relative path/);
+      expect(messages).toMatch(/expected a non-empty relative path/);
+      expect(messages).toMatch(/path exceeds 4096 characters/);
+      expect(messages).toMatch(/at most 32 relative paths are allowed/);
+      expect(messages).toMatch(/workspace binding requires a subagent/);
+      expect(messages).toMatch(
+        /workspace-binding outcome must target an ordinary step/,
+      );
+      expect(messages).toMatch(
+        /workspace binding is not allowed on a gated step/,
+      );
+      expect(messages).toMatch(
+        /reachable after workspace binding must use a subagent/,
+      );
+      expect(messages).toMatch(/only one workspace-binding step is allowed/);
     });
 
     test('validates per-step subagent model and execution budgets', () => {
@@ -112,7 +272,10 @@ describe('when testing config', () => {
         subagent: { retryToolFailures: true },
         permissions: {
           tools: ['read', 'bash', 'edit'],
-          bash: { mode: 'read-only' },
+          bash: {
+            mode: 'allow-list',
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
+          },
         },
       };
       expect(validateWorkflow(mutationCapableRecovery).errors).toEqual([]);
@@ -163,7 +326,7 @@ describe('when testing config', () => {
       );
     });
 
-    test('validates reviewed Bash command sources', () => {
+    test('keeps Bash authority entirely declarative in the workflow', () => {
       // given
       const raw = baseWorkflow();
       const steps = raw.steps as Record<string, Record<string, unknown>>;
@@ -173,6 +336,7 @@ describe('when testing config', () => {
           tools: ['read', 'bash'],
           bash: {
             mode: 'allow-list',
+            allow: [{ executable: 'npm', argsPrefix: ['test'] }],
             approvedSources: ['verification-worker'],
             handoffSources: ['verification-worker', 'verification-reviewer'],
           },
@@ -181,36 +345,28 @@ describe('when testing config', () => {
       // when
       const result = validateWorkflow(raw);
       // then
-      expect(result.errors).toEqual([]);
-      expect(
-        result.value?.steps.inspect?.permissions.bash.approvedSources,
-      ).toEqual(['verification-worker']);
-      expect(
-        result.value?.steps.inspect?.permissions.bash.handoffSources,
-      ).toEqual(['verification-worker', 'verification-reviewer']);
+      expect(result.errors.join('\n')).toMatch(
+        /unknown property "approvedSources"[\s\S]*unknown property "handoffSources"/,
+      );
 
-      const invalid = structuredClone(raw);
-      const invalidSteps = invalid.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      invalidSteps.inspect = {
-        ...invalidSteps.inspect,
+      const valid = structuredClone(raw);
+      const validSteps = valid.steps as Record<string, Record<string, unknown>>;
+      validSteps.inspect = {
+        ...validSteps.inspect,
         permissions: {
           tools: ['read', 'bash'],
           bash: {
-            mode: 'read-only',
-            approvedSources: ['remote-actions'],
-            handoffSources: ['verification-worker'],
+            mode: 'allow-list',
+            allow: [{ executable: 'npm', argsPrefix: ['test'] }],
           },
         },
       };
-      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
-        /approvedSources: only valid when mode is "allow-list"/,
-      );
-      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
-        /handoffSources: only valid when mode is "allow-list"/,
-      );
+      expect(
+        validateWorkflow(valid).value?.steps.inspect?.permissions.bash,
+      ).toEqual({
+        mode: 'allow-list',
+        allow: [{ executable: 'npm', argsPrefix: ['test'] }],
+      });
     });
 
     test('expands compact Bash argument-prefix alternatives', () => {
@@ -675,6 +831,9 @@ describe('when testing config', () => {
       expect(plannotatorResult.value?.steps.inspect?.gate?.provider).toBe(
         'plannotator',
       );
+      expect(plannotatorResult.value?.steps.inspect?.gate).toMatchObject({
+        timeoutMs: 30_000,
+      });
 
       const invalid = structuredClone(raw);
       const invalidSteps = invalid.steps as Record<
@@ -706,7 +865,10 @@ describe('when testing config', () => {
         allowProjectWorkflows: true,
         permissionCeiling: {
           tools: ['read', 'edit', 'bash'],
-          bash: { mode: 'read-only' },
+          bash: {
+            mode: 'allow-list',
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
+          },
         },
       });
       expect(mainSettings.value?.permissionCeiling).toBeTruthy();
@@ -731,6 +893,48 @@ describe('when testing config', () => {
           mainSettings.value!.permissionCeiling!,
         ).join('\n'),
       ).toMatch(/subagent execution exceeds/);
+    });
+
+    test('project ceiling rejects workspace binding as its own exact error', () => {
+      const raw = workspaceWorkflow(['..']);
+      const steps = raw.steps as Record<string, Record<string, unknown>>;
+      for (const stepId of ['inspect', 'implement']) {
+        const step = steps[stepId]!;
+        step.subagent = {
+          ...(step.subagent as Record<string, unknown>),
+          turnBudget: { maxTurns: 10, graceTurns: 1 },
+          toolBudget: { hard: 20, block: '*' },
+        };
+      }
+      const workflow = validateWorkflow(raw);
+      expect(workflow.errors).toEqual([]);
+
+      const settings = validateSettings({
+        version: 1,
+        allowProjectWorkflows: true,
+        permissionCeiling: {
+          tools: ['read', 'edit', 'bash'],
+          bash: {
+            mode: 'allow-list',
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
+          },
+          subagent: {
+            ...projectSubagentCeiling(),
+            agents: ['workspace-preparer', 'worker'],
+            maxTimeoutMs: 900_000,
+          },
+        },
+      });
+      expect(settings.errors).toEqual([]);
+
+      expect(
+        checkWorkflowAgainstCeiling(
+          workflow.value!,
+          settings.value!.permissionCeiling!,
+        ),
+      ).toEqual([
+        'workflow.steps.inspect.workspace: workspace binding is unavailable to project workflows',
+      ]);
     });
 
     test('project permission ceiling rejects wider tools and MCP servers', () => {
@@ -828,7 +1032,7 @@ describe('when testing config', () => {
       ).toMatch(/subagent\.retryToolFailures/);
     });
 
-    test('project permission ceiling constrains reviewed Bash sources', () => {
+    test('project permission ceiling constrains declarative Bash rules', () => {
       // given
       const raw = baseWorkflow();
       const steps = raw.steps as Record<string, Record<string, unknown>>;
@@ -838,7 +1042,7 @@ describe('when testing config', () => {
           tools: ['read', 'bash'],
           bash: {
             mode: 'allow-list',
-            approvedSources: ['verification-worker'],
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
           },
         },
       };
@@ -853,7 +1057,7 @@ describe('when testing config', () => {
           tools: ['read', 'edit', 'bash'],
           bash: {
             mode: 'allow-list',
-            approvedSources: ['verification-reviewer'],
+            allow: [{ executable: 'git', argsPrefix: ['diff'] }],
           },
           subagent: projectSubagentCeiling(),
         },
@@ -873,7 +1077,7 @@ describe('when testing config', () => {
           tools: ['read', 'edit', 'bash'],
           bash: {
             mode: 'allow-list',
-            approvedSources: ['verification-worker'],
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
           },
           subagent: projectSubagentCeiling(),
         },
@@ -1235,7 +1439,11 @@ describe('when testing config', () => {
           '  mcp: []',
           '  extensions: []',
           '  skills: []',
-          '  bash: { mode: read-only }',
+          '  bash:',
+          '    mode: allow-list',
+          '    allow:',
+          '      - executable: git',
+          '        argsPrefix: [status]',
           '  subagent:',
           '    agents: [pi-workflows.step]',
           '    contexts: [fresh]',

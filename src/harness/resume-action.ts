@@ -5,13 +5,20 @@ import {
   reconcileRun,
   resolveGate,
   resumeRun,
+  setResumeInput,
   storeGateResolution,
 } from '../engine/transitions.ts';
+import { MAX_RESUME_INPUT_CHARS } from '../engine/state.ts';
 import {
   captureResumeCheckpoint,
   matchesResumeCheckpoint,
 } from '../engine/resume.ts';
+import { analyzeWorkflow } from '../workflow-doctor.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import {
+  conciseStepFailureSummary,
+  reportFailedStep,
+} from './step-reporting.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -29,6 +36,7 @@ type HarnessActionContext = Pick<
   | 'restoreBaselineTools'
   | 'run'
   | 'sessionEpoch'
+  | 'settleAfterTransition'
   | 'updateStatus'
 >;
 
@@ -36,13 +44,23 @@ export type ResumeAction = {
   resumeNow: (
     this: HarnessActionContext,
     context: ExtensionCommandContext,
+    input?: string,
   ) => Promise<void>;
 };
 
 async function resumeNow(
   this: HarnessActionContext,
   context: ExtensionCommandContext,
+  input = '',
 ): Promise<void> {
+  const resumeInput = input.trim();
+  if (resumeInput.length > MAX_RESUME_INPUT_CHARS) {
+    context.ui.notify(
+      `Resume guidance exceeds ${MAX_RESUME_INPUT_CHARS} characters`,
+      'error',
+    );
+    return;
+  }
   if (!this.run || this.run.status !== 'paused') {
     context.ui.notify('No paused workflow to resume', 'warning');
     return;
@@ -88,6 +106,16 @@ async function resumeNow(
   if (!reconciled.run) {
     context.ui.notify(
       reconciled.error ?? 'Cannot reconcile workflow configuration',
+      'error',
+    );
+    return;
+  }
+  const livenessErrors = analyzeWorkflow(workflow.definition).issues.filter(
+    (issue) => issue.level === 'error',
+  );
+  if (livenessErrors.length > 0) {
+    context.ui.notify(
+      `Cannot resume workflow; run /workflow-doctor ${workflow.definition.id}:\n${livenessErrors.map((issue) => issue.message).join('\n')}`,
       'error',
     );
     return;
@@ -144,6 +172,16 @@ async function resumeNow(
       );
       return;
     }
+    const latestLivenessErrors = analyzeWorkflow(
+      workflow.definition,
+    ).issues.filter((issue) => issue.level === 'error');
+    if (latestLivenessErrors.length > 0) {
+      context.ui.notify(
+        `Cannot resume workflow; run /workflow-doctor ${workflow.definition.id}:\n${latestLivenessErrors.map((issue) => issue.message).join('\n')}`,
+        'error',
+      );
+      return;
+    }
     resumed = latest.run;
 
     if (
@@ -187,14 +225,29 @@ async function resumeNow(
   }
 
   const storedResolution = resumed.pendingGate?.resolution;
+  let settledGate:
+    | {
+        readonly stepId: string;
+        readonly outcome: string;
+      }
+    | undefined;
   if (storedResolution) {
     try {
+      const stepId = resumed.pendingGate?.stepId ?? resumed.currentStepId;
+      const gate = workflow.definition.steps[stepId]?.gate;
+      if (!gate) throw new Error(`gated step "${stepId}" no longer exists`);
       resumed = resolveGate(
         workflow,
         resumed,
         storedResolution,
         this.dependencies.now(),
       );
+      settledGate = {
+        stepId,
+        outcome: storedResolution.approved
+          ? gate.approvedOutcome
+          : gate.rejectedOutcome,
+      };
     } catch (error) {
       context.ui.notify(
         `Cannot apply stored gate result: ${error instanceof Error ? error.message : String(error)}`,
@@ -205,7 +258,20 @@ async function resumeNow(
   } else {
     resumed = resumeRun(resumed, this.dependencies.now());
   }
+  resumed = setResumeInput(
+    resumed,
+    resumed.status === 'running' ? resumeInput : '',
+    this.dependencies.now(),
+  );
   this.run = resumed;
+
+  if (settledGate) {
+    this.settleAfterTransition(workflow, {
+      ...settledGate,
+      summary: this.run.lastSummary,
+    });
+    return;
+  }
 
   if (this.run.status === 'awaiting-gate') {
     this.persist();
@@ -238,10 +304,18 @@ async function resumeNow(
       this.dependencies.now(),
     );
     this.persist();
+    reportFailedStep(
+      this.pi,
+      workflow,
+      this.run,
+      this.run.pauseReason ?? 'Step preflight failed',
+    );
     this.restoreBaselineTools();
     this.updateStatus();
     context.ui.notify(
-      `Cannot resume workflow:\n${preflightErrors.join('\n')}`,
+      `Cannot resume workflow: ${conciseStepFailureSummary(
+        preflightErrors.join('; '),
+      )}`,
       'error',
     );
     return;

@@ -4,9 +4,13 @@ import { parseWorkflowStepResult } from '../src/runtime/step-result.ts';
 describe('when testing step result', () => {
   const policy = {
     policyDigest: 'policy-1',
-    outcomes: ['done', 'submit'],
+    outcomes: ['done', 'submit', 'bind'],
     summaryMaxChars: 5,
     gateSubmitOutcome: 'submit',
+    workspace: {
+      bindOn: ['bind'],
+      allowedRoots: ['../worktrees'],
+    },
   };
 
   describe('should satisfy its behavioral contract', () => {
@@ -32,6 +36,82 @@ describe('when testing step result', () => {
         summary: 'done',
         artifact: 'artifact',
       });
+    });
+
+    test('requires workspace cwd exactly on configured binding outcomes', () => {
+      expect(
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'bind',
+            summary: 'bound',
+            workspace: { cwd: '/tmp/worktree ' },
+          },
+          policy,
+        ),
+      ).toEqual({
+        version: 1,
+        policyDigest: 'policy-1',
+        outcome: 'bind',
+        summary: 'bound',
+        workspace: { cwd: '/tmp/worktree ' },
+      });
+
+      const invalid: Array<[unknown, RegExp]> = [
+        [
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'bind',
+            summary: 'bound',
+          },
+          /requires workspace\.cwd/,
+        ],
+        [
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'done',
+            summary: 'done',
+            workspace: { cwd: '/tmp/worktree' },
+          },
+          /workspace is forbidden/,
+        ],
+        [
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'bind',
+            summary: 'bound',
+            workspace: { cwd: 'relative/worktree' },
+          },
+          /must be an absolute path/,
+        ],
+        [
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'bind',
+            summary: 'bound',
+            workspace: { cwd: `/${'x'.repeat(4_096)}` },
+          },
+          /exceeds 4096 characters/,
+        ],
+        [
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'bind',
+            summary: 'bound',
+            workspace: { cwd: '/tmp/worktree', extra: true },
+          },
+          /workspace has unknown property/,
+        ],
+      ];
+      for (const [value, message] of invalid) {
+        expect(() => parseWorkflowStepResult(value, policy)).toThrow(message);
+      }
     });
 
     test('rejects malformed workflow results', () => {

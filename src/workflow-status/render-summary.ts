@@ -25,9 +25,11 @@ export function renderHeaderLines(
   width: number,
 ): Array<string> {
   const { run } = snapshot;
+  const command = snapshot.workflow?.definition.command;
   const firstLine = [
     statusGlyph(theme, runDisplayStatus(run), snapshot.now),
     theme.bold(inline(run.workflowId)),
+    ...(command ? [theme.fg('accent', `/${inline(command)}`)] : []),
     statusBadge(theme, run.status),
     theme.fg('muted', '·'),
     theme.fg(
@@ -62,6 +64,23 @@ export function renderSummaryLines(
   const { run, workflow } = snapshot;
   const lines = [
     ...keyValueLines(theme, 'workflow', run.workflowId, width),
+    ...(workflow
+      ? [
+          ...keyValueLines(
+            theme,
+            'command',
+            `/${workflow.definition.command}`,
+            width,
+            'accent',
+          ),
+          ...keyValueLines(
+            theme,
+            'about',
+            workflow.definition.description,
+            width,
+          ),
+        ]
+      : []),
     ...keyValueLines(theme, 'run', run.runId, width),
     ...keyValueLines(
       theme,
@@ -91,6 +110,9 @@ export function renderSummaryLines(
     ),
   ];
 
+  if (run.cwd && run.startCwd && run.cwd !== run.startCwd) {
+    lines.push(...keyValueLines(theme, 'workspace', run.cwd, width, 'accent'));
+  }
   const execution = formatExecution(snapshot.execution);
   if (execution) {
     lines.push(

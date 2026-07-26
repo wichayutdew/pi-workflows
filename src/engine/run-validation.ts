@@ -1,16 +1,204 @@
+import { isAbsolute, resolve } from 'node:path';
 import {
+  MAX_RESUME_INPUT_CHARS,
+  MAX_STEP_TRACE_ARTIFACT_CHARS,
+  MAX_STEP_TRACE_ATTEMPTS,
+  MAX_STEP_TRACE_LOG_CHARS,
+  MAX_STEP_TRACE_LOG_EVENT_CHARS,
+  MAX_STEP_TRACE_LOG_EVENTS,
+  MAX_STEP_TRACE_SUMMARY_CHARS,
+  MAX_STEP_TRACE_TASK_CHARS,
+  MAX_WORKFLOW_TRACE_CHARS,
   RUN_STATE_VERSION,
+  type GateApproval,
   type GateResolution,
   type PendingGate,
+  type StepAttemptResult,
+  type StepExecutionAttempt,
+  type StepGateDecision,
   type StepHistoryEntry,
   type WorkflowRun,
   type WorkflowRunStatus,
 } from './state-types.ts';
+import { workflowTraceChars } from './step-trace.ts';
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 
 const isRecord = (value: unknown): value is UnknownRecord =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isAbsoluteCwd = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  isAbsolute(value) &&
+  !value.includes('\0');
+
+const isGateApproval = (value: unknown): value is GateApproval =>
+  isRecord(value) &&
+  typeof value.requestId === 'string' &&
+  value.requestId.length > 0 &&
+  typeof value.artifact === 'string' &&
+  value.artifact.trim().length > 0 &&
+  typeof value.feedback === 'string' &&
+  typeof value.stepStructuralDigest === 'string' &&
+  value.stepStructuralDigest.length > 0;
+
+const isStepAttemptResult = (value: unknown): value is StepAttemptResult =>
+  isRecord(value) &&
+  typeof value.outcome === 'string' &&
+  typeof value.summary === 'string' &&
+  value.summary.length <= MAX_STEP_TRACE_SUMMARY_CHARS &&
+  (value.summaryTruncated === undefined || value.summaryTruncated === true) &&
+  (value.artifact === undefined || typeof value.artifact === 'string') &&
+  (typeof value.artifact !== 'string' ||
+    value.artifact.length <= MAX_STEP_TRACE_ARTIFACT_CHARS) &&
+  (value.artifactTruncated === undefined || value.artifactTruncated === true) &&
+  !(value.artifactTruncated === true && value.artifact === undefined) &&
+  (value.workspaceCwd === undefined || isAbsoluteCwd(value.workspaceCwd));
+
+const isStepGateDecision = (value: unknown): value is StepGateDecision =>
+  isRecord(value) &&
+  (value.provider === 'prompt' || value.provider === 'plannotator') &&
+  typeof value.requestId === 'string' &&
+  value.requestId.length > 0 &&
+  typeof value.approved === 'boolean' &&
+  typeof value.feedback === 'string' &&
+  value.feedback.length <= MAX_STEP_TRACE_SUMMARY_CHARS &&
+  (value.feedbackTruncated === undefined || value.feedbackTruncated === true) &&
+  typeof value.resolvedAt === 'number' &&
+  (value.reviewId === undefined || typeof value.reviewId === 'string');
+
+const isSafeTraceIdentityField = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  !value.includes('\0') &&
+  !value.includes('/') &&
+  !value.includes('\\') &&
+  value !== '.' &&
+  value !== '..';
+
+const hasValidMainStepLog = (value: UnknownRecord): boolean => {
+  const log = value.log;
+  if (
+    log !== undefined &&
+    (!Array.isArray(log) ||
+      log.length > MAX_STEP_TRACE_LOG_EVENTS ||
+      !log.every(
+        (line) =>
+          typeof line === 'string' &&
+          line.length > 0 &&
+          line.length <= MAX_STEP_TRACE_LOG_EVENT_CHARS,
+      ) ||
+      log.reduce<number>(
+        (total, line) => total + (typeof line === 'string' ? line.length : 0),
+        0,
+      ) > MAX_STEP_TRACE_LOG_CHARS)
+  ) {
+    return false;
+  }
+  if (value.logTruncated !== undefined && value.logTruncated !== true) {
+    return false;
+  }
+  if (
+    value.omittedLogEvents !== undefined &&
+    (!Number.isSafeInteger(value.omittedLogEvents) ||
+      (value.omittedLogEvents as number) <= 0)
+  ) {
+    return false;
+  }
+  return (
+    (value.logTruncated === true) ===
+      (typeof value.omittedLogEvents === 'number') &&
+    !(
+      log === undefined &&
+      (value.logTruncated !== undefined || value.omittedLogEvents !== undefined)
+    )
+  );
+};
+
+const isStepExecutionAttempt = (
+  value: unknown,
+): value is StepExecutionAttempt => {
+  if (
+    !isRecord(value) ||
+    (value.kind !== 'main' && value.kind !== 'subagent') ||
+    typeof value.requestId !== 'string' ||
+    value.requestId.length === 0 ||
+    value.requestId.includes('\0') ||
+    (value.ordinal !== undefined &&
+      (!Number.isSafeInteger(value.ordinal) ||
+        (value.ordinal as number) <= 0)) ||
+    typeof value.task !== 'string' ||
+    value.task.trim().length === 0 ||
+    value.task.length > MAX_STEP_TRACE_TASK_CHARS ||
+    (value.taskTruncated !== undefined && value.taskTruncated !== true) ||
+    (value.omittedTaskChars !== undefined &&
+      (!Number.isSafeInteger(value.omittedTaskChars) ||
+        (value.omittedTaskChars as number) <= 0)) ||
+    (value.taskTruncated === true) !==
+      (typeof value.omittedTaskChars === 'number') ||
+    typeof value.startedAt !== 'number' ||
+    (value.result !== undefined && !isStepAttemptResult(value.result)) ||
+    (value.gateDecision !== undefined &&
+      !isStepGateDecision(value.gateDecision))
+  ) {
+    return false;
+  }
+  if (value.kind === 'main') {
+    return (
+      value.agent === undefined &&
+      value.transcript === undefined &&
+      hasValidMainStepLog(value)
+    );
+  }
+  if (
+    value.log !== undefined ||
+    value.logTruncated !== undefined ||
+    value.omittedLogEvents !== undefined
+  ) {
+    return false;
+  }
+  if (typeof value.agent !== 'string' || value.agent.length === 0) {
+    return false;
+  }
+  if (value.transcript === undefined) return true;
+  if (!isRecord(value.transcript)) return false;
+  const transcript = value.transcript;
+  if (
+    !isAbsoluteCwd(transcript.trustedRoot) ||
+    !isAbsoluteCwd(transcript.sessionFile) ||
+    !isSafeTraceIdentityField(transcript.runId) ||
+    !Number.isSafeInteger(transcript.childIndex) ||
+    (transcript.childIndex as number) < 0
+  ) {
+    return false;
+  }
+  return (
+    resolve(
+      transcript.trustedRoot,
+      transcript.runId,
+      `run-${String(transcript.childIndex)}`,
+      'session.jsonl',
+    ) === resolve(transcript.sessionFile)
+  );
+};
+
+const isStepExecutionAttempts = (
+  value: unknown,
+): value is ReadonlyArray<StepExecutionAttempt> =>
+  Array.isArray(value) &&
+  value.length <= MAX_STEP_TRACE_ATTEMPTS &&
+  value.every(isStepExecutionAttempt) &&
+  new Set(value.map((attempt) => attempt.requestId)).size === value.length &&
+  value.every((attempt, index) => {
+    if (attempt.ordinal === undefined) return true;
+    const ordinal = attempt.ordinal;
+    return value
+      .slice(0, index)
+      .every(
+        (earlier) => earlier.ordinal === undefined || earlier.ordinal < ordinal,
+      );
+  });
 
 const isStepHistoryEntry = (value: unknown): value is StepHistoryEntry =>
   isRecord(value) &&
@@ -18,6 +206,15 @@ const isStepHistoryEntry = (value: unknown): value is StepHistoryEntry =>
   typeof value.stepDigest === 'string' &&
   typeof value.outcome === 'string' &&
   typeof value.summary === 'string' &&
+  (value.workspaceCwd === undefined || isAbsoluteCwd(value.workspaceCwd)) &&
+  (value.artifact === undefined || typeof value.artifact === 'string') &&
+  (value.approval === undefined ||
+    (isGateApproval(value.approval) &&
+      value.artifact === value.approval.artifact)) &&
+  (value.attempts === undefined || isStepExecutionAttempts(value.attempts)) &&
+  (value.omittedAttempts === undefined ||
+    (Number.isSafeInteger(value.omittedAttempts) &&
+      (value.omittedAttempts as number) > 0)) &&
   typeof value.completedAt === 'number';
 
 const isGateResolution = (value: unknown): value is GateResolution =>
@@ -49,6 +246,10 @@ const isVisitCounts = (value: unknown): value is Record<string, number> =>
 const isOptionalString = (value: unknown): value is string | undefined =>
   value === undefined || typeof value === 'string';
 
+const isOptionalResumeInput = (value: unknown): value is string | undefined =>
+  value === undefined ||
+  (typeof value === 'string' && value.length <= MAX_RESUME_INPUT_CHARS);
+
 const isWorkflowRunStatus = (value: unknown): value is WorkflowRunStatus =>
   value === 'running' ||
   value === 'paused' ||
@@ -75,6 +276,29 @@ const hasValidGateState = (
       (run.status === 'awaiting-gate' ||
         (run.status === 'paused' && run.pausedFrom === 'awaiting-gate'));
 
+const hasValidWorkspaceState = (
+  run: UnknownRecord,
+  history: ReadonlyArray<StepHistoryEntry>,
+): boolean => {
+  const startCwd = run.startCwd;
+  const cwd = run.cwd;
+  if (startCwd !== undefined && !isAbsoluteCwd(startCwd)) return false;
+  if (cwd !== undefined && !isAbsoluteCwd(cwd)) return false;
+
+  const bindings = history.flatMap((entry) =>
+    entry.workspaceCwd ? [entry.workspaceCwd] : [],
+  );
+  if (new Set(bindings).size > 1) return false;
+  const boundCwd = bindings.at(-1);
+  if (boundCwd !== undefined) {
+    return isAbsoluteCwd(startCwd) && isAbsoluteCwd(cwd) && cwd === boundCwd;
+  }
+
+  // Legacy checkpoints have only `cwd`; new checkpoints keep start/current
+  // equal until a structured workspace binding is accepted.
+  return startCwd === undefined || cwd === startCwd;
+};
+
 /**
  * Validates an unknown value as a persisted workflow run.
  *
@@ -100,6 +324,11 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
     value.baselineTools.every((tool) => typeof tool === 'string') &&
     Array.isArray(value.history) &&
     value.history.every(isStepHistoryEntry) &&
+    (value.currentStepAttempts === undefined ||
+      isStepExecutionAttempts(value.currentStepAttempts)) &&
+    (value.currentStepOmittedAttempts === undefined ||
+      (Number.isSafeInteger(value.currentStepOmittedAttempts) &&
+        (value.currentStepOmittedAttempts as number) > 0)) &&
     isVisitCounts(value.visits) &&
     typeof value.startedAt === 'number' &&
     typeof value.updatedAt === 'number' &&
@@ -111,6 +340,7 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
     isOptionalString(value.reviewedArtifact) &&
     isOptionalString(value.reviewedFeedback) &&
     isOptionalString(value.stepHandoff) &&
+    isOptionalResumeInput(value.resumeInput) &&
     isOptionalString(value.pauseReason) &&
     isOptionalString(value.failedStepId) &&
     (value.pausedFrom === undefined ||
@@ -122,6 +352,11 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
   if (pendingGate !== undefined && !isPendingGate(pendingGate)) return false;
 
   return (
+    workflowTraceChars(value as WorkflowRun) <= MAX_WORKFLOW_TRACE_CHARS &&
+    hasValidWorkspaceState(
+      value,
+      value.history as ReadonlyArray<StepHistoryEntry>,
+    ) &&
     hasValidPauseState(value) &&
     hasValidFailureState(value) &&
     hasValidGateState(value, pendingGate)

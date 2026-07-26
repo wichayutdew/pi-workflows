@@ -8,6 +8,7 @@ const PROMPT_VARIABLES = new Set([
   'reviewed.artifact',
   'reviewed.feedback',
   'gate.feedback',
+  'resume.input',
 ]);
 
 /** Validate template variables embedded in resolved prompt text. */

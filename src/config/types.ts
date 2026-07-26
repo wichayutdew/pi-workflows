@@ -4,18 +4,14 @@ export const WORKFLOW_SCHEMA_VERSION = 1 as const;
 export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
 export const SUBAGENT_RUNTIME_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
+export const MAX_WORKSPACE_PATH_CHARS = 4_096;
+export const MAX_WORKSPACE_ALLOWED_ROOTS = 32;
 
 export const TERMINAL_TARGETS = ['$done', '$pause'] as const;
 export type TerminalTarget = (typeof TERMINAL_TARGETS)[number];
 export type StepTarget = string;
 
-export type BashMode = 'deny' | 'read-only' | 'allow-list' | 'unrestricted';
-export type BashApprovalSource =
-  | 'verification-worker'
-  | 'verification-reviewer'
-  | 'remote-actions'
-  | 'remote-push'
-  | 'remote-drafts';
+export type BashMode = 'deny' | 'allow-list' | 'unrestricted';
 
 export type BashRule = {
   readonly executable: string;
@@ -25,18 +21,6 @@ export type BashRule = {
 export type BashPermission = {
   readonly mode: BashMode;
   readonly allow: ReadonlyArray<BashRule>;
-  /**
-   * Exact commands extracted from the most recent human-approved artifact.
-   * They supplement `allow` only inside the correlated step execution.
-   */
-  readonly approvedSources?: ReadonlyArray<BashApprovalSource>;
-  /**
-   * Sources whose command-only retry handoffs may refine an already approved
-   * command. The original reviewed identity and safety envelope remain fixed.
-   */
-  readonly handoffSources?: ReadonlyArray<
-    'verification-worker' | 'verification-reviewer'
-  >;
 };
 
 export type StepPermissions = {
@@ -81,9 +65,9 @@ export type StepSubagent = {
   readonly toolBudget?: SubagentToolBudget;
   readonly artifacts: boolean;
   /**
-   * Authorizes the bounded automatic recovery sequence in Bash modes broader
-   * than read-only. Every failed attempt must still have a complete,
-   * mutation-safe replay audit.
+   * Authorizes bounded automatic recovery when Bash can execute commands.
+   * Every failed attempt must still have a complete, mutation-safe replay
+   * audit.
    */
   readonly retryToolFailures: boolean;
 };
@@ -108,6 +92,13 @@ export type PlannotatorGate = GateDefinition & {
 
 export type WorkflowGate = PromptGate | PlannotatorGate;
 
+export type StepWorkspaceBinding = {
+  /** Outcomes whose result establishes the workspace for later steps. */
+  readonly bindOn: ReadonlyArray<string>;
+  /** Paths relative to the run-start directory that may contain the workspace. */
+  readonly allowedRoots: ReadonlyArray<string>;
+};
+
 export type WorkflowStep = {
   readonly title: string;
   readonly prompt: PromptSpec;
@@ -117,6 +108,8 @@ export type WorkflowStep = {
   readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;
   readonly gate?: WorkflowGate;
+  /** Optional one-time workspace binding produced by this delegated step. */
+  readonly workspace?: StepWorkspaceBinding;
 };
 
 export type WorkflowDefinition = {
@@ -137,6 +130,8 @@ export type LoadedWorkflow = {
   readonly prompts: Readonly<Record<string, string>>;
   readonly digest: string;
   readonly stepDigests: Readonly<Record<string, string>>;
+  /** Per-step digest excluding only the prompt specification and resolved text. */
+  readonly stepStructuralDigests: Readonly<Record<string, string>>;
   readonly sourcePath: string;
   readonly sourceKind: WorkflowSourceKind;
 };

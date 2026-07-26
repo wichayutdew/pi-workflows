@@ -4,6 +4,7 @@ export type ToolFailureDiagnostic = {
   readonly tool: string;
   readonly call?: string;
   readonly output?: string;
+  readonly postCompletionWarning?: string;
   readonly replaySafe?: true;
   readonly completionAfterFailure?: true;
   readonly completionValue?: Readonly<Record<string, unknown>>;
@@ -21,7 +22,6 @@ export type DelegationReplayAudit = {
 export type DelegationReplayExpectation = {
   readonly task: string;
   readonly bashPermission: BashPermission;
-  readonly approvedBashCommands: ReadonlyArray<string>;
 };
 
 export type SubagentSessionIdentity = {
@@ -55,6 +55,11 @@ export type RecordedCompletion = {
   readonly value: Readonly<Record<string, unknown>>;
 };
 
+export type RecordedTranscriptWarning = {
+  readonly order: number;
+  readonly content: string;
+};
+
 export type RecordedMessage = {
   readonly order: number;
   readonly value: Readonly<Record<string, unknown>>;
@@ -65,6 +70,7 @@ export type ParsedFailureTranscript = {
   readonly diagnostics: ReadonlyArray<RecordedToolFailure>;
   readonly successfulResults: ReadonlyArray<RecordedToolSuccess>;
   readonly successfulCompletions: ReadonlyArray<RecordedCompletion>;
+  readonly transcriptWarnings: ReadonlyArray<RecordedTranscriptWarning>;
   readonly recordedMessages: ReadonlyArray<RecordedMessage>;
   readonly resultCallIds: ReadonlySet<string>;
   readonly hasValidFalsePositiveProof: boolean;

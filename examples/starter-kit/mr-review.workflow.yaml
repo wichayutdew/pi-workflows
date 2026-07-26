@@ -1,0 +1,130 @@
+version: 1
+id: mr-review
+command: mr-review
+description: Fetch, approve, publish, and verify one hosted code review
+start: fetch
+maxStepVisits: 3
+summaryMaxChars: 50000
+steps:
+  fetch:
+    title: Fetch complete hosted-review evidence
+    prompt:
+      file: steps/mr-review/fetch.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1800000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [
+                [status],
+                [diff],
+                [log],
+                [show],
+                [grep],
+                [ls-files],
+                [remote, -v],
+                [remote, get-url],
+                [rev-parse],
+              ]
+          - executable: glab
+            argsPrefixes: [[mr, view], [mr, diff], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
+          - executable: curl
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      fetched: review
+      blocked: $pause
+
+  review:
+    title: Produce and approve a complete review
+    prompt:
+      file: steps/mr-review/review.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1800000
+    permissions:
+      tools: [read, ls, bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: glab
+            argsPrefixes: [[mr, view], [mr, diff], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
+          - executable: curl
+    requires:
+      tools: [read, ls, bash]
+    gate:
+      provider: plannotator
+      submitOutcome: submit
+      approvedOutcome: approved
+      rejectedOutcome: changes-requested
+      timeoutMs: 30000
+    transitions:
+      approved: publish
+      changes-requested: $pause
+      blocked: $pause
+
+  publish:
+    title: Publish the approved review
+    prompt:
+      file: steps/mr-review/publish.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 900000
+    permissions:
+      tools: [bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: glab
+            argsPrefixes: [[mr, view], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [api]]
+          - executable: curl
+    requires:
+      tools: [bash]
+    transitions:
+      published: verify
+      blocked: $pause
+
+  verify:
+    title: Verify the review is observable remotely
+    prompt:
+      file: steps/mr-review/verify.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 900000
+    permissions:
+      tools: [bash]
+      mcp: [gitlab, github]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: glab
+            argsPrefixes: [[mr, view], [api]]
+          - executable: gh
+            argsPrefixes: [[pr, view], [api]]
+          - executable: curl
+    requires:
+      tools: [bash]
+    transitions:
+      verified: $done
+      blocked: $pause

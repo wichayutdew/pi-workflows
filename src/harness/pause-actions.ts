@@ -1,15 +1,18 @@
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { abortRun, pauseRun } from '../engine/transitions.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import { conciseStepPauseSummary, reportPausedStep } from './step-reporting.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
   | 'cancelActiveDelegation'
   | 'cancelPromptReview'
+  | 'catalog'
   | 'dependencies'
   | 'isolateMainSessionTools'
   | 'mainSteps'
   | 'persist'
+  | 'pi'
   | 'restoreBaselineTools'
   | 'run'
   | 'updateStatus'
@@ -60,6 +63,12 @@ async function pauseNow(
 
   this.run = pauseRun(this.run, reason, this.dependencies.now());
   this.persist();
+  reportPausedStep(
+    this.pi,
+    this.catalog.workflows.get(this.run.workflowId),
+    this.run,
+    this.run.pauseReason ?? reason,
+  );
   if (isCancellationConfirmed) {
     this.restoreBaselineTools();
   } else {
@@ -68,7 +77,7 @@ async function pauseNow(
   this.updateStatus();
   context.ui.notify(
     isCancellationConfirmed
-      ? `Paused "${this.run.workflowId}" at step "${this.run.currentStepId}". Fix the issue, then run /workflow-resume.`
+      ? `Paused "${this.run.workflowId}" at step "${this.run.currentStepId}": ${conciseStepPauseSummary(this.run.pauseReason ?? reason)}`
       : `Pause recorded at "${this.run.currentStepId}", but child cancellation is not confirmed. Main tools remain isolated until it exits.`,
     isCancellationConfirmed ? 'info' : 'warning',
   );

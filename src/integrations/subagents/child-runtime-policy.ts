@@ -18,6 +18,7 @@ export const childPolicyStep = (policy: ChildStepPolicy): WorkflowStep => ({
   permissions: policy.permissions,
   requires: { tools: [], extensions: [], skills: [] },
   transitions: {},
+  ...(policy.workspace ? { workspace: policy.workspace } : {}),
 });
 
 /**
@@ -25,7 +26,6 @@ export const childPolicyStep = (policy: ChildStepPolicy): WorkflowStep => ({
  * policy.
  */
 export const childSystemPrompt = (policy: ChildStepPolicy): string => {
-  const hasPauseOutcome = policy.pauseOutcomes.length > 0;
   return [
     '# Pi Workflows delegated step',
     '',
@@ -36,7 +36,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     'The parent workflow harness owns orchestration and state transitions.',
     'Perform only this delegated step. Its child-side tool policy is enforced.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
-    'Pass the workflow result as its `value`: outcome, summary, and optional artifact.',
+    'Pass the workflow result as its `value`: outcome, summary, optional artifact, and workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
@@ -45,39 +45,14 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
           `Outcome "${policy.gateSubmitOutcome}" requires the complete gate artifact.`,
         ]
       : []),
-    ...(hasPauseOutcome
+    ...(policy.workspace
       ? [
-          `If the workflow definition or environment is wrong, choose a pause outcome (${policy.pauseOutcomes.join(', ')}).`,
+          `Workspace-binding outcomes: ${policy.workspace.bindOn.join(', ')}`,
+          `For those outcomes, include workspace.cwd as an absolute directory under one allowed root relative to the run-start directory: ${policy.workspace.allowedRoots.join(', ')}`,
+          'For every other outcome, omit workspace.',
         ]
-      : [
-          'If the workflow definition or environment is wrong, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step.',
-        ]),
+      : ['This step cannot bind a workspace; omit workspace.']),
     'This is a non-interactive workflow child. Never call contact_supervisor, subagent_supervisor, or intercom.',
-    ...(policy.gateSubmitOutcome
-      ? [
-          'Put every unresolved decision in the gate artifact with evidence, options, a recommendation, and an adopted default; do not ask a terminal question.',
-        ]
-      : hasPauseOutcome
-        ? [
-            'Treat the step instructions and incoming handoff as the final execution contract.',
-            'If that contract is missing, stale, or contradictory, finish with a pause outcome and describe the unresolved contract and evidence declaratively in the summary; do not ask a terminal question.',
-          ]
-        : [
-            'Treat the step instructions and incoming handoff as the final execution contract.',
-            'If that contract is missing, stale, or contradictory, do not fabricate success or call the completion tool; end with a concise declarative error so the parent pauses the step. Do not ask a terminal question.',
-          ]),
-    ...(policy.repositoryCwd
-      ? [
-          `Reviewed repository root: ${policy.repositoryCwd}`,
-          ...(policy.bootstrapCwd
-            ? [
-                `Bootstrap directory: ${policy.bootstrapCwd}`,
-                'The reviewed repository root does not exist yet. Run only its exact approved setup command first, then use absolute paths under the reviewed repository root for every edit and write. Never mutate the bootstrap directory.',
-              ]
-            : [
-                'Keep every edit and write inside the reviewed repository root.',
-              ]),
-        ]
-      : []),
+    'Follow the supplied step instructions when choosing one valid outcome; outcome names have no built-in domain meaning.',
   ].join('\n');
 };

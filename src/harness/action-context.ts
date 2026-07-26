@@ -22,6 +22,7 @@ import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { WorkflowStatusSnapshot } from '../workflow-status.ts';
 import type { DelegationFailureActions } from './delegation-failure.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
+import type { SettledStepReport } from './step-reporting.ts';
 import type {
   ActiveDelegation,
   ActivePromptReview,
@@ -61,6 +62,10 @@ export type HarnessActionContext = {
   legacyProgressWidgetContext: ExtensionContext | undefined;
   workflowIds: () => Array<string>;
   list: (context: ExtensionCommandContext) => Promise<void>;
+  doctor: (
+    workflowId: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
   start: (
     workflowId: string,
     input: string,
@@ -74,8 +79,11 @@ export type HarnessActionContext = {
   ) => Promise<void>;
   pause: (reason: string, context: ExtensionCommandContext) => Promise<void>;
   pauseNow: (reason: string, context: ExtensionCommandContext) => Promise<void>;
-  resume: (context: ExtensionCommandContext) => Promise<void>;
-  resumeNow: (context: ExtensionCommandContext) => Promise<void>;
+  resume: (input: string, context: ExtensionCommandContext) => Promise<void>;
+  resumeNow: (
+    context: ExtensionCommandContext,
+    input?: string,
+  ) => Promise<void>;
   abort: (reason: string, context: ExtensionCommandContext) => Promise<void>;
   abortNow: (reason: string, context: ExtensionCommandContext) => Promise<void>;
   reload: (context: ExtensionCommandContext) => Promise<void>;
@@ -93,6 +101,16 @@ export type HarnessActionContext = {
     run: WorkflowRun,
     step: WorkflowStep,
   ) => void;
+  queueMainStepLog: (
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void>;
+  recordMainStepLog: (
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void>;
   queueMainStepResult: (
     identity: MainStepIdentity,
     result: WorkflowStepResult | undefined,
@@ -123,8 +141,12 @@ export type HarnessActionContext = {
     failure: DelegationFailureDetails | undefined,
     reason: string,
   ) => boolean;
-  pauseForDelegationFailure: (reason: string) => void;
-  pauseForExecutionFailure: (label: string, reason: string) => void;
+  pauseForDelegationFailure: (reason: string, failureSummary?: string) => void;
+  pauseForExecutionFailure: (
+    label: string,
+    reason: string,
+    failureSummary?: string,
+  ) => void;
   retainUnconfirmedDelegation: (
     active: ActiveDelegation,
     reason: string,
@@ -134,6 +156,7 @@ export type HarnessActionContext = {
     workflow: LoadedWorkflow,
     originalRun: WorkflowRun,
     outcome: string,
+    summary: string,
     artifact: string,
   ) => Promise<void>;
   launchPromptReview: (
@@ -157,7 +180,10 @@ export type HarnessActionContext = {
   cancelPromptReview: () => void;
   registerPlannotatorResults: () => void;
   handlePlannotatorResult: (data: unknown) => Promise<void>;
-  settleAfterTransition: (workflow: LoadedWorkflow) => void;
+  settleAfterTransition: (
+    workflow: LoadedWorkflow,
+    report: SettledStepReport,
+  ) => void;
   preflight: (workflow: LoadedWorkflow, stepId: string) => Array<string>;
   isolateMainSessionTools: () => void;
   restoreBaselineTools: () => void;
@@ -176,6 +202,5 @@ export type HarnessActionContext = {
   refreshStatusWhileRunning: () => void;
   stopStatusRefresh: () => void;
   registerWorkflowStatusShortcut: () => void;
-  openWorkflowStatus: (context: ExtensionContext) => void;
   showWorkflowStatus: (context: ExtensionContext) => Promise<void>;
 };

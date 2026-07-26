@@ -7,6 +7,14 @@ import { failRun, pauseRun } from '../engine/transitions.ts';
 import { preflightStep } from '../preflight.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { formatCatalogDiagnostics } from './catalog.ts';
+import {
+  conciseStepFailureSummary,
+  conciseStepPauseSummary,
+  reportFailedStep,
+  reportPausedStep,
+  reportSettledStep,
+  type SettledStepReport,
+} from './step-reporting.ts';
 
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 
@@ -39,6 +47,7 @@ export type CoreActions = {
   settleAfterTransition: (
     this: HarnessActionContext,
     workflow: LoadedWorkflow,
+    report: SettledStepReport,
   ) => void;
   preflight: (
     this: HarnessActionContext,
@@ -71,6 +80,7 @@ export type CoreActions = {
 function settleAfterTransition(
   this: HarnessActionContext,
   workflow: LoadedWorkflow,
+  report: SettledStepReport,
 ): void {
   if (!this.run) return;
   if (this.run.status === 'running') {
@@ -85,6 +95,14 @@ function settleAfterTransition(
   }
 
   this.persist();
+  reportSettledStep(this.pi, workflow, this.run, report);
+  if (
+    this.run.status === 'paused' &&
+    this.run.failedStepId === this.run.currentStepId &&
+    this.run.pauseReason
+  ) {
+    reportFailedStep(this.pi, workflow, this.run, this.run.pauseReason);
+  }
   if (this.run.status !== 'running') {
     this.restoreBaselineTools();
     this.updateStatus();
@@ -94,8 +112,13 @@ function settleAfterTransition(
         'info',
       );
     } else if (this.run.status === 'paused') {
+      const reason = this.run.pauseReason ?? 'manual action required';
       this.latestContext?.ui.notify(
-        `Workflow paused: ${this.run.pauseReason ?? 'manual action required'}`,
+        `Workflow paused: ${
+          this.run.failedStepId
+            ? conciseStepFailureSummary(reason)
+            : conciseStepPauseSummary(reason)
+        }`,
         'warning',
       );
     }
@@ -195,6 +218,12 @@ function restoreFromSession(
       this.dependencies.now(),
     );
     this.persist();
+    reportPausedStep(
+      this.pi,
+      this.catalog.workflows.get(this.run.workflowId),
+      this.run,
+      this.run.pauseReason ?? 'Session was restored',
+    );
   }
   if (!this.run && previousBaseline) {
     this.pi.setActiveTools([...previousBaseline]);

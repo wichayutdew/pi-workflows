@@ -28,21 +28,10 @@ function bashWithinCeiling(
   if (ceiling.mode === 'unrestricted') return true;
   if (requested.mode === 'deny') return true;
   if (ceiling.mode === 'deny') return false;
-  if (ceiling.mode === 'read-only') return requested.mode === 'read-only';
   if (requested.mode !== 'allow-list') return false;
 
   const allowedRules = new Set(ceiling.allow.map(ruleKey));
-  const allowedSources = new Set(ceiling.approvedSources ?? []);
-  const allowedHandoffSources = new Set(ceiling.handoffSources ?? []);
-  return (
-    requested.allow.every((rule) => allowedRules.has(ruleKey(rule))) &&
-    (requested.approvedSources ?? []).every((source) =>
-      allowedSources.has(source),
-    ) &&
-    (requested.handoffSources ?? []).every((source) =>
-      allowedHandoffSources.has(source),
-    )
-  );
+  return requested.allow.every((rule) => allowedRules.has(ruleKey(rule)));
 }
 
 function turnBudgetErrors(
@@ -128,6 +117,11 @@ export function checkWorkflowAgainstCeiling(
   return Object.entries(workflow.steps).flatMap(([stepId, step]) => {
     const path = `workflow.steps.${stepId}.permissions`;
     return [
+      ...(Object.hasOwn(step, 'workspace')
+        ? [
+            `workflow.steps.${stepId}.workspace: workspace binding is unavailable to project workflows`,
+          ]
+        : []),
       ...step.permissions.tools
         .filter((tool) => !ceiling.tools.includes(tool))
         .map(

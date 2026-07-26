@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { WorkflowCatalog } from '../src/config/types.ts';
+import { advanceRun } from '../src/engine/transitions.ts';
 import { createRun, type WorkflowRun } from '../src/engine/state.ts';
 import { pauseRun } from '../src/engine/transitions.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
@@ -42,6 +43,11 @@ function createCoreFixture() {
     persisted: 0,
     registered: [] as Array<string>,
     restoredTools: 0,
+    sentMessages: [] as Array<{
+      customType: string;
+      content: string;
+      display?: boolean;
+    }>,
     statusUpdates: 0,
     toolSets: [] as Array<Array<string>>,
   };
@@ -69,6 +75,13 @@ function createCoreFixture() {
       getCommands: () => [] as Array<{ name: string }>,
       registerCommand: (name: string) => {
         calls.registered.push(name);
+      },
+      sendMessage: (message: {
+        customType: string;
+        content: string;
+        display?: boolean;
+      }) => {
+        calls.sentMessages.push(message);
       },
       setActiveTools: (tools: Array<string>) => {
         calls.toolSets.push(tools);
@@ -116,17 +129,28 @@ describe('when testing core actions', () => {
   test('fails a running transition whose next step fails preflight', () => {
     const workflow = loadedWorkflow();
     const { calls, fixture, notices } = createCoreFixture();
-    fixture.run = createRun(workflow, '', ['read'], 'run-1', 1);
+    fixture.run = advanceRun(
+      workflow,
+      createRun(workflow, '', ['read'], 'run-1', 1),
+      'ready',
+      'Inspection is complete',
+      2,
+    );
     fixture.preflight = () => ['required skill is unavailable'];
 
     actions.settleAfterTransition.call(
       fixture as unknown as HarnessActionContext,
       workflow,
+      {
+        stepId: 'inspect',
+        outcome: 'ready',
+        summary: 'Inspection is complete',
+      },
     );
 
     expect(fixture.run).toMatchObject({
       status: 'paused',
-      failedStepId: 'inspect',
+      failedStepId: 'implement',
       pauseReason: 'Step preflight failed: required skill is unavailable',
     });
     expect(calls).toMatchObject({
@@ -136,6 +160,11 @@ describe('when testing core actions', () => {
       statusUpdates: 1,
     });
     expect(notices.at(-1)?.message).toContain('Workflow paused');
+    expect(calls.sentMessages).toHaveLength(2);
+    expect(calls.sentMessages[0]?.content).toContain('Inspection is complete');
+    expect(calls.sentMessages[1]?.content).toContain(
+      'Step preflight failed: required skill is unavailable',
+    );
   });
 
   test('rejects mutations before initialization and after a session switch', async () => {
@@ -216,6 +245,9 @@ describe('when testing core actions', () => {
     });
     expect(calls.persisted).toBe(1);
     expect(calls.restoredTools).toBe(1);
+    expect(calls.sentMessages.at(-1)?.content).toContain(
+      'Session was restored; inspect the checkpoint before resuming',
+    );
   });
 
   test('discards a stale catalog load', async () => {

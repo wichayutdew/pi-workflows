@@ -1,7 +1,9 @@
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { createRun } from '../engine/state.ts';
+import { analyzeWorkflow, formatWorkflowDoctor } from '../workflow-doctor.ts';
 import { formatWorkflowList } from '../workflow-list.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import { formatCatalogDiagnostics } from './catalog.ts';
 import type { WorkflowStartContext } from './types.ts';
 
 type HarnessActionContext = Pick<
@@ -13,7 +15,6 @@ type HarnessActionContext = Pick<
   | 'isSessionActive'
   | 'isolateMainSessionTools'
   | 'launchCurrentStep'
-  | 'openWorkflowStatus'
   | 'persist'
   | 'pi'
   | 'preflight'
@@ -38,6 +39,11 @@ function isCurrentSession(
 export type StartActions = {
   listWorkflows: (
     this: HarnessActionContext,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
+  doctorWorkflows: (
+    this: HarnessActionContext,
+    workflowId: string,
     context: ExtensionCommandContext,
   ) => Promise<void>;
   startNow: (
@@ -71,6 +77,48 @@ async function listWorkflows(
     customType: 'workflow-list',
     content: formatWorkflowList(
       workflows.map((workflow) => workflow.definition),
+    ),
+    display: true,
+  });
+}
+
+async function doctorWorkflows(
+  this: HarnessActionContext,
+  workflowId: string,
+  context: ExtensionCommandContext,
+): Promise<void> {
+  const catalog = await this.dependencies.loadCatalog({
+    cwd: context.cwd,
+    projectTrusted: context.isProjectTrusted(),
+  });
+  if (catalog.diagnostics.some((diagnostic) => diagnostic.level === 'error')) {
+    context.ui.notify(
+      `Workflow configuration errors:\n${formatCatalogDiagnostics(catalog)}`,
+      'warning',
+    );
+  }
+  const selected = workflowId
+    ? [catalog.workflows.get(workflowId)].filter(
+        (workflow) => workflow !== undefined,
+      )
+    : [...catalog.workflows.values()].sort((left, right) =>
+        left.definition.id.localeCompare(right.definition.id),
+      );
+  if (workflowId && selected.length === 0) {
+    context.ui.notify(`Workflow "${workflowId}" is not loaded`, 'error');
+    return;
+  }
+  if (selected.length === 0) {
+    context.ui.notify(
+      `No workflows loaded from ${catalog.userDirectory}`,
+      catalog.diagnostics.length > 0 ? 'warning' : 'info',
+    );
+    return;
+  }
+  this.pi.sendMessage({
+    customType: 'workflow-doctor',
+    content: formatWorkflowDoctor(
+      selected.map((workflow) => analyzeWorkflow(workflow.definition)),
     ),
     display: true,
   });
@@ -134,6 +182,16 @@ async function startNow(
     context.ui.notify(`Workflow "${workflowId}" is not loaded`, 'error');
     return;
   }
+  const livenessErrors = analyzeWorkflow(workflow.definition).issues.filter(
+    (issue) => issue.level === 'error',
+  );
+  if (livenessErrors.length > 0) {
+    context.ui.notify(
+      `Cannot start workflow; run /workflow-doctor ${workflowId}:\n${livenessErrors.map((issue) => issue.message).join('\n')}`,
+      'error',
+    );
+    return;
+  }
   const preflightErrors = this.preflight(workflow, workflow.definition.start);
   if (preflightErrors.length > 0) {
     context.ui.notify(
@@ -143,17 +201,33 @@ async function startNow(
     return;
   }
 
+  let canonicalStartCwd: string;
+  try {
+    canonicalStartCwd = this.dependencies.resolveWorkspaceDirectory({
+      candidateCwd: context.cwd,
+      startCwd: context.cwd,
+      allowedRoots: ['.'],
+    });
+  } catch (error) {
+    context.ui.notify(
+      `Cannot capture workflow working directory: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      'error',
+    );
+    return;
+  }
   this.run = createRun(
     workflow,
     input.trim(),
     this.pi.getActiveTools(),
     this.dependencies.createRequestId(),
     this.dependencies.now(),
+    canonicalStartCwd,
   );
   this.persist();
   this.isolateMainSessionTools();
   this.updateStatus();
-  this.openWorkflowStatus(context);
   this.launchCurrentStep(workflow);
 }
 
@@ -179,5 +253,5 @@ async function reloadNow(
  * Returns workflow listing, start, and reload actions for harness composition.
  */
 export function createStartActions(): StartActions {
-  return { listWorkflows, startNow, reloadNow };
+  return { listWorkflows, doctorWorkflows, startNow, reloadNow };
 }

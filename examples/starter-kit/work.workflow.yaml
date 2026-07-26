@@ -1,0 +1,97 @@
+version: 1
+id: work
+command: work
+description: Prepare a dedicated workspace, approve a plan, implement, and verify local work
+start: prepare-workspace
+maxStepVisits: 4
+summaryMaxChars: 30000
+steps:
+  prepare-workspace:
+    title: Prepare or reuse a dedicated worktree
+    prompt:
+      file: steps/shared/prepare-workspace.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 900000
+    workspace:
+      bindOn: [ready]
+      allowedRoots: ['..']
+    permissions:
+      tools: [read, ls, bash]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      ready: plan
+      blocked: $pause
+
+  plan:
+    title: Explore and plan the requested work
+    prompt:
+      file: steps/work/plan.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 1200000
+    permissions:
+      tools: [read, ls, bash]
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: rg
+          - executable: grep
+    requires:
+      tools: [read, ls, bash]
+    gate:
+      provider: plannotator
+      submitOutcome: submit
+      approvedOutcome: approved
+      rejectedOutcome: changes-requested
+      timeoutMs: 30000
+    transitions:
+      approved: implement
+      changes-requested: $pause
+      blocked: $pause
+
+  implement:
+    title: Implement the approved plan
+    prompt:
+      file: steps/work/implement.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 7200000
+      artifacts: true
+    permissions:
+      tools: [read, ls, bash, edit, write]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash, edit, write]
+    transitions:
+      ready: verify
+      blocked: $pause
+
+  verify:
+    title: Independently verify the result
+    prompt:
+      file: steps/work/verify.md
+    subagent:
+      agent: pi-workflows.step
+      context: fresh
+      timeoutMs: 3600000
+    permissions:
+      tools: [read, ls, bash]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+    transitions:
+      passed: $done
+      failed: implement
+      blocked: $pause

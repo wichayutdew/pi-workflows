@@ -22,8 +22,11 @@ function historyPathEntry(
   workflow: LoadedWorkflow | undefined,
   entry: StepHistoryEntry,
   visit: number,
+  index: number,
 ): PathEntry {
   return {
+    index,
+    historyIndex: index,
     stepId: entry.stepId,
     title: stepTitle(workflow, entry.stepId),
     status: 'completed',
@@ -39,16 +42,17 @@ export function buildPathEntries(
 ): Array<PathEntry> {
   const { run, workflow } = snapshot;
   const visits = new Map<string, number>();
-  const completedEntries = run.history.map((entry) => {
+  const completedEntries = run.history.map((entry, index) => {
     const visit = (visits.get(entry.stepId) ?? 0) + 1;
     visits.set(entry.stepId, visit);
-    return historyPathEntry(workflow, entry, visit);
+    return historyPathEntry(workflow, entry, visit, index);
   });
 
   if (run.status !== 'completed') {
     return [
       ...completedEntries,
       {
+        index: completedEntries.length,
         stepId: run.currentStepId,
         title: stepTitle(workflow, run.currentStepId),
         status: runDisplayStatus(run),
@@ -67,6 +71,7 @@ export function buildPathEntries(
     return [
       ...completedEntries,
       {
+        index: completedEntries.length,
         stepId: run.currentStepId,
         title: stepTitle(workflow, run.currentStepId),
         status: 'completed',
@@ -83,13 +88,24 @@ export function renderPathLines(
   theme: WorkflowStatusTheme,
   snapshot: WorkflowStatusSnapshot,
   width: number,
+  selectedIndex?: number,
 ): Array<string> {
   const entries = buildPathEntries(snapshot);
   if (entries.length === 0) {
     return [theme.fg('muted', 'No step attempts recorded')];
   }
 
-  const hidden = Math.max(0, entries.length - MAX_PATH_ROWS);
+  const selection = Math.max(
+    0,
+    Math.min(selectedIndex ?? entries.length - 1, entries.length - 1),
+  );
+  const maximumStart = Math.max(0, entries.length - MAX_PATH_ROWS);
+  const windowStart = Math.max(
+    0,
+    Math.min(selection - Math.floor(MAX_PATH_ROWS / 2), maximumStart),
+  );
+  const hidden = windowStart;
+  const hiddenAfter = Math.max(0, entries.length - windowStart - MAX_PATH_ROWS);
   const prefix =
     hidden > 0
       ? [
@@ -99,25 +115,36 @@ export function renderPathLines(
           ),
         ]
       : [];
-  const visibleRows = entries.slice(hidden).map((entry) => {
-    const visit =
-      entry.visit > 1 ? theme.fg('dim', ` · visit ${entry.visit}`) : '';
-    const left = `${statusGlyph(theme, entry.status, snapshot.now)} ${theme.fg(
-      entry.isCurrent ? 'text' : 'muted',
-      entry.title,
-    )}${visit}`;
-    const right = entry.outcome
-      ? `${statusLabel(entry.status)} · ${inline(entry.outcome)}`
-      : statusLabel(entry.status);
-    const row = joinColumns(
-      left,
-      theme.fg(statusColor(entry.status), right),
-      width,
-      Math.max(12, Math.floor(width * 0.58)),
-    );
-    return entry.isCurrent
-      ? theme.bg('selectedBg', padAnsi(row, width))
-      : truncateToWidth(row, width);
-  });
-  return [...prefix, ...visibleRows];
+  const visibleRows = entries
+    .slice(windowStart, windowStart + MAX_PATH_ROWS)
+    .map((entry) => {
+      const visit =
+        entry.visit > 1 ? theme.fg('dim', ` · visit ${entry.visit}`) : '';
+      const left = `${statusGlyph(theme, entry.status, snapshot.now)} ${theme.fg(
+        entry.isCurrent ? 'text' : 'muted',
+        entry.title,
+      )}${visit}`;
+      const right = entry.outcome
+        ? `${statusLabel(entry.status)} · ${inline(entry.outcome)}`
+        : statusLabel(entry.status);
+      const row = joinColumns(
+        left,
+        theme.fg(statusColor(entry.status), right),
+        width,
+        Math.max(12, Math.floor(width * 0.58)),
+      );
+      return entry.index === selection
+        ? theme.bg('selectedBg', padAnsi(row, width))
+        : truncateToWidth(row, width);
+    });
+  const suffix =
+    hiddenAfter > 0
+      ? [
+          theme.fg(
+            'dim',
+            `… ${hiddenAfter} later attempt${hiddenAfter === 1 ? '' : 's'}`,
+          ),
+        ]
+      : [];
+  return [...prefix, ...visibleRows, ...suffix];
 }

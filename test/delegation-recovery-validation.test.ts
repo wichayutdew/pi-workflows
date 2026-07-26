@@ -21,6 +21,7 @@ function childPolicy(): ChildStepPolicy {
     runId: 'run-1',
     stepId: 'inspect',
     stepTitle: 'Inspect',
+    cwd: '/repository',
     policyDigest: 'a'.repeat(64),
     capabilityPath: '/private/result/capability',
     capabilityToken: 'b'.repeat(64),
@@ -30,7 +31,7 @@ function childPolicy(): ChildStepPolicy {
       mcp: [],
       extensions: [],
       skills: [],
-      bash: { mode: 'read-only', allow: [] },
+      bash: { mode: 'deny', allow: [] },
     },
     outcomes: ['done'],
     pauseOutcomes: [],
@@ -130,6 +131,48 @@ describe('when validating recovered delegation evidence', () => {
         },
         result,
         policy,
+      ),
+    ).toBe(false);
+
+    const workspacePolicy: ChildStepPolicy = {
+      ...policy,
+      outcomes: ['bound'],
+      workspace: {
+        bindOn: ['bound'],
+        allowedRoots: ['../worktrees'],
+      },
+    };
+    const workspaceResult = {
+      ...result,
+      outcome: 'bound',
+      workspace: { cwd: '/tmp/worktree' },
+    };
+    expect(
+      completionMatchesResult(
+        {
+          tool: 'bash',
+          completionValue: {
+            outcome: 'bound',
+            summary: 'Recovered',
+            workspace: { cwd: '/tmp/worktree' },
+          },
+        },
+        workspaceResult,
+        workspacePolicy,
+      ),
+    ).toBe(true);
+    expect(
+      completionMatchesResult(
+        {
+          tool: 'bash',
+          completionValue: {
+            outcome: 'bound',
+            summary: 'Recovered',
+            workspace: { cwd: '/tmp/other-worktree' },
+          },
+        },
+        workspaceResult,
+        workspacePolicy,
       ),
     ).toBe(false);
   });

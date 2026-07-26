@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from '../src/config/load.ts';
+import { analyzeWorkflow } from '../src/workflow-doctor.ts';
 
 describe('when testing example', () => {
   const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,6 +22,51 @@ describe('when testing example', () => {
       expect(catalog.workflows.get('mr-comments')?.definition.command).toBe(
         'mr-comments',
       );
+      const example = catalog.workflows.get('mr-comments')?.definition;
+      expect(example?.steps.plan?.gate).toMatchObject({
+        provider: 'plannotator',
+        timeoutMs: 30_000,
+      });
+      expect(example?.steps.plan?.permissions.extensions).not.toContain(
+        'plannotator',
+      );
+      expect(example?.steps.plan?.requires.extensions).not.toContain(
+        'plannotator',
+      );
+      expect(example?.steps.plan?.transitions).toMatchObject({
+        approved: 'implement',
+        'changes-requested': '$pause',
+        blocked: '$pause',
+      });
+      expect(example?.steps.implement?.transitions).toMatchObject({
+        retry: 'implement',
+        blocked: '$pause',
+      });
+      expect(example?.steps.implement?.transitions).not.toHaveProperty(
+        'replan',
+      );
+      const doctor = analyzeWorkflow(example!);
+      expect(doctor.issues.filter((issue) => issue.level === 'error')).toEqual(
+        [],
+      );
+      expect(doctor.issues.some((issue) => issue.code === 'cycle')).toBe(true);
+      const planPrompt = catalog.workflows.get('mr-comments')?.prompts.plan;
+      expect(planPrompt).toContain('## Review summary');
+      expect(planPrompt).toContain('## Review focus');
+      expect(planPrompt).toContain('## Proposed changes');
+      expect(planPrompt).toContain('## Validation');
+      expect(planPrompt).toContain('## Risks');
+      expect(planPrompt).toMatch(/checkboxes only for acceptance criteria/i);
+      expect(planPrompt).toMatch(
+        /format is defined by this\s+workflow prompt/i,
+      );
+      expect(planPrompt).toMatch(/treats the artifact as opaque/i);
+      expect(catalog.workflows.get('mr-comments')?.prompts.implement).toContain(
+        '{{reviewed.artifact}}',
+      );
+      expect(catalog.workflows.get('mr-comments')?.prompts.verify).toContain(
+        '{{reviewed.artifact}}',
+      );
 
       for (const schema of ['workflow.schema.json', 'settings.schema.json']) {
         const raw = await readFile(
@@ -29,6 +75,37 @@ describe('when testing example', () => {
         );
         expect(() => JSON.parse(raw)).not.toThrow();
       }
+      const workflowSchema = JSON.parse(
+        await readFile(
+          join(repositoryRoot, 'schemas', 'workflow.schema.json'),
+          'utf8',
+        ),
+      ) as {
+        $defs?: {
+          step?: {
+            allOf?: unknown;
+          };
+          prompt?: {
+            oneOf?: Array<unknown>;
+          };
+        };
+      };
+      expect(workflowSchema.$defs?.step?.allOf).toEqual([
+        {
+          if: { required: ['workspace'] },
+          then: {
+            required: ['subagent'],
+            not: { required: ['gate'] },
+          },
+        },
+      ]);
+      expect(workflowSchema.$defs?.prompt?.oneOf?.[1]).toMatchObject({
+        properties: {
+          file: {
+            $ref: '#/$defs/relativePath',
+          },
+        },
+      });
 
       const packageJson = JSON.parse(
         await readFile(join(repositoryRoot, 'package.json'), 'utf8'),
@@ -37,6 +114,133 @@ describe('when testing example', () => {
       expect(
         await readFile(join(repositoryRoot, 'agents', 'step.md'), 'utf8'),
       ).toMatch(/package: pi-workflows/);
+    });
+
+    test('portable four-workflow starter kit loads with bounded graphs', async () => {
+      const starterDirectory = join(repositoryRoot, 'examples', 'starter-kit');
+      const catalog = await loadCatalog({
+        cwd: repositoryRoot,
+        projectTrusted: false,
+        userDirectory: starterDirectory,
+      });
+
+      expect(catalog.diagnostics).toEqual([]);
+      expect([...catalog.workflows.keys()].sort()).toEqual([
+        'mr-comment',
+        'mr-review',
+        'ticket',
+        'work',
+      ]);
+
+      for (const loaded of catalog.workflows.values()) {
+        expect(JSON.stringify(loaded.definition)).not.toMatch(/\/Users\//);
+        expect(
+          analyzeWorkflow(loaded.definition).issues.filter(
+            (issue) => issue.level === 'error',
+          ),
+        ).toEqual([]);
+        expect(loaded.definition.maxStepVisits).toBeLessThanOrEqual(4);
+        for (const step of Object.values(loaded.definition.steps)) {
+          expect(step.permissions.skills).toEqual([]);
+          expect(step.permissions.extensions).toEqual([]);
+          expect(Object.values(step.transitions)).not.toContain('replan');
+        }
+        for (const prompt of Object.values(loaded.prompts)) {
+          expect(prompt).not.toMatch(/\/Users\//);
+          expect(prompt).not.toMatch(
+            /caveman|superpowers|using-git-worktrees|pi-web-tools/i,
+          );
+        }
+      }
+
+      for (const workflowId of ['work', 'ticket']) {
+        const workflow = catalog.workflows.get(workflowId)!;
+        expect(workflow.definition.start).toBe('prepare-workspace');
+        expect(
+          workflow.definition.steps['prepare-workspace']?.workspace,
+        ).toEqual({
+          bindOn: ['ready'],
+          allowedRoots: ['..'],
+        });
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /dirty exact run-owned\s+worktree is resumable/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /reuse it even when it is dirty[\s\S]*launched\s+from a different primary or linked worktree/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /never reuse the current checkout merely because it is a linked worktree/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /regardless of whether the source\s+checkout is primary or linked/i,
+        );
+        expect(workflow.definition.steps.plan?.transitions).toMatchObject({
+          approved: 'implement',
+          'changes-requested': '$pause',
+          blocked: '$pause',
+        });
+      }
+
+      const review = catalog.workflows.get('mr-review')!;
+      expect(review.definition.start).toBe('fetch');
+      expect(review.prompts.fetch).toMatch(
+        /MCP server first[\s\S]*host CLI[\s\S]*cURL/i,
+      );
+      expect(review.definition.steps.review?.gate?.provider).toBe(
+        'plannotator',
+      );
+      expect(review.definition.steps.review?.transitions).toMatchObject({
+        approved: 'publish',
+        'changes-requested': '$pause',
+      });
+      for (const step of Object.values(review.definition.steps)) {
+        expect(step.requires.tools).not.toContain('mcp');
+      }
+
+      const comment = catalog.workflows.get('mr-comment')!;
+      expect(comment.definition.start).toBe('fetch');
+      expect(
+        Object.values(comment.definition.steps).every(
+          (step) => step.workspace === undefined,
+        ),
+      ).toBe(true);
+      for (const prompt of Object.values(comment.prompts)) {
+        expect(prompt).toMatch(/current|checkout/i);
+        expect(prompt).toMatch(/Never create|never create/i);
+      }
+      expect(comment.definition.steps.plan?.transitions).toMatchObject({
+        approved: 'implement',
+        'changes-requested': '$pause',
+      });
+      expect(comment.definition.steps.verify?.transitions.failed).toBe(
+        'implement',
+      );
+      for (const step of Object.values(comment.definition.steps)) {
+        expect(step.requires.tools).not.toContain('mcp');
+      }
+      const publicationRules =
+        comment.definition.steps.publish?.permissions.bash.allow ?? [];
+      expect(
+        publicationRules
+          .filter((rule) => rule.executable === 'git')
+          .map((rule) => rule.argsPrefix),
+      ).toContainEqual(['push']);
+      expect(
+        publicationRules
+          .filter((rule) => rule.executable === 'git')
+          .some((rule) => rule.argsPrefix[0] === '-C'),
+      ).toBe(false);
+      expect(
+        publicationRules
+          .filter((rule) => rule.executable === 'glab')
+          .map((rule) => rule.argsPrefix),
+      ).toContainEqual(['api']);
+      expect(comment.prompts.plan).toMatch(
+        /subcommand first[\s\S]*never add a dynamic `git -C`/i,
+      );
+      expect(comment.prompts.plan).toMatch(
+        /prefer `glab api`[\s\S]*do not assume[\s\S]*`glab mr view` supports `--json`/i,
+      );
     });
   });
 });

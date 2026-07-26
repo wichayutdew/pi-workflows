@@ -30,6 +30,11 @@ export function buildResourceSection({
     `Extension selectors: ${formatList(step.permissions.extensions)}`,
     `Skills: ${formatList(step.permissions.skills)}`,
     `Bash policy: ${step.permissions.bash.mode}`,
+    `Bash allow rules: ${
+      step.permissions.bash.allow.length > 0
+        ? JSON.stringify(step.permissions.bash.allow)
+        : '(none)'
+    }`,
     '',
     `Use only the listed skills for this step. Tool calls are enforced ${isDelegated ? 'inside this child process' : 'by the workflow harness'}.`,
     '',
@@ -59,17 +64,10 @@ export function buildDelegatedHandoffSection(
  * @param step - Active delegated workflow step.
  * @returns Delegated completion-guidance lines.
  */
-export function buildDelegatedCompletionInstructions(
-  step: WorkflowStep,
-): ReadonlyArray<string> {
-  const finalContractInstruction = step.gate
-    ? 'Put every unresolved decision in the gate artifact with evidence, options, a recommendation, and an adopted default; do not ask a terminal question.'
-    : 'Treat the step instructions and incoming handoff as the final execution contract; do not ask a terminal question.';
-
+export function buildDelegatedCompletionInstructions(): ReadonlyArray<string> {
   return [
     'This child is non-interactive. Never call `contact_supervisor`, `subagent_supervisor`, or `intercom`.',
-    'When a tool or command fails, inspect its exact error, diagnose the cause, and try a permitted semantically equivalent alternative before ending the step. Continue the original work after recovery; do not treat the first recoverable failure as terminal.',
-    'Never broaden mutation targets or external side effects while recovering. Before using a pause outcome, exhaust safe permitted alternatives and include the exact failed call, exact error, alternatives attempted, observed state, and why recovery is impossible.',
-    finalContractInstruction,
+    'Follow the step instructions when choosing one valid outcome; outcome names have no built-in domain meaning.',
+    'Stay within the configured permissions and do not broaden mutation targets or external side effects.',
   ];
 }

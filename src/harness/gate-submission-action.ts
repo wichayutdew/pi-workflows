@@ -5,10 +5,9 @@ import {
   beginGate,
   failGate,
   failRun,
-  resolveGate,
 } from '../engine/transitions.ts';
-import { reviewedCommandShapeError } from '../policy/approved-commands.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import { reportFailedStep } from './step-reporting.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -21,7 +20,6 @@ type HarnessActionContext = Pick<
   | 'restoreBaselineTools'
   | 'run'
   | 'sessionEpoch'
-  | 'settleAfterTransition'
   | 'updateStatus'
 >;
 
@@ -31,6 +29,7 @@ export type GateSubmissionAction = {
     workflow: LoadedWorkflow,
     originalRun: WorkflowRun,
     outcome: string,
+    summary: string,
     artifact: string,
   ) => Promise<void>;
 };
@@ -55,6 +54,7 @@ async function submitGate(
   workflow: LoadedWorkflow,
   originalRun: WorkflowRun,
   outcome: string,
+  summary: string,
   artifact: string,
 ): Promise<void> {
   const requestSessionEpoch = this.sessionEpoch;
@@ -64,34 +64,6 @@ async function submitGate(
   const step = workflow.definition.steps[originalRun.currentStepId];
   if (!step?.gate) throw new Error('Current step has no gate');
 
-  const commandShapeError = reviewedCommandShapeError(artifact);
-  if (commandShapeError) {
-    const awaitingReview = beginGate(
-      workflow,
-      originalRun,
-      outcome,
-      artifact,
-      requestId,
-      this.dependencies.now(),
-    );
-    this.run = resolveGate(
-      workflow,
-      awaitingReview,
-      {
-        approved: false,
-        feedback: commandShapeError,
-        resolvedAt: this.dependencies.now(),
-      },
-      this.dependencies.now(),
-    );
-    this.latestContext?.ui.notify(
-      `Plan contract needs repair before review: ${commandShapeError}`,
-      'warning',
-    );
-    this.settleAfterTransition(workflow);
-    return;
-  }
-
   this.run = beginGate(
     workflow,
     originalRun,
@@ -99,6 +71,7 @@ async function submitGate(
     artifact,
     requestId,
     this.dependencies.now(),
+    summary,
   );
   this.persist();
   this.restoreBaselineTools();
@@ -129,6 +102,7 @@ async function submitGate(
     const gateFailed = failGate(currentRun, reason, this.dependencies.now());
     this.run = failRun(gateFailed, reason, this.dependencies.now());
     this.persist();
+    reportFailedStep(this.pi, workflow, this.run, reason);
     this.restoreBaselineTools();
     this.updateStatus();
     throw new Error(reason);

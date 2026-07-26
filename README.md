@@ -1,8 +1,20 @@
-[![codecov](https://codecov.io/gh/wichayutdew/pi-workflows/graph/badge.svg?token=33xrCBRM82)](https://codecov.io/gh/wichayutdew/pi-workflows)
-
 # Pi Workflows
 
-A declarative, pauseable workflow harness for Pi.
+**Turn repeatable agent work into declarative, pauseable workflows that cannot
+silently loop forever.** Put the steps, tools, prompts, approvals, and outcomes
+in YAML; Pi Workflows supplies durable checkpoints, finite automatic execution,
+and a live status view without learning your language, framework, or process.
+
+[![codecov](https://codecov.io/gh/wichayutdew/pi-workflows/graph/badge.svg?token=33xrCBRM82)](https://codecov.io/gh/wichayutdew/pi-workflows)
+
+```bash
+pi install npm:@wichayutdew/pi-workflows
+```
+
+- Compose main-agent and isolated subagent steps from one strict YAML contract.
+- Pause for built-in or Plannotator review, then resume the same checkpoint.
+- Reject dead-end graphs up front and pause bounded cycles at `maxStepVisits`.
+- Keep every domain decision in your workflow files—not in the harness.
 
 ## Overview
 
@@ -47,6 +59,89 @@ delegated step cannot start.
 
 Pi loads `src/index.ts` through the package manifest. Restart Pi or run `/reload` after changing extension source.
 
+## Quick start: bootstrap four practical workflows
+
+The checked-in [`examples/starter-kit`](./examples/starter-kit) is a portable,
+user-owned starting point for:
+
+| Command       | Included flow                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `/work`       | Prepare or reuse one dedicated Git worktree, plan, approve, implement, and verify local work.              |
+| `/ticket`     | Prepare or reuse one dedicated Git worktree, read a ticket, plan, approve, implement, and verify.          |
+| `/mr-review`  | Fetch a hosted review, produce a child review, approve it, publish it, and verify the remote effect.       |
+| `/mr-comment` | Fetch review comments, plan and approve fixes, edit only the current branch/worktree, verify, push, reply. |
+
+Install the integrations required by these four examples:
+
+```bash
+pi install npm:pi-subagents
+pi install npm:@plannotator/pi-extension
+```
+
+Configure a Pi MCP proxy for the `atlassian`, `gitlab`, and/or `github` server
+IDs when you want that access route. The MR examples try a matching MCP server
+first but can fall back to the repository/host CLIs or cURL named in their
+YAML; ensure at least one route is authenticated and available. The ticket
+example requires Atlassian MCP by default. MCP server names, authentication,
+tool availability, Git hosting, and repository commands are environment
+choices, so adapt the selectors, `requires`, and Bash rules instead of
+expecting the extension to infer them.
+
+Copy the starter files into the user workflow directory:
+
+```bash
+mkdir -p ~/.pi/agent/workflows
+cp examples/starter-kit/*.workflow.yaml ~/.pi/agent/workflows/
+cp -R examples/starter-kit/steps ~/.pi/agent/workflows/
+```
+
+If files with those names already exist, review and merge them instead of
+overwriting your working configuration. Then customize:
+
+1. In `work.workflow.yaml` and `ticket.workflow.yaml`, set each
+   `workspace.allowedRoots` to relative directories where the preparation
+   prompt may create or reuse a worktree.
+2. Replace or narrow the `atlassian`, `gitlab`, and `github` MCP selectors to
+   match your configured adapter. Remove an unused host consistently from the
+   relevant `permissions.mcp` blocks and prompts.
+3. Review every Bash mode and executable. The starter implementation and
+   verification steps are deliberately language-neutral and therefore
+   unrestricted; replace them with repository-specific allow lists when
+   possible. Command syntax—including package-manager argument order—belongs
+   in your prompt and repository context.
+4. Edit the prompt files under `steps/` to define your artifact format,
+   acceptance criteria, publication policy, and organization-specific rules.
+   Pi Workflows treats all of that content as opaque domain configuration.
+
+Reload and diagnose every graph before the first run:
+
+```text
+/reload
+/workflow-reload
+/workflow-doctor work
+/workflow-doctor ticket
+/workflow-doctor mr-review
+/workflow-doctor mr-comment
+```
+
+Start them from the repository checkout that should supply the initial
+workspace:
+
+```text
+/work update the navigation
+/ticket PROJ-123 retry failed requests
+/mr-review https://gitlab.example.com/group/project/-/merge_requests/42
+/mr-comment https://github.com/example/project/pull/42
+```
+
+`/work` and `/ticket` bind the exact worktree returned by their user-authored
+preparation prompt. `/mr-comment` intentionally has no workspace-binding step:
+every child stays on the branch and worktree from which the run started.
+Approval rejection pauses either review workflow; it never launches an
+automatic replacement plan. Remote publication prompts first check whether an
+approved effect already exists because the harness cannot guarantee
+exactly-once external side effects.
+
 ## Add a workflow
 
 User workflows live in one of these formats:
@@ -61,28 +156,9 @@ strict YAML 1.2 core schema: duplicate keys, merge keys, invalid tags,
 multiple documents, non-1.2 directives, and excessive alias expansion fail
 closed.
 
-Set `PI_WORKFLOWS_DIR` to use another directory. The example can be copied as a starting point:
-
-```bash
-mkdir -p ~/.pi/agent/workflows/prompts
-cp examples/mr-comments.workflow.yaml ~/.pi/agent/workflows/
-cp -R examples/prompts/mr-comments ~/.pi/agent/workflows/prompts/
-```
-
-The example YAML language-server schema path is repository-relative. Adjust or
-remove its first comment after copying.
-
-Run `/workflow-reload`, then start by configured command:
-
-```text
-/mr-comments <merge-request URL or description>
-```
-
-Every workflow is also available through:
-
-```text
-/workflow-start mr-comments <merge-request URL or description>
-```
+Set `PI_WORKFLOWS_DIR` to use another directory. For a complete portable
+starting point, copy the four-workflow starter kit above. Every configured
+command is also available as `/workflow-start <workflow-id> [input]`.
 
 ## Minimal workflow
 
@@ -99,7 +175,11 @@ steps:
     permissions:
       tools: [read, grep, bash]
       bash:
-        mode: read-only
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes: [[status], [diff]]
+          - executable: rg
     requires:
       tools: [read, bash]
     transitions:
@@ -114,7 +194,7 @@ steps:
       bash:
         mode: allow-list
         allow:
-          - executable: bun
+          - executable: project-check
             argsPrefix: [test]
     transitions:
       done: $done
@@ -143,15 +223,16 @@ Top-level fields:
 
 Each step supports:
 
-| Field         | Required | Description                                                                             |
-| ------------- | -------- | --------------------------------------------------------------------------------------- |
-| `title`       | No       | Human-readable name. Defaults to the step identifier.                                   |
-| `prompt`      | Yes      | Inline text or `{ "file": "relative/path.md" }`.                                        |
-| `subagent`    | No       | Opt into isolated delegation and select the Pi Subagents profile and execution budgets. |
-| `permissions` | No       | Resources callable during this step. Everything defaults to denied.                     |
-| `requires`    | No       | Dependencies that must be detectable before the step starts.                            |
-| `transitions` | Yes      | Exact outcome to next step, `$pause`, or `$done`.                                       |
-| `gate`        | No       | Built-in prompt or Plannotator human-review gate.                                       |
+| Field         | Required | Description                                                                                           |
+| ------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `title`       | No       | Human-readable name. Defaults to the step identifier.                                                 |
+| `prompt`      | Yes      | Inline text or `{ "file": "relative/path.md" }`.                                                      |
+| `subagent`    | No       | Opt into isolated delegation and select the Pi Subagents profile and execution budgets.               |
+| `permissions` | No       | Resources callable during this step. Everything defaults to denied.                                   |
+| `requires`    | No       | Dependencies that must be detectable before the step starts.                                          |
+| `transitions` | Yes      | Exact outcome to next step, `$pause`, or `$done`.                                                     |
+| `gate`        | No       | Built-in prompt or Plannotator human-review gate.                                                     |
+| `workspace`   | No       | Bind one delegated step result as the working directory for all reachable downstream delegated steps. |
 
 Supported prompt variables:
 
@@ -162,14 +243,26 @@ Supported prompt variables:
 {{step.id}}
 {{step.title}}
 {{last.summary}}
+{{reviewed.artifact}}
+{{reviewed.feedback}}
 {{gate.feedback}}
+{{resume.input}}
 ```
 
 Unknown variables fail configuration loading.
 
 `{{last.summary}}` normally contains the previous completed step's handoff.
 After a step-requested `$pause`, it contains both the preserved incoming
-approved/previous-step handoff and the latest paused-attempt summary.
+previous-step handoff and the latest paused-attempt summary. Gate artifacts and
+summaries stay separate: prompts opt into the opaque approved artifact through
+`{{reviewed.artifact}}`.
+`{{resume.input}}` contains guidance supplied to the current attempt through
+`/workflow-resume [guidance]`. If a prompt omits that variable, the harness
+adds the guidance in a clearly delimited standard section, so every workflow
+can still use it. Standard-section guidance is an authoritative task-level
+amendment for that retry, but it cannot change the workflow graph or bypass
+YAML-enforced resource and workspace boundaries. The value is replaced on each
+explicit resume and cleared after the step returns an outcome.
 
 ### Per-step subagents
 
@@ -204,6 +297,34 @@ The expanded defaults are `agent: pi-workflows.step`, `context: fresh`,
 `fresh` is the only supported workflow-step context: each child receives the
 original workflow input and the previous step's compact handoff, never the
 parent or a sibling transcript.
+
+The run captures Pi's current working directory when it starts. Without a
+`workspace` binding, every delegated visit—including cycles, retries, and
+resumed steps—uses that directory.
+
+One delegated, non-gated step may bind a different directory through structured
+result data:
+
+```yaml
+workspace:
+  bindOn: [ready]
+  allowedRoots: ['..']
+```
+
+On a binding outcome, the result must include
+`workspace: { cwd: "/absolute/directory" }`. The harness resolves its real path,
+requires an existing directory under one configured root relative to the
+run-start directory, persists it once, and passes that exact directory to every
+reachable downstream child, revisit, recovery attempt, and resume. Other
+outcomes must omit `workspace`; later results cannot replace the binding. All
+reachable nonterminal steps after a binding must be delegated because the main
+Pi process cannot change its working directory.
+
+The workflow prompt owns how the directory is prepared and what it represents.
+The harness does not know Git, worktrees, languages, frameworks, or command
+syntax, and it never derives a directory from summaries or gate artifacts. A
+legacy checkpoint without a captured directory fails closed before delegation;
+abort it and start a new run.
 
 Use a profile name directly when only the child profile changes:
 
@@ -339,14 +460,14 @@ process; the tool policy does not unload extension code.
 
 ### Bash modes
 
-| Mode           | Behavior                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| `deny`         | Blocks Bash. This is the default.                                                        |
-| `read-only`    | Allows a small built-in inspection preset. Shell composition and expansion are rejected. |
-| `allow-list`   | Allows one executable plus configured argument prefixes.                                 |
-| `unrestricted` | Allows any Bash command. Use only in user-owned workflows.                               |
+| Mode           | Behavior                                                            |
+| -------------- | ------------------------------------------------------------------- |
+| `deny`         | Blocks Bash. This is the default.                                   |
+| `allow-list`   | Allows one executable plus user-configured argument prefixes.       |
+| `unrestricted` | Allows any Bash command. Use only in trusted, user-owned workflows. |
 
-Restricted modes reject shell operators, substitutions, expansions, wrapper shells, environment assignments, and known execution options in the read-only preset.
+Allow-list mode rejects shell operators, substitutions, expansions, wrapper
+shells, and environment assignments before matching the declarative rule.
 
 Allow-list entries are OR alternatives. `argsPrefix` is one ordered token
 sequence:
@@ -356,11 +477,11 @@ mode: allow-list
 allow:
   - executable: git
     argsPrefix: [status]
-  - executable: bun
+  - executable: project-check
     argsPrefix: [test]
 ```
 
-This permits `bun test --runInBand` but not `bun run build`.
+This permits `project-check test --focused` but not `project-check build`.
 
 Use `argsPrefixes` to merge several alternatives for one executable without
 widening permission:
@@ -380,96 +501,13 @@ sequence `git status diff`; it does not mean “status or diff.” `argsPrefix` 
 `argsPrefixes` are mutually exclusive in one rule. Omitting both allows that
 executable with any safely tokenized arguments.
 
-An allow-list may also import exact command strings from the run's most recent
-human-reviewed gate artifact:
+The engine deliberately has no package-manager, language, framework, Git, or
+hosted-API command knowledge. It does not rewrite command argument order and
+does not derive Bash authority from prompts, summaries, or gate artifacts.
+Command meaning and syntax belong to the step prompt and the agent's own
+context; executable scope belongs entirely to the YAML `allow` rules.
 
-```yaml
-mode: allow-list
-allow:
-  - executable: git
-    argsPrefix: [status]
-approvedSources: [verification-worker]
-```
-
-Supported sources are:
-
-| Source                  | Reviewed JSON path                                                    |
-| ----------------------- | --------------------------------------------------------------------- |
-| `verification-worker`   | `repositories[].worker[].command`                                     |
-| `verification-reviewer` | `repositories[].reviewer[].command`                                   |
-| `remote-actions`        | `actions[]` where `toolName` is `bash` and `input.command` is present |
-| `remote-push`           | Exact approved non-force `git push` command                           |
-| `remote-drafts`         | Parent-synthesized author-private review drafts                       |
-
-The JSON must be the whole reviewed artifact or appear in a fenced `json`
-block. The harness copies only exact strings into the correlated step policy.
-Verification sources reject shell wrappers, remote-transfer programs,
-`gh`/`glab`, publishing commands, and non-local Git operations. Remote actions
-accept only `gh api`, `glab api`, or non-force `git push`. A model cannot widen
-an approved command by adding arguments or shell composition.
-
-Approved sources fail closed until a gate has actually been approved. Ordinary
-step summaries never become command provenance. Legacy v1 checkpoints remain
-readable, but they receive no reviewed-command capabilities until a new gate
-produces an approved artifact.
-
-Static allow-list rules for `gh api` and `glab api` are GET-only: mutation
-flags such as fields, input, forms, or an explicit method are blocked. A
-mutating API call therefore needs an exact `remote-actions` command from a
-reviewed artifact.
-
-#### How `approvedSources` works
-
-`approvedSources` does not allow an executable, run a command, or read from the
-current step summary. It tells the harness which fixed field in the most recent
-human-approved artifact may contribute exact command strings. Approval may
-come from the built-in Pi prompt gate or Plannotator.
-
-For example, suppose the approved artifact contains:
-
-```json
-{
-  "repositories": [
-    {
-      "cwd": "/absolute/path/to/repository",
-      "sourceCwd": "/absolute/path/to/source",
-      "worker": [
-        {
-          "command": "bun --cwd /absolute/path/to/repository test"
-        }
-      ]
-    }
-  ]
-}
-```
-
-A later step with `approvedSources: [verification-worker]` may run only the
-exact reviewed command. Cwd-dependent commands must encode that entry's
-absolute `repositories[].cwd`, such as `bun --cwd /reviewed/root test`; they
-may not substitute another directory or add `--watch`.
-`verification-reviewer` reads the sibling `reviewer` list with the same rule.
-`remote-actions` reads only Bash actions from
-`actions[]` and additionally filters them to supported hosted-API mutations or
-non-force pushes.
-
-A delegated step accepts one distinct reviewed repository directory; repeated
-entries may name that same absolute `cwd`. Missing, relative, or ambiguous
-multiple directories fail closed before the child starts. A not-yet-created
-worktree may bootstrap only from the same contract's one existing absolute
-`sourceCwd`; file mutations remain confined to the reviewed target `cwd`, and
-all setup and later Bash commands must still match the approved strings.
-
-The complete path is:
-
-```text
-step artifact -> human approval -> persisted reviewed artifact
--> source-specific extraction -> correlated step policy -> exact string check
-```
-
-If no gate has been approved, the selected field is absent, the command is
-unsafe for that source, or the string differs at all, no permission is added.
-
-Hard turn and tool-call budgets are best for read-only inspection and
+Hard turn and tool-call budgets are best for non-mutating inspection and
 verification steps. For a step that edits files, use a generous timeout and no
 hard count budget unless partial edits are acceptable; inspect the working tree
 after any interruption before resuming.
@@ -486,14 +524,16 @@ gate:
   rejectedOutcome: changes-requested
 transitions:
   approved: implement
-  changes-requested: plan
+  changes-requested: $pause
   blocked: $pause
 ```
 
 When the step completes with outcome `submit`, it must include the full content
 in `artifact`. Pi shows Approve, Request changes, and Pause workflow. Requested
 changes are returned through `{{gate.feedback}}`; approval persists the
-artifact as the reviewed handoff. Dismissing the panel pauses the workflow and
+artifact as `{{reviewed.artifact}}` while the step's `summary` remains the
+compact handoff. A requested change pauses at the same step with feedback, so
+revision starts only after explicit `/workflow-resume`. Dismissing the panel
 keeps the pending artifact, so `/workflow-resume` reopens the same review.
 
 Dialog-capable UI is available in Pi TUI and RPC modes. In print or JSON mode,
@@ -515,7 +555,8 @@ Pi Workflows uses Plannotator's shared extension API as a human approval gate:
 - A workflow submits its plan or other Markdown artifact.
 - Plannotator opens the visual review in your browser.
 - Approval advances through the configured transition.
-- Requested changes return structured feedback to the configured revision step.
+- Requested changes follow the workflow's configured transition with structured
+  feedback.
 - Pausing never discards a decision; resume queries the same review identifier.
 
 This keeps workflow order and permissions declarative while Plannotator handles
@@ -531,36 +572,37 @@ gate:
   submitOutcome: submit
   approvedOutcome: approved
   rejectedOutcome: changes-requested
-  timeoutMs: 5000
+  timeoutMs: 30000
 transitions:
   approved: implement
-  changes-requested: plan
+  changes-requested: $pause
   blocked: $pause
 ```
 
-Setting `provider: plannotator` is the entire opt-in; the harness preflights the
-installed extension automatically. A main-agent planning step calls
+Setting `provider: plannotator` is the entire opt-in; do not also grant the
+planning child Plannotator extension tools. The harness preflights the installed
+extension automatically. A main-agent planning step calls
 `workflow_complete_step`; a delegated planning child calls
-`structured_output`. In either case it uses outcome `submit` and places the full
-content in `artifact`. The harness correlates the Plannotator review identifier
-and accepts only the matching decision. On approval, that reviewed artifact—not
-the step's separate summary—becomes the authoritative handoff to the next step.
+`structured_output`. In either case it uses the configured submit outcome and
+places the review content in `artifact`. The harness correlates the Plannotator
+review identifier and accepts only the matching decision. On approval, the
+artifact is preserved as an opaque template value; the separate `summary`
+remains the next step's compact handoff.
+
+The artifact is never substituted for a missing summary. If an older pending
+gate has no separately stored summary, its transition uses an empty compact
+handoff.
 
 If review finishes while the workflow is paused, the result is checkpointed and applied only after `/workflow-resume`. Resume also queries Plannotator’s durable review status, so a decision made while Pi was closed is not lost.
 
-### Planning is the decision boundary
+### Artifact format belongs to the workflow
 
-For a delegated plan workflow, put every unresolved choice in the plan artifact
-with evidence, options, a recommendation, and an adopted default. The built-in
-review panel or Plannotator is where the user resolves those choices. Approval
-makes that reviewed artifact the final implementation contract and compact
-handoff.
-
-Post-approval implementation and verification children are non-interactive:
-they do not ask questions in the terminal or detach for supervisor input. If an
-approved contract is missing, stale, or contradictory, the child pauses with a
-declarative evidence summary instead of starting a replacement or opening a
-side channel.
+Pi Workflows imposes no plan headings, acceptance-criteria layout,
+machine-readable appendix, command schema, or other Plannotator prompt format.
+The step's YAML prompt defines what the artifact means and how downstream steps
+use `{{reviewed.artifact}}`. Outcome names are equally opaque: names such as
+`approved`, `retry`, or `replan` have only the transitions and meanings the
+workflow author gives them.
 
 In print or JSON mode, a pending built-in plan review remains safely paused.
 Reopen the same session in TUI or RPC mode and run `/workflow-resume` to show
@@ -581,10 +623,18 @@ the Pi session. A late completion cannot advance a paused, aborted,
 reconfigured, or replaced run.
 
 When a step itself transitions to `$pause`, the checkpoint keeps both the
-incoming reviewed/previous-step handoff and the latest failed-attempt summary.
-The resumed execution sees both. Exact reviewed commands continue to derive only
-from the separately persisted reviewed artifact, never from the failed attempt
-or a legacy unreviewed summary.
+incoming previous-step handoff and the latest failed-attempt summary. The
+resumed execution sees both. The run-start directory, any accepted workspace
+binding, and any separately persisted reviewed artifact are preserved without
+being interpreted.
+
+Every settled step also posts one visible chat summary without starting another
+agent turn. Successful and `$pause` outcomes show only the step's validated
+`summary`; the final one also states that the workflow completed. Manual,
+restored-session, and review pauses show their concise pause reason. Runtime
+failures show only a short, redacted failure summary—not the task, artifact,
+tool transcript, or full diagnostic. Complete evidence remains available in
+the status explorer.
 
 For a delegated step, if child termination is not confirmed within five
 seconds, the pause is recorded but main tools remain isolated and resume is
@@ -599,10 +649,11 @@ automatic recovery child. The audit accepts only regular, non-symlink session
 files contained by the current parent session's child-run root, requires the
 persisted policy-stripped task and its per-request binding to match the active
 delegation, reads a bounded complete tail, and proves that every recorded call
-was read-only or rejected by that step's actual Bash policy before execution.
-Approved exact Bash commands are evaluated with the same authorization inputs
-used by the child. A zero-tool attempt is also replay-safe when the complete
-bound transcript proves it.
+used a known-safe non-Bash tool or was rejected by policy before execution.
+A zero-tool attempt is also replay-safe when the complete bound transcript
+proves it. Executed Bash is treated as an unknown effect; automatic recovery
+requires explicit authorization and still cannot claim that a domain-specific
+command was non-mutating.
 
 When the terminal error identifies a failed tool, the harness also records the
 exact correlated call, tool error, subagent exit code, terminal error, and
@@ -635,26 +686,26 @@ can consume at most three times its per-child timeout, turn budget, and tool
 budget.
 
 Inside a live child, recovery is not tied to a list of known error strings. The
-completion contract requires the agent to inspect the exact error and current
-state, try a permitted semantically equivalent alternative, and continue the
-original step. It may pause only after safe alternatives are exhausted, with
-the failed call, error, attempted alternatives, and remaining blocker in its
-handoff. A fresh retry is explicitly a continuation: it inspects state first
-and must not repeat a side effect that is already present.
+agent receives the exact error and current state, then follows the user-authored
+step prompt and configured outcomes. The engine does not assign a recovery,
+pause, or replanning meaning to any outcome name.
 
 While paused, fix repository code, workflow YAML, prompts, MCP configuration,
 an extension, or any other environmental problem. Then run:
 
 ```text
-/workflow-resume
+/workflow-resume inspect the existing partial output before retrying
 ```
 
 Resume reloads configuration before continuing:
 
+- Optional text after `/workflow-resume` is passed as a user-authored
+  task-level amendment for this attempt. It may supersede conflicting prompt or
+  handoff instructions, but never YAML-enforced resource or workspace policy.
 - The paused step restarts in its configured main-agent or delegated mode.
 - A changed current step restarts that step.
 - A changed ordinary completed step restarts the earliest changed completed step.
-- A completed human-approved gate keeps its persisted reviewed artifact authoritative; later prompt or configuration digest changes do not reopen that plan while the gate and approved outcome still match.
+- A completed human-approved gate keeps its opaque reviewed artifact; later prompt or configuration digest changes do not reopen that gate while its configuration and approved outcome still match.
 - Future-only changes preserve the current checkpoint.
 - Removing the current or a completed step fails closed and requires restoring configuration or aborting.
 - Restoring a Pi session automatically pauses an in-progress workflow for inspection.
@@ -663,29 +714,56 @@ Resume reloads configuration before continuing:
 
 ## Commands
 
-The full status overlay opens when a workflow starts and is toggled with
-`Ctrl+Alt+W` by default (`q` or `Esc` also hides it). Set `statusShortcut` in
-`settings.yaml` to another Pi key identifier, then run Pi's `/reload` to
-re-register it; `/workflow-reload` cannot change extension shortcuts. The
-overlay shows run timing, execution or review, pause reasons, configuration
-drift, and the completed attempt path without a task-viewer pane below the
-editor. The main surface shows only one small animated `◐`/`◓`/`◑`/`◒` working
-indicator while a workflow runs, then clears it when execution stops. All step,
-progress, history, failure, and review detail stays in the overlay. There, `✓`
-marks a completed step, `✕` a failed or aborted run, and `◆` a paused step or
-pending review. Long reasons are clamped to the available display width; the
-durable checkpoint retains the full text. On short terminals, use `↑`/`↓`,
-PgUp/PgDn, or Home/End to scroll the overlay.
+The full status overlay is an on-demand verification and history page. Toggle
+it with `Ctrl+Alt+W` by default (`q` or `Esc` hides the board). Set
+`statusShortcut` in `settings.yaml` to another Pi key identifier, then run Pi's
+`/reload` to re-register it; `/workflow-reload` cannot change extension
+shortcuts. The overlay shows run timing, execution or review, pause reasons,
+configuration drift, and the completed attempt path without a task-viewer pane
+below the editor. The main surface shows only one small animated
+`◐`/`◓`/`◑`/`◒` working
+indicator followed by the workflow id and current step title/id while a
+workflow runs, then clears it when execution stops. This makes live progress
+visible without opening the status page. All attempt logs, history, failure,
+and review detail stays in the overlay. There, `✓` marks a completed step, `✕`
+a failed or aborted run, and `◆` a paused step or pending review.
 
-| Command                         | Purpose                                              |
-| ------------------------------- | ---------------------------------------------------- |
-| `/workflow-list`                | List loaded workflows and their configured commands. |
-| `/workflow-start <id> [input]`  | Start by workflow identifier.                        |
-| `/<configured-command> [input]` | Start through a workflow alias.                      |
-| `/workflow-pause [reason]`      | Halt without losing the checkpoint.                  |
-| `/workflow-resume`              | Reload, reconcile, and continue.                     |
-| `/workflow-abort [reason]`      | End the active run and restore baseline tools.       |
-| `/workflow-reload`              | Reload definitions while no workflow is running.     |
+Use `↑`/`↓` or `j`/`k` to select a step, then `Enter`, `→`, or `l` to inspect
+the bounded task supplied to each attempt, its result and gate decision, and a
+chronological execution log when available. In the detail view,
+`↑`/`↓` or `j`/`k` scrolls; `←`, `h`, or `Esc` returns to the board; `q` or the
+configured shortcut closes it. PgUp/PgDn and Home/End retain page navigation.
+Trace references and bounded task/result evidence live in the checkpoint, so
+completed, paused, resumed, and restored runs remain inspectable. Child logs
+are path-confined, size-bounded, control-sanitized, and redact common
+credential forms.
+For new main-agent attempts, the extension arms only on the exact workflow
+task and checkpoints a redacted, size-bounded prefix of finalized assistant
+and tool events in source order. This log remains part of the parent session,
+but the explorer never reads unrelated parent-session traffic. Legacy
+checkpoints without a main-agent log still show their bounded task and result.
+Long reasons are clamped to the display width while the durable checkpoint
+retains the full reason.
+
+| Command                         | Purpose                                                   |
+| ------------------------------- | --------------------------------------------------------- |
+| `/workflow-list`                | List loaded workflows and their configured commands.      |
+| `/workflow-doctor [id]`         | Diagnose completion paths, unreachable steps, and cycles. |
+| `/workflow-start <id> [input]`  | Start by workflow identifier.                             |
+| `/<configured-command> [input]` | Start through a workflow alias.                           |
+| `/workflow-pause [reason]`      | Halt without losing the checkpoint.                       |
+| `/workflow-resume [guidance]`   | Reload, reconcile, and continue with an optional hint.    |
+| `/workflow-abort [reason]`      | End the active run and restore baseline tools.            |
+| `/workflow-reload`              | Reload definitions while no workflow is running.          |
+
+Before a workflow starts or resumes, the doctor rejects graphs whose start
+cannot reach `$done` or whose reachable branches contain a step that cannot
+reach `$done`.
+Unreachable steps and cycles are reported as warnings; a cycle with an exit may
+run, but `maxStepVisits` pauses the uninterrupted run before a step can execute
+more than its configured limit. An explicit resume can continue from that
+checkpoint, so the guard bounds automatic graph advancement rather than
+guaranteeing completion or wall-clock duration.
 
 Configured aliases also accept multiline input. For example, if `work` is a
 loaded workflow command, Pi Workflows normalizes:
@@ -720,7 +798,12 @@ permissionCeiling:
   mcp: []
   extensions: []
   skills: []
-  bash: { mode: read-only }
+  bash:
+    mode: allow-list
+    allow:
+      - executable: git
+        argsPrefixes: [[status], [diff]]
+      - executable: rg
   subagent:
     agents: [scout, planner, worker, reviewer]
     contexts: [fresh]
@@ -741,34 +824,36 @@ path.
 Project workflows load only when Pi trusts the project and every step stays
 within this ceiling. The `subagent` ceiling is optional for main-only project
 workflows; if omitted, any project step that declares `subagent` is rejected.
+Project workflows cannot declare `workspace` binding at all, even when their
+other permissions fit the ceiling. Keep workflows that create, choose, or bind
+a different execution directory in the user-owned workflow directory.
 Each delegated project step must declare `turnBudget` and `toolBudget` with
 `"block": "*"`, so it cannot silently inherit unbounded child defaults or keep
 mutation tools after reaching the hard limit. The ceiling also controls
 agent profile names, fresh-context use, model overrides, timeouts, artifact
-retention, and the Bash rules and approved sources that a project workflow may
-request. Project workflows cannot override user workflow identifiers or
-commands.
+retention, and the Bash rules that a project workflow may request. Project
+workflows cannot override user workflow identifiers or commands.
 
 ## Architecture
 
 The package keeps the Pi entry point intentionally small:
 
-| Module                            | Responsibility                                                        |
-| --------------------------------- | --------------------------------------------------------------------- |
-| `src/index.ts`                    | Pi entry point only.                                                  |
-| `src/harness.ts`                  | Runtime orchestration and session lifecycle.                          |
-| `src/commands.ts`                 | User command surface.                                                 |
-| `src/config/`                     | Types, strict validation, prompt loading, precedence, ceilings.       |
-| `src/engine/`                     | Serializable run state and deterministic transitions.                 |
-| `src/policy/`                     | Tool, MCP, and Bash enforcement.                                      |
-| `src/policy/approved-commands.ts` | Filtered exact-command extraction from human-reviewed JSON artifacts. |
-| `src/integrations/subagents/`     | Delegation client, child protocol, and child policy runtime.          |
-| `src/integrations/plannotator.ts` | Versioned Plannotator gate adapter.                                   |
-| `src/integrations/prompt-gate.ts` | Built-in Pi prompt review adapter.                                    |
-| `src/runtime/`                    | Shared completion parsing and main-agent step runtime.                |
-| `src/preflight.ts`                | Required tool, extension, and skill checks.                           |
-| `src/prompt.ts`                   | Template rendering and step contract.                                 |
-| `agents/step.md`                  | Default general-purpose profile plus workflow child guidance.         |
+| Module                            | Responsibility                                                  |
+| --------------------------------- | --------------------------------------------------------------- |
+| `src/index.ts`                    | Pi entry point only.                                            |
+| `src/harness.ts`                  | Runtime orchestration and session lifecycle.                    |
+| `src/commands.ts`                 | User command surface.                                           |
+| `src/config/`                     | Types, strict validation, prompt loading, precedence, ceilings. |
+| `src/engine/`                     | Serializable run state and deterministic transitions.           |
+| `src/policy/`                     | Tool, MCP, and Bash enforcement.                                |
+| `src/workflow-doctor.ts`          | Deterministic transition-graph liveness diagnostics.            |
+| `src/integrations/subagents/`     | Delegation client, child protocol, and child policy runtime.    |
+| `src/integrations/plannotator.ts` | Versioned Plannotator gate adapter.                             |
+| `src/integrations/prompt-gate.ts` | Built-in Pi prompt review adapter.                              |
+| `src/runtime/`                    | Shared completion parsing and main-agent step runtime.          |
+| `src/preflight.ts`                | Required tool, extension, and skill checks.                     |
+| `src/prompt.ts`                   | Template rendering and step contract.                           |
+| `agents/step.md`                  | Default general-purpose profile plus workflow child guidance.   |
 
 The engine and policy modules do not depend on Pi runtime types, so they are fast to test.
 
@@ -787,7 +872,7 @@ process separation when a step opts into pi-subagents:
 - a single-use, parent-created child capability tied to the delegated step;
 - explicit MCP server and tool checks;
 - restricted Bash parsing;
-- exact Bash capabilities derived from a correlated human-reviewed artifact;
+- exact user-declared Bash executable and argument-prefix rules;
 - project trust and a user-owned permission ceiling;
 - fail-closed durable state, correlated child results, and correlated gate results.
 
@@ -800,14 +885,15 @@ source before installing or enabling it.
 Step completion is structurally validated—policy digest, declared outcome,
 non-empty bounded summary, required gate artifact, and sole completion call—but
 the harness cannot prove that a model's semantic claims or test evidence are
-true. Put exact checks in reviewed command contracts, use an independent
-verification step, and keep consequential actions behind a human gate.
+true. Put exact checks and acceptance criteria in the workflow prompt, use an
+independent verification step, and keep consequential actions behind a human
+gate.
 
 The harness does not provide exactly-once external effects. If a publish step
 is interrupted after a remote action succeeds but before it checkpoints, a
-resumed execution receives the same approved capability. Publish prompts should
-query the remote effect first, skip only proven-complete actions, and pause on
-ambiguous state.
+resumed execution receives the same declarative step permissions. Publish
+prompts should query the remote effect first, skip only proven-complete actions,
+and pause on ambiguous state.
 
 ## Development
 
@@ -823,10 +909,14 @@ main-agent completion, built-in feedback/approval, subagent request correlation
 and cancellation, child policy enforcement, and dependency preflight,
 including bounded automatic recovery after replay-safe terminal errors,
 timeouts, budget exhaustion, and nonzero exits; duplicate-failure stopping;
-reviewed exact-command propagation; and fail-closed legacy checkpoints.
+opaque gate artifacts; workspace binding and cwd reuse; workflow liveness
+diagnostics; and fail-closed legacy checkpoints.
 `bun run check` also launches real Pi RPC subprocesses, invokes
 `/work`, and verifies fresh `scout`, `worker`, and `reviewer` children receive
-only the explicit compact handoff from the immediately preceding step.
+only the explicit compact handoff from the immediately preceding step. The
+real-Pi scenario binds a sibling workspace, revisits its worker once, and
+verifies that every downstream visit keeps the bound cwd and receives no
+undeclared `replan` outcome.
 
 ## Publishing checklist
 
@@ -847,7 +937,6 @@ extensions, without hard-coding them into the orchestrator, are:
 | --------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Configurable recovery and backoff | Replace the fixed two-attempt recovery cap with a ceiling-aware per-step transient-failure policy. |
 | Acceptance criteria               | Give each step machine-checkable completion evidence and verification commands.                    |
-| Working directory or worktree     | Isolate mutating steps, monorepo packages, and concurrent branches.                                |
 | Parallel groups and join policy   | Run independent steps together and declare fail-fast, quorum, or all-success behavior.             |
 | Generic gates                     | Add ticket, CI, chat, or custom approval providers behind the same versioned gate contract.        |
 | Output schema and named artifacts | Pass structured data between steps instead of relying only on a summary.                           |
@@ -861,7 +950,7 @@ extensions, without hard-coding them into the orchestrator, are:
 - Gate providers are built-in prompt and Plannotator; custom providers are not yet configurable.
 - Delegated steps require pi-subagents 0.36.0 or newer and launch the actual profile selected by `subagent.agent`.
 - Extension tools are enforced; autonomous extension event-handler side effects cannot be disabled per step.
-- Completion evidence is model-reported; use reviewed executable checks and a fresh verification step when correctness matters.
+- Completion evidence is model-reported; use declarative executable checks and a fresh verification step when correctness matters.
 - Workflow configuration uses YAML. Prompt bodies may live in separate Markdown files.
 
 ## License

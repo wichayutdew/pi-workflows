@@ -18,6 +18,7 @@ function childPolicy(tools: ReadonlyArray<string> = ['read']): ChildStepPolicy {
     runId: 'run-1',
     stepId: 'inspect',
     stepTitle: 'Inspect',
+    cwd: '/repository',
     policyDigest: 'a'.repeat(64),
     capabilityPath: '/private/result/capability',
     capabilityToken: 'b'.repeat(64),
@@ -27,7 +28,7 @@ function childPolicy(tools: ReadonlyArray<string> = ['read']): ChildStepPolicy {
       mcp: [],
       extensions: [],
       skills: [],
-      bash: { mode: 'read-only', allow: [] },
+      bash: { mode: 'deny', allow: [] },
     },
     outcomes: ['done', 'blocked'],
     pauseOutcomes: ['blocked'],
@@ -244,6 +245,69 @@ describe('when testing delegation edge actions', () => {
     }
   });
 
+  test('does not retry a terminal failure with a post-completion watchdog warning', () => {
+    const actions = createDelegationFailureActions({
+      readDelegationReplayAudit: async () => ({
+        replaySafe: true,
+        toolCount: 2,
+      }),
+      readToolFailureDiagnostic: async () => undefined,
+    });
+
+    expect(
+      actions.isRetryableTerminalFailure({
+        reason: 'Child completion was followed by a watchdog warning.',
+        status: 'failed',
+        error: 'bash failed (exit 1): stale terminal projection',
+        exitCode: 1,
+        diagnostic: {
+          tool: 'bash',
+          postCompletionWarning: 'Unexpected files changed.',
+        },
+      }),
+    ).toBe(false);
+  });
+
+  test('reads a post-completion warning from an otherwise completed response', async () => {
+    const auditCalls: Array<ReadonlyArray<unknown>> = [];
+    const actions = createDelegationFailureActions({
+      readDelegationReplayAudit: async () => undefined,
+      readToolFailureDiagnostic: async () => undefined,
+      auditCompletedDelegationTranscript: async (...args) => {
+        auditCalls.push(args);
+        return {
+          verified: true,
+          warning: 'Unexpected files changed after completion.',
+        };
+      },
+    });
+    const active = activeDelegation({
+      trustedSessionRoot: '/sessions/parent',
+    });
+
+    const audit = await actions.completedResponseAudit(active, {
+      version: 1,
+      requestId: active.requestId,
+      status: 'completed',
+      agent: active.agent,
+      runId: 'child-run',
+      childIndex: 0,
+      sessionFile: '/sessions/parent/child-run/run-0/session.jsonl',
+    });
+
+    expect(audit).toEqual({
+      verified: true,
+      warning: 'Unexpected files changed after completion.',
+    });
+    expect(auditCalls).toEqual([
+      [
+        '/sessions/parent/child-run/run-0/session.jsonl',
+        '/sessions/parent',
+        { runId: 'child-run', childIndex: 0 },
+      ],
+    ]);
+  });
+
   test('allows audited timeout and budget recovery but rejects incomplete audit evidence', async () => {
     const auditedActions = createDelegationFailureActions({
       readDelegationReplayAudit: async () => ({
@@ -339,23 +403,31 @@ describe('when testing delegation edge actions', () => {
     const steps = raw.steps as Record<string, Record<string, unknown>>;
     steps.inspect = { ...steps.inspect, subagent: {} };
     const workflow = loadedWorkflow(raw);
-    const run = createRun(workflow, '', ['read'], 'run-1', 1);
+    const run = createRun(workflow, '', ['read'], 'run-1', 1, '/repository');
     const failures: Array<{ active: ActiveDelegation; reason: string }> = [];
     const fixture = {
       activeDelegation: undefined as ActiveDelegation | undefined,
       run,
       sessionEpoch: 2,
-      latestContext: undefined,
+      latestContext: {
+        cwd: '/repository',
+        sessionManager: { getSessionFile: () => undefined },
+        ui: { notify: () => undefined },
+      },
       mainSteps: { activeStepId: undefined },
       dependencies: {
         createRequestId: () => 'delegation-1',
-        currentWorkingDirectory: () => '/repository',
         createDelegationWorkspace: () => ({
           resultDirectory: '/private/delegation',
           capabilityPath: '/private/delegation/capability',
           capabilityToken: 'c'.repeat(64),
           resultPath: '/private/delegation/result.json',
         }),
+        resolveWorkspaceDirectory: ({
+          candidateCwd,
+        }: {
+          candidateCwd: string;
+        }) => candidateCwd,
       },
       subagents: {
         delegate: () => {
@@ -433,6 +505,64 @@ describe('when testing delegation edge actions', () => {
     expect(fixture.activeDelegation).toBeUndefined();
     expect(calls.pauseReasons).toEqual([
       'Active workflow configuration is unavailable',
+    ]);
+    expect(calls.cleaned).toBe(1);
+  });
+
+  test('does not advance a completed response with a post-completion watchdog warning', async () => {
+    const workflow = loadedWorkflow();
+    const run = createRun(workflow, '', ['read'], 'run-1', 1);
+    const active = {
+      ...activeDelegation(),
+      stepDigest: run.currentStepDigest,
+    };
+    const calls = {
+      cleaned: 0,
+      delegatedResultReads: 0,
+      pauseReasons: [] as Array<string>,
+    };
+    const fixture = {
+      activeDelegation: active as ActiveDelegation | undefined,
+      catalog: { workflows: new Map([[workflow.definition.id, workflow]]) },
+      dependencies: {
+        now: () => 10,
+        readDelegatedResult: async () => {
+          calls.delegatedResultReads += 1;
+          return '';
+        },
+      },
+      isSessionActive: true,
+      run,
+      sessionEpoch: 2,
+      cleanupDelegation: async () => {
+        calls.cleaned += 1;
+      },
+      delegationFailures: {
+        completedResponseAudit: async () => ({
+          verified: true as const,
+          warning: 'Unexpected files changed after completion.',
+        }),
+      },
+      pauseForDelegationFailure: (reason: string) => {
+        calls.pauseReasons.push(reason);
+      },
+      releaseMainAfterCancellation: () => {},
+      retryDelegationAfterFailure: () => false,
+    };
+
+    await createDelegationResponseActions().finishDelegation.call(
+      fixture as unknown as HarnessActionContext,
+      active,
+      {
+        version: 1,
+        requestId: active.requestId,
+        status: 'completed',
+      },
+    );
+
+    expect(calls.delegatedResultReads).toBe(0);
+    expect(calls.pauseReasons).toEqual([
+      'Subagent "worker" completed with an unresolved post-completion watchdog warning: Unexpected files changed after completion.',
     ]);
     expect(calls.cleaned).toBe(1);
   });

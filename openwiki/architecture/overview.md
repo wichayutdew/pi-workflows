@@ -29,7 +29,7 @@ flowchart TD
 
   EngineFacade --> EngineCore[src/engine/create-run<br/>run-*<br/>gate-*]
 
-  MainRuntime --> PolicyFacades[src/policy/tools.ts<br/>bash.ts<br/>approved-commands.ts]
+  MainRuntime --> PolicyFacades[src/policy/tools.ts<br/>bash.ts]
   ChildRuntime --> PolicyFacades
   ChildRuntime --> ChildPolicy[src/integrations/subagents/child-policy-*]
   ChildRuntime --> ChildFiles[src/integrations/subagents/child-runtime-*]
@@ -56,7 +56,7 @@ runtimes, and status rendering.
 | Area                                                | Handles                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/command-names.ts`                              | Reserved slash-command names owned by Pi and by the workflow extension. Config validation uses these names to prevent workflow command conflicts.                                                                                                                                                                                           |
-| `src/commands.ts`                                   | Declarative registration for `/workflow-list`, `/workflow-start`, `/workflow-pause`, `/workflow-resume`, `/workflow-abort`, and `/workflow-reload`. It depends only on the `WorkflowCommandController` port.                                                                                                                                |
+| `src/commands.ts`                                   | Declarative registration for `/workflow-list`, `/workflow-doctor`, `/workflow-start`, `/workflow-pause`, `/workflow-resume`, `/workflow-abort`, and `/workflow-reload`. It depends only on the `WorkflowCommandController` port.                                                                                                            |
 | `src/config/`                                       | Settings and workflow catalog loading. `load.ts`, `validate.ts`, and `types.ts` are compatibility/public facades; `catalog.ts`, `load-settings.ts`, `load-workflows.ts`, `yaml.ts`, `diagnostics.ts`, `ceiling.ts`, and `command-conflicts.ts` do the work.                                                                                 |
 | `src/config/validation/`                            | Schema-level validation split by concern: settings, workflow, step, subagent, shortcut, permissions, prompt, and shared result helpers. These modules normalize untrusted YAML before it reaches the runtime.                                                                                                                               |
 | `src/digest.ts`                                     | Stable hashing for workflow and step digests, used by catalog loading and run reconciliation.                                                                                                                                                                                                                                               |
@@ -65,12 +65,13 @@ runtimes, and status rendering.
 | `src/index.ts`                                      | Pi extension factory with injected environment, settings loader, child-runtime registration, and harness creation boundaries.                                                                                                                                                                                                               |
 | `src/integrations/`                                 | External integration adapters. Plannotator request/response/type helpers live beside the public `plannotator.ts`; prompt review gates live in `prompt-gate.ts`; `subagents/` owns parent-child delegation and child runtime contracts.                                                                                                      |
 | `src/integrations/subagents/`                       | Pi Subagents protocol family. `protocol.ts`, `client.ts`, `diagnostics.ts`, and `child-runtime.ts` are stable facades; implementation modules cover event protocol, delegation lifecycle, child policy envelope/path/validation, child completion/result files, replay safety, failure diagnostics, and transcript correlation.             |
-| `src/policy/`                                       | Tool and command authorization. `tools.ts`, `bash.ts`, and `approved-commands.ts` are facades; implementation modules authorize tool calls, MCP proxy selectors, Bash modes, restricted git/command shapes, reviewed artifacts, reviewed repository cwd, read-only Bash, and immutable completion inputs.                                   |
+| `src/policy/`                                       | Domain-neutral tool and command authorization. The `tools.ts` and `bash.ts` facades cover tool calls, MCP selectors, generic Bash modes and allow-list parsing, plus immutable completion inputs.                                                                                                                                           |
 | `src/preflight.ts`                                  | Runtime availability checks for required tools, extensions, MCP proxy support, skills, Plannotator, and pi-subagents before a step launches.                                                                                                                                                                                                |
 | `src/prompt.ts` and `src/prompt/`                   | Prompt rendering. The facade exports main workflow notices, main/delegated step tasks, retry tasks, step contract/sections, and template rendering.                                                                                                                                                                                         |
 | `src/runtime/`                                      | Main-agent execution runtime and task serialization. `main-step-runtime.ts` is the public controller plus a compatibility class; sibling modules register lifecycle, policy, completion, state, completion-tool, step-result parsing, and the serial task queue.                                                                            |
 | `src/workflow-list.ts`                              | Formatting for the workflow catalog list command.                                                                                                                                                                                                                                                                                           |
-| `src/workflow-status.ts` and `src/workflow-status/` | Status overlay rendering. The facade exports board/text formatting, shortcut labels, view controller, and types; the folder handles layout, path rendering, summary rendering, status formatting, and the TUI view.                                                                                                                         |
+| `src/workflow-doctor.ts`                            | Deterministic transition-graph liveness diagnostics used by `/workflow-doctor` and start refusal.                                                                                                                                                                                                                                           |
+| `src/workflow-status.ts` and `src/workflow-status/` | Status overlay rendering. The facade exports board/text formatting, shortcut labels, view controller, and types; the folder handles layout, path rendering, summary and detail rendering, transcript reads, status formatting, and the TUI view.                                                                                            |
 
 ## Parent And Child Modes
 
@@ -95,13 +96,15 @@ flowchart LR
   PromptFiles[prompt markdown] --> Loaded[LoadedWorkflow]
   Definition --> Loaded
   Loaded --> WorkflowDigest[workflow digest]
-  Loaded --> StepDigests[step digests]
+  Loaded --> StepDigests[step and structural digests]
 
   Loaded --> Run[WorkflowRun]
   Run --> History[StepHistoryEntry list]
   Run --> Gate[PendingGate optional]
   Run --> Handoff[stepHandoff and lastSummary]
   Run --> Reviewed[reviewedArtifact provenance]
+  Run --> Workspace[run-start and bound cwd]
+  Run --> Trace[bounded step attempts and logs]
   Run --> Baseline[baselineTools]
   Run --> Checkpoint[pi-workflows-state-v1 session entry]
 ```

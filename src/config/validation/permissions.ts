@@ -1,6 +1,5 @@
 import {
   EMPTY_PERMISSIONS,
-  type BashApprovalSource,
   type BashMode,
   type BashPermission,
   type BashRule,
@@ -8,7 +7,6 @@ import {
   type StepRequirements,
 } from '../types.ts';
 import {
-  BASH_APPROVAL_SOURCE_PATTERN,
   EXECUTABLE_PATTERN,
   isJsonObject,
   MCP_SELECTOR_PATTERN,
@@ -19,18 +17,6 @@ import {
   TOOL_PATTERN,
   type ValidationErrors,
 } from './shared.ts';
-
-const BASH_APPROVAL_SOURCES = [
-  'verification-worker',
-  'verification-reviewer',
-  'remote-actions',
-  'remote-push',
-  'remote-drafts',
-] as const satisfies ReadonlyArray<BashApprovalSource>;
-
-function isBashApprovalSource(value: string): value is BashApprovalSource {
-  return BASH_APPROVAL_SOURCES.some((source) => source === value);
-}
 
 function emptyPermissions(): StepPermissions {
   return {
@@ -131,23 +117,13 @@ function parseBashPermission(
     errors.push(`${path}: expected an object`);
     return { ...EMPTY_PERMISSIONS.bash, allow: [] };
   }
-  rejectUnknownKeys(
-    value,
-    ['mode', 'allow', 'approvedSources', 'handoffSources'],
-    path,
-    errors,
-  );
+  rejectUnknownKeys(value, ['mode', 'allow'], path, errors);
 
   const mode = readString(value.mode, `${path}.mode`, errors);
   const isValidMode =
-    mode === 'deny' ||
-    mode === 'read-only' ||
-    mode === 'allow-list' ||
-    mode === 'unrestricted';
+    mode === 'deny' || mode === 'allow-list' || mode === 'unrestricted';
   if (!isValidMode) {
-    errors.push(
-      `${path}.mode: expected deny, read-only, allow-list, or unrestricted`,
-    );
+    errors.push(`${path}.mode: expected deny, allow-list, or unrestricted`);
   }
 
   const allow = Array.isArray(value.allow)
@@ -159,54 +135,17 @@ function parseBashPermission(
     errors.push(`${path}.allow: expected an array`);
   }
 
-  const approvedSources = (
-    value.approvedSources === undefined
-      ? []
-      : readStringList(
-          value.approvedSources,
-          `${path}.approvedSources`,
-          errors,
-          BASH_APPROVAL_SOURCE_PATTERN,
-        )
-  ).filter(isBashApprovalSource);
-  const handoffSources = (
-    value.handoffSources === undefined
-      ? []
-      : readStringList(
-          value.handoffSources,
-          `${path}.handoffSources`,
-          errors,
-          /^(verification-worker|verification-reviewer)$/,
-        )
-  ) as Array<'verification-worker' | 'verification-reviewer'>;
-
   const normalizedMode: BashMode = isValidMode ? mode : 'deny';
   if (normalizedMode !== 'allow-list' && allow.length > 0) {
     errors.push(`${path}.allow: only valid when mode is "allow-list"`);
   }
-  if (
-    normalizedMode === 'allow-list' &&
-    allow.length === 0 &&
-    approvedSources.length === 0
-  ) {
-    errors.push(
-      `${path}: allow-list mode requires an allow rule or an approved command source`,
-    );
-  }
-  if (normalizedMode !== 'allow-list' && approvedSources.length > 0) {
-    errors.push(
-      `${path}.approvedSources: only valid when mode is "allow-list"`,
-    );
-  }
-  if (normalizedMode !== 'allow-list' && handoffSources.length > 0) {
-    errors.push(`${path}.handoffSources: only valid when mode is "allow-list"`);
+  if (normalizedMode === 'allow-list' && allow.length === 0) {
+    errors.push(`${path}: allow-list mode requires an allow rule`);
   }
 
   return {
     mode: normalizedMode,
     allow,
-    ...(approvedSources.length > 0 ? { approvedSources } : {}),
-    ...(handoffSources.length > 0 ? { handoffSources } : {}),
   };
 }
 

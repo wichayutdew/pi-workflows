@@ -32,6 +32,9 @@ export function delegationFailureFingerprint(
           tool: normalizedFingerprintField(failure.diagnostic.tool),
           call: normalizedFingerprintField(failure.diagnostic.call),
           output: normalizedFingerprintField(failure.diagnostic.output),
+          postCompletionWarning: normalizedFingerprintField(
+            failure.diagnostic.postCompletionWarning,
+          ),
         }
       : undefined,
   });
@@ -62,6 +65,7 @@ export function isRetryableTerminalFailure(
   failure: DelegationFailureDetails,
 ): boolean {
   if (failure.recoveryBlocker !== undefined) return false;
+  if (failure.diagnostic?.postCompletionWarning !== undefined) return false;
   if (
     failure.status === 'timed_out' ||
     failure.status === 'turn_budget_exhausted' ||
@@ -96,9 +100,7 @@ export function isSafeToRetryDelegation(
 ): boolean {
   return (
     replayAudit?.replaySafe === true &&
-    (isReplayExplicitlyAuthorized ||
-      policy.permissions.bash.mode === 'deny' ||
-      policy.permissions.bash.mode === 'read-only')
+    (isReplayExplicitlyAuthorized || policy.permissions.bash.mode === 'deny')
   );
 }
 

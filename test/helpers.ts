@@ -5,6 +5,10 @@ import type {
   WorkflowDefinition,
 } from '../src/config/types.ts';
 import { validateWorkflow } from '../src/config/validate.ts';
+import {
+  digestWorkflowStep,
+  digestWorkflowStepStructure,
+} from '../src/config/step-digests.ts';
 
 export function expectTruthy<T>(value: T): asserts value {
   expect(value).toBeTruthy();
@@ -23,7 +27,10 @@ export function baseWorkflow(): Record<string, unknown> {
         prompt: 'Inspect {{workflow.input}}',
         permissions: {
           tools: ['read', 'bash'],
-          bash: { mode: 'read-only' },
+          bash: {
+            mode: 'allow-list',
+            allow: [{ executable: 'git', argsPrefix: ['status'] }],
+          },
         },
         requires: {
           tools: ['read'],
@@ -59,13 +66,20 @@ export function loadedWorkflow(raw = baseWorkflow()): LoadedWorkflow {
   const stepDigests = Object.fromEntries(
     Object.entries(definition.steps).map(([stepId, step]) => [
       stepId,
-      digest({ step, prompt: prompts[stepId] }),
+      digestWorkflowStep(step, prompts[stepId] ?? ''),
+    ]),
+  );
+  const stepStructuralDigests = Object.fromEntries(
+    Object.entries(definition.steps).map(([stepId, step]) => [
+      stepId,
+      digestWorkflowStepStructure(step),
     ]),
   );
   return {
     definition,
     prompts,
     stepDigests,
+    stepStructuralDigests,
     digest: digest({ definition, prompts }),
     sourcePath: '/tmp/example.workflow.yaml',
     sourceKind: 'user',

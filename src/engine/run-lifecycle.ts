@@ -99,6 +99,16 @@ export const resumeRun = (run: WorkflowRun, now: number): WorkflowRun => {
 };
 
 /**
+ * Replaces the user-authored guidance for one explicit resume attempt.
+ */
+export const setResumeInput = (
+  run: WorkflowRun,
+  input: string,
+  now: number,
+): WorkflowRun =>
+  withRunUpdate(run, { resumeInput: input.trim() || undefined }, now);
+
+/**
  * Aborts a run and clears resumable gate state.
  *
  * @param run - Current workflow state.
@@ -119,6 +129,7 @@ export const abortRun = (
       pausedFrom: undefined,
       failedStepId: undefined,
       pendingGate: undefined,
+      resumeInput: undefined,
     },
     now,
   );

@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
   authorizeBash,
-  parseRestrictedGitCommand,
   tokenizeRestrictedCommand,
 } from '../src/policy/bash.ts';
 import {
@@ -13,25 +12,18 @@ import { loadedWorkflow } from './helpers.ts';
 
 describe('when testing policy', () => {
   describe('should satisfy its behavioral contract', () => {
-    test('read-only Bash accepts inspection and rejects shell composition', () => {
+    test('Bash allow-lists enforce generic token rules without command semantics', () => {
       // given
-      // when
-      const policy = { mode: 'read-only' as const, allow: [] };
+      const policy = {
+        mode: 'allow-list' as const,
+        allow: [
+          { executable: 'git', argsPrefix: ['status'] },
+          { executable: 'rg', argsPrefix: [] },
+        ],
+      };
       // then
       expect(authorizeBash('git status --short', policy).allowed).toBe(true);
-      expect(
-        authorizeBash('git -C /other/repository status --short', policy)
-          .allowed,
-      ).toBe(true);
-      expect(
-        authorizeBash(
-          'git -C /other/repository --no-pager rev-parse HEAD',
-          policy,
-        ).allowed,
-      ).toBe(true);
-      expect(
-        authorizeBash('git -C /other/repository checkout main', policy).allowed,
-      ).toBe(false);
+      expect(authorizeBash('git checkout main', policy).allowed).toBe(false);
       expect(authorizeBash('rg TODO src', policy).allowed).toBe(true);
       expect(authorizeBash('git status && rm -rf tmp', policy).allowed).toBe(
         false,
@@ -42,20 +34,7 @@ describe('when testing policy', () => {
       expect(authorizeBash('rg "unsafe $HOME" src', policy).allowed).toBe(
         false,
       );
-      expect(authorizeBash('rg --pre sh TODO', policy).allowed).toBe(false);
-      expect(authorizeBash('rg --pr[e] ./evil needle .', policy).allowed).toBe(
-        false,
-      );
-      expect(
-        authorizeBash('git diff --outpu[t]=captured', policy).allowed,
-      ).toBe(false);
       expect(authorizeBash("rg -g '*.ts' TODO .", policy).allowed).toBe(true);
-      expect(
-        authorizeBash("git grep -O'pager command' Pi", policy).allowed,
-      ).toBe(false);
-      expect(
-        authorizeBash("git -c alias.status='!sh' status", policy).allowed,
-      ).toBe(false);
     });
 
     test('Bash allow-list matches executable and argument prefix', () => {
@@ -81,13 +60,13 @@ describe('when testing policy', () => {
           mode: 'allow-list',
           allow: [{ executable: 'git', argsPrefix: ['diff'] }],
         }).allowed,
-      ).toBe(false);
+      ).toBe(true);
       expect(
         authorizeBash('git diff --ext-diff', {
           mode: 'allow-list',
           allow: [{ executable: 'git', argsPrefix: ['diff'] }],
         }).allowed,
-      ).toBe(false);
+      ).toBe(true);
       const hostedApiPolicy = {
         mode: 'allow-list' as const,
         allow: [{ executable: 'glab', argsPrefix: ['api'] }],
@@ -103,32 +82,13 @@ describe('when testing policy', () => {
           'glab api projects/1/merge_requests/2/notes -f body=posted',
           hostedApiPolicy,
         ).allowed,
-      ).toBe(false);
+      ).toBe(true);
       expect(
         authorizeBash(
           'glab api projects/1/merge_requests/2 --method DELETE',
           hostedApiPolicy,
         ).allowed,
-      ).toBe(false);
-    });
-
-    test('Bash allows only exact reviewed commands from configured sources', () => {
-      // given
-      // when
-      const policy = {
-        mode: 'allow-list' as const,
-        allow: [],
-        approvedSources: ['verification-worker' as const],
-      };
-      // then
-      expect(
-        authorizeBash('npm test -- --runInBand', policy, [
-          'npm test -- --runInBand',
-        ]).allowed,
       ).toBe(true);
-      expect(
-        authorizeBash('npm test', policy, ['npm test -- --runInBand']).allowed,
-      ).toBe(false);
     });
 
     test('MCP proxy requires an explicit allowed server and tool', () => {
@@ -285,11 +245,6 @@ describe('when testing policy', () => {
       // then
       expect(results.slice(0, 3).every((result) => result.error)).toBe(true);
       expect(results[3]).toEqual({ tokens: ['hello world'] });
-      expect(parseRestrictedGitCommand(['git', 'status'])).toEqual({
-        subcommand: 'status',
-        subcommandIndex: 1,
-      });
-      expect(parseRestrictedGitCommand(['git'])).toBe(undefined);
       expect(
         authorizeBash('anything', { mode: 'unrestricted', allow: [] }).allowed,
       ).toBe(true);
