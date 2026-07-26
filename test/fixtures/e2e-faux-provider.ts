@@ -108,7 +108,7 @@ function observe(context: Context): Observation {
     step === 'bootstrap'
       ? 'worker'
       : step === 'plan'
-        ? 'scout'
+        ? 'planner'
         : step === 'implement'
           ? 'worker'
           : step === 'verify'

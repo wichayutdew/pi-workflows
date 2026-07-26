@@ -71,6 +71,14 @@ user-owned starting point for:
 | `/mr-review`  | Fetch a hosted review, produce a child review, approve it, publish it, and verify the remote effect.       |
 | `/mr-comment` | Fetch review comments, plan and approve fixes, edit only the current branch/worktree, verify, push, reply. |
 
+The starter YAML explicitly selects Pi Subagents' standard role profiles:
+`scout` for evidence gathering, `planner` for implementation plans, `worker`
+for mutations and publication, and `reviewer` for independent review and
+verification. Change those `subagent.agent` values when your own Pi Subagents
+configuration uses different profiles. The generic `pi-workflows.step` profile
+remains available for user-authored `subagent: {}` steps, but the starter kit
+does not rely on it.
+
 Install the integrations required by these four examples:
 
 ```bash
