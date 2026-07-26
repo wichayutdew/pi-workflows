@@ -2,6 +2,7 @@ import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import {
   failedToolName,
   formatToolFailureDiagnostic,
+  type CompletedDelegationTranscriptAudit,
 } from '../integrations/subagents/diagnostics.ts';
 import type {
   ChildStepPolicy,
@@ -28,6 +29,10 @@ import type {
 export type DelegationFailureActions = {
   delegationFailureFingerprint: (failure: DelegationFailureDetails) => string;
   hasContradictoryCompletion: (response: SubagentDelegationResponse) => boolean;
+  completedResponseAudit: (
+    active: ActiveDelegation,
+    response: SubagentDelegationResponse,
+  ) => Promise<CompletedDelegationTranscriptAudit>;
   isRetryableTerminalFailure: (failure: DelegationFailureDetails) => boolean;
   isSafeToRetryDelegation: (
     policy: ChildStepPolicy,
@@ -134,8 +139,42 @@ export function createDelegationFailureActions(
   dependencies: Pick<
     WorkflowHarnessDependencies,
     'readDelegationReplayAudit' | 'readToolFailureDiagnostic'
-  >,
+  > &
+    Partial<
+      Pick<WorkflowHarnessDependencies, 'auditCompletedDelegationTranscript'>
+    >,
 ): DelegationFailureActions {
+  const responseIdentity = (
+    active: ActiveDelegation,
+    response: SubagentDelegationResponse,
+  ): { readonly runId: string; readonly childIndex: 0 } | undefined => {
+    if (
+      response.childIndex !== 0 ||
+      typeof response.runId !== 'string' ||
+      (response.agent !== undefined && response.agent !== active.agent)
+    ) {
+      return undefined;
+    }
+    return { runId: response.runId, childIndex: 0 };
+  };
+
+  const completedResponseAudit = async (
+    active: ActiveDelegation,
+    response: SubagentDelegationResponse,
+  ): Promise<CompletedDelegationTranscriptAudit> => {
+    if (!dependencies.auditCompletedDelegationTranscript) {
+      return {
+        verified: false,
+        reason: 'completed transcript auditing is unavailable',
+      };
+    }
+    return dependencies.auditCompletedDelegationTranscript(
+      response.sessionFile,
+      active.trustedSessionRoot,
+      responseIdentity(active, response),
+    );
+  };
+
   const describeDelegationFailure = async (
     active: ActiveDelegation,
     response: SubagentDelegationResponse,
@@ -144,13 +183,7 @@ export function createDelegationFailureActions(
     const terminalError = nonEmptyTerminalError(response);
     const error =
       terminalError ?? 'The subagent returned no terminal error details.';
-    const isResponseIdentityValid =
-      response.childIndex === 0 &&
-      (response.agent === undefined || response.agent === active.agent);
-    const identity =
-      isResponseIdentityValid && response.runId !== undefined
-        ? { runId: response.runId, childIndex: 0 }
-        : undefined;
+    const identity = responseIdentity(active, response);
     const [diagnostic, replayAudit] = await Promise.all([
       dependencies.readToolFailureDiagnostic(
         response.sessionFile,
@@ -166,7 +199,6 @@ export function createDelegationFailureActions(
         {
           task: active.transcriptTask,
           bashPermission: active.policy.permissions.bash,
-          approvedBashCommands: active.policy.approvedBashCommands ?? [],
         },
       ),
     ]);
@@ -205,6 +237,7 @@ export function createDelegationFailureActions(
   return {
     delegationFailureFingerprint,
     hasContradictoryCompletion,
+    completedResponseAudit,
     isRetryableTerminalFailure,
     isSafeToRetryDelegation,
     rejectedRecoveryReason,

@@ -22,7 +22,13 @@ steps:
       tools: [read, grep, bash]
       mcp: [gitlab/get_merge_request, gitlab/list_merge_request_discussions]
       bash:
-        mode: read-only
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: rg
+            argsPrefix: []
     requires:
       tools: [read, bash, mcp]
     transitions:
@@ -42,23 +48,27 @@ steps:
     permissions:
       tools: [read, grep, bash]
       mcp: [gitlab/get_merge_request, gitlab/list_merge_request_discussions]
-      extensions: [plannotator]
       skills: [superpowers:brainstorming]
       bash:
-        mode: read-only
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes:
+              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+          - executable: rg
+            argsPrefix: []
     requires:
       tools: [read, mcp]
-      extensions: [plannotator]
       skills: [superpowers:brainstorming]
     gate:
       provider: plannotator
       submitOutcome: submit
       approvedOutcome: approved
       rejectedOutcome: changes-requested
-      timeoutMs: 5000
+      timeoutMs: 30000
     transitions:
       approved: implement
-      changes-requested: plan
+      changes-requested: $pause
       blocked: $pause
   implement:
     title: Implement the approved plan
@@ -79,7 +89,6 @@ steps:
             argsPrefixes: [[status], [diff]]
           - executable: npm
             argsPrefix: [test]
-        approvedSources: [verification-worker]
     requires:
       tools: [read, edit, bash]
       skills: [superpowers:test-driven-development]
@@ -107,7 +116,6 @@ steps:
             argsPrefixes: [[status], [diff]]
           - executable: npm
             argsPrefix: [test]
-        approvedSources: [verification-reviewer]
     requires:
       tools: [read, bash]
     transitions:

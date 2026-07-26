@@ -1,3 +1,9 @@
+import { isAbsolute } from 'node:path';
+import {
+  MAX_WORKSPACE_PATH_CHARS,
+  type StepWorkspaceBinding,
+} from '../config/types.ts';
+
 const MAX_ARTIFACT_CHARS = 200_000;
 const RESULT_KEYS = new Set([
   'version',
@@ -5,6 +11,7 @@ const RESULT_KEYS = new Set([
   'outcome',
   'summary',
   'artifact',
+  'workspace',
 ]);
 
 /**
@@ -15,6 +22,11 @@ export type StepResultPolicy = {
   readonly outcomes: ReadonlyArray<string>;
   readonly summaryMaxChars: number;
   readonly gateSubmitOutcome?: string;
+  readonly workspace?: StepWorkspaceBinding;
+};
+
+export type WorkflowResultWorkspace = {
+  readonly cwd: string;
 };
 
 /**
@@ -26,11 +38,50 @@ export type WorkflowStepResult = {
   readonly outcome: string;
   readonly summary: string;
   readonly artifact?: string;
+  readonly workspace?: WorkflowResultWorkspace;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 };
+
+function parseResultWorkspace(
+  value: unknown,
+  outcome: string,
+  policy: StepResultPolicy,
+): WorkflowResultWorkspace | undefined {
+  const requiresWorkspace = policy.workspace?.bindOn.includes(outcome) === true;
+  if (!requiresWorkspace) {
+    if (value !== undefined) {
+      throw new Error('workflow step workspace is forbidden for this outcome');
+    }
+    return undefined;
+  }
+  if (!isObject(value)) {
+    throw new Error(
+      `workflow step outcome "${outcome}" requires workspace.cwd`,
+    );
+  }
+  const unknownKey = Object.keys(value).find((key) => key !== 'cwd');
+  if (unknownKey) {
+    throw new Error(
+      `workflow step workspace has unknown property "${unknownKey}"`,
+    );
+  }
+  if (typeof value.cwd !== 'string') {
+    throw new Error('workflow step workspace cwd must be a string');
+  }
+  const cwd = value.cwd;
+  if (!cwd || cwd.includes('\0') || !isAbsolute(cwd)) {
+    throw new Error('workflow step workspace cwd must be an absolute path');
+  }
+  if (cwd.length > MAX_WORKSPACE_PATH_CHARS) {
+    throw new Error(
+      `workflow step workspace cwd exceeds ${MAX_WORKSPACE_PATH_CHARS} characters`,
+    );
+  }
+  return { cwd };
+}
 
 /**
  * Validates and normalizes the structured result returned by a workflow step.
@@ -96,11 +147,17 @@ export function parseWorkflowStepResult(
   ) {
     throw new Error('workflow gate outcome requires a non-empty artifact');
   }
+  const workspace = parseResultWorkspace(
+    value.workspace,
+    value.outcome,
+    policy,
+  );
   return {
     version: 1,
     policyDigest: policy.policyDigest,
     outcome: value.outcome,
     summary,
     ...(artifact !== undefined ? { artifact } : {}),
+    ...(workspace ? { workspace } : {}),
   };
 }

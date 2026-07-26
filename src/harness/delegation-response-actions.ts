@@ -4,9 +4,14 @@ import {
   type SubagentDelegationUpdate,
 } from '../integrations/subagents/protocol.ts';
 import { advanceRun } from '../engine/transitions.ts';
+import {
+  attachSubagentTranscript,
+  recordCurrentStepResult,
+} from '../engine/step-trace.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import type { ActiveDelegation, DelegationFailureDetails } from './types.ts';
+import { resolveStepEffects } from './step-effects.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -138,10 +143,50 @@ async function finishDelegation(
     ) {
       return;
     }
+    const terminalAt = this.dependencies.now();
+    if (
+      response.requestId === active.requestId &&
+      (response.agent === undefined || response.agent === active.agent) &&
+      response.sessionFile &&
+      active.trustedSessionRoot &&
+      typeof response.runId === 'string' &&
+      response.runId &&
+      response.childIndex === 0
+    ) {
+      try {
+        this.run = attachSubagentTranscript(
+          this.run,
+          active.requestId,
+          {
+            trustedRoot: active.trustedSessionRoot,
+            sessionFile: response.sessionFile,
+            runId: response.runId,
+            childIndex: response.childIndex,
+          },
+          terminalAt,
+        );
+      } catch {
+        // Status evidence is best-effort and cannot alter terminal handling.
+      }
+    }
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     const step = workflow?.definition.steps[this.run.currentStepId];
     if (!workflow || !step) {
       throw new Error('Active workflow configuration is unavailable');
+    }
+    if (response.status === 'completed') {
+      const transcriptAudit =
+        await this.delegationFailures.completedResponseAudit(active, response);
+      if (!transcriptAudit.verified) {
+        throw new Error(
+          `Subagent "${active.agent}" completed without a verifiable terminal transcript: ${transcriptAudit.reason}`,
+        );
+      }
+      if (transcriptAudit.warning) {
+        throw new Error(
+          `Subagent "${active.agent}" completed with an unresolved post-completion watchdog warning: ${transcriptAudit.warning}`,
+        );
+      }
     }
     let recoveredTerminalFailure: DelegationFailureDetails | undefined;
     if (
@@ -237,6 +282,7 @@ async function finishDelegation(
         ),
       );
     }
+    const acceptedAt = terminalAt;
     if (recoveredTerminalFailure) {
       const isFalsePositive =
         recoveredTerminalFailure.diagnostic?.correlation ===
@@ -249,29 +295,53 @@ async function finishDelegation(
       );
     }
     if (step.gate?.submitOutcome === result.outcome) {
+      this.run = recordCurrentStepResult(this.run, result, acceptedAt);
       await this.submitGate(
         workflow,
         this.run,
         result.outcome,
+        result.summary,
         result.artifact ?? '',
       );
       return;
     }
 
+    const effects = resolveStepEffects(
+      this.run,
+      step,
+      result,
+      this.dependencies,
+    );
+    const tracedRun = recordCurrentStepResult(
+      this.run,
+      result,
+      acceptedAt,
+      effects.workspaceCwd,
+    );
     this.run = advanceRun(
       workflow,
-      this.run,
+      tracedRun,
       result.outcome,
       result.summary,
       this.dependencies.now(),
+      effects,
     );
-    this.settleAfterTransition(workflow);
+    this.settleAfterTransition(workflow, {
+      stepId: active.stepId,
+      outcome: result.outcome,
+      summary: result.summary,
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     cleanupAttempted = true;
     await this.cleanupDelegation(active);
     if (!this.retryDelegationAfterFailure(active, terminalFailure, reason)) {
-      this.pauseForDelegationFailure(reason);
+      const failureSummary = terminalFailure?.error
+        ? `Subagent ${terminalFailure.status.replaceAll('_', ' ')}: ${terminalFailure.error}`
+        : terminalFailure
+          ? `Subagent ${terminalFailure.status.replaceAll('_', ' ')}`
+          : reason;
+      this.pauseForDelegationFailure(reason, failureSummary);
     }
   } finally {
     try {

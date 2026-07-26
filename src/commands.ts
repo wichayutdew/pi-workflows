@@ -12,6 +12,11 @@ export type WorkflowCommandController = {
   readonly workflowIds: () => ReadonlyArray<string>;
   /** Lists loaded workflows. */
   readonly list: (context: ExtensionCommandContext) => Promise<void>;
+  /** Diagnoses workflow graph liveness. */
+  readonly doctor: (
+    workflowId: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
   /** Starts a workflow. */
   readonly start: (
     workflowId: string,
@@ -23,8 +28,11 @@ export type WorkflowCommandController = {
     reason: string,
     context: ExtensionCommandContext,
   ) => Promise<void>;
-  /** Resumes the paused workflow. */
-  readonly resume: (context: ExtensionCommandContext) => Promise<void>;
+  /** Resumes the paused workflow with optional user guidance. */
+  readonly resume: (
+    input: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
   /** Aborts the active workflow. */
   readonly abort: (
     reason: string,
@@ -98,6 +106,25 @@ export function createHarnessCommands(
         handler: async (_args, context) => controller.list(context),
       },
     },
+    {
+      name: 'workflow-doctor',
+      options: {
+        description:
+          'Check workflow completion paths, unreachable steps, and cycles',
+        getArgumentCompletions: (prefix) => {
+          const completions = controller
+            .workflowIds()
+            .filter((workflowId) => workflowId.startsWith(prefix))
+            .map((workflowId) => ({
+              value: workflowId,
+              label: workflowId,
+            }));
+          return completions.length > 0 ? completions : null;
+        },
+        handler: async (args, context) =>
+          controller.doctor(args.trim(), context),
+      },
+    },
     createStartCommand(controller),
     {
       name: 'workflow-pause',
@@ -110,8 +137,10 @@ export function createHarnessCommands(
     {
       name: 'workflow-resume',
       options: {
-        description: 'Reload configuration and resume the paused workflow',
-        handler: async (_args, context) => controller.resume(context),
+        description:
+          'Reload configuration and resume: /workflow-resume [guidance]',
+        handler: async (input, context) =>
+          controller.resume(input.trim(), context),
       },
     },
     {

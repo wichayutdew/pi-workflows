@@ -1,10 +1,5 @@
 import { basename } from 'node:path';
 import type { BashPermission, BashRule } from '../config/types.ts';
-import {
-  authorizeHostedApiRead,
-  authorizeReadOnlyBash,
-  usesReadOnlyBashPreset,
-} from './bash-read-only.ts';
 import type { BashAuthorization } from './bash-types.ts';
 import { tokenizeRestrictedCommand } from './restricted-command.ts';
 
@@ -34,23 +29,15 @@ const matchesRule = (tokens: ReadonlyArray<string>, rule: BashRule): boolean =>
 /**
  * Authorizes a Bash command for a workflow step.
  *
- * Exact reviewed commands are considered first, followed by the configured
- * terminal mode and its static restrictions.
- *
  * @param command - Bash command text.
  * @param permission - Bash permission configured for the active step.
- * @param approvedCommands - Exact commands derived from a reviewed artifact.
  * @returns The authorization decision.
  */
 export const authorizeBash = (
   command: string,
   permission: BashPermission,
-  approvedCommands: ReadonlyArray<string> = [],
 ): BashAuthorization => {
-  const isReviewedCommand =
-    (permission.approvedSources?.length ?? 0) > 0 &&
-    approvedCommands.includes(command);
-  if (isReviewedCommand || permission.mode === 'unrestricted') {
+  if (permission.mode === 'unrestricted') {
     return { allowed: true };
   }
   if (permission.mode === 'deny') {
@@ -70,17 +57,11 @@ export const authorizeBash = (
     return reject('environment assignments are not allowed in restricted mode');
   }
 
-  if (permission.mode === 'read-only') {
-    return authorizeReadOnlyBash(parsed.tokens);
-  }
-
   const rule = permission.allow.find((candidate) =>
     matchesRule(parsed.tokens, candidate),
   );
   if (!rule) {
     return reject("command does not match this step's Bash allow-list");
   }
-  return usesReadOnlyBashPreset(parsed.tokens)
-    ? authorizeReadOnlyBash(parsed.tokens)
-    : authorizeHostedApiRead(parsed.tokens);
+  return { allowed: true, tokens: [...parsed.tokens] };
 };

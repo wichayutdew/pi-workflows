@@ -13,8 +13,3 @@ export type RestrictedCommandTokens =
       readonly tokens?: never;
       readonly error: string;
     };
-
-export type RestrictedGitCommand = {
-  readonly subcommand: string;
-  readonly subcommandIndex: number;
-};

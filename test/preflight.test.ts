@@ -133,7 +133,7 @@ describe('when testing preflight', () => {
       expect(errors.join('\n')).not.toMatch(/pi-subagents/);
     });
 
-    test('reports a missing MCP proxy for configured selectors', () => {
+    test('MCP selectors are optional unless the proxy tool is required', () => {
       // given
       const workflow = loadedWorkflow({
         version: 1,
@@ -158,9 +158,31 @@ describe('when testing preflight', () => {
       });
 
       // then
-      expect(errors).toEqual([
-        'MCP selectors are configured, but the "mcp" proxy tool is not installed',
-      ]);
+      expect(errors).toEqual([]);
+
+      const requiredWorkflow = loadedWorkflow({
+        version: 1,
+        id: 'mcp-required',
+        command: 'mcp-required',
+        description: 'Required MCP workflow',
+        start: 'run',
+        steps: {
+          run: {
+            prompt: 'Run',
+            permissions: { mcp: ['gitlab/get_merge_request'] },
+            requires: { tools: ['mcp'] },
+            transitions: { done: '$done' },
+          },
+        },
+      });
+      expect(
+        preflightStep(requiredWorkflow.definition.steps.run!, {
+          tools: [],
+          commands: [],
+          skills: new Set(),
+        }),
+      ).toEqual(['required tool "mcp" is not installed']);
+
       const plannotatorWorkflow = loadedWorkflow({
         version: 1,
         id: 'plannotator-present',

@@ -15,6 +15,7 @@ import {
   type SubagentDelegationClientController,
 } from '../integrations/subagents/client.ts';
 import {
+  auditCompletedDelegationTranscript,
   readDelegationReplayAudit,
   readToolFailureDiagnostic,
 } from '../integrations/subagents/diagnostics.ts';
@@ -28,6 +29,10 @@ import {
 } from '../runtime/serial-task-queue.ts';
 import { showWorkflowStatus } from '../workflow-status.ts';
 import type { ActiveDelegation } from './types.ts';
+import {
+  resolveWorkspaceDirectory,
+  type ResolveWorkspaceDirectoryOptions,
+} from './workspace-directory.ts';
 
 const MAX_DELEGATED_RESULT_BYTES = 1024 * 1024;
 
@@ -47,14 +52,17 @@ export type WorkflowHarnessDependencies = {
   readonly removeDelegationWorkspace: (
     resultDirectory: string,
   ) => Promise<void>;
-  readonly currentWorkingDirectory: () => string;
   readonly waitForDelay: (delayMs: number) => Promise<void>;
+  readonly resolveWorkspaceDirectory: (
+    options: ResolveWorkspaceDirectoryOptions,
+  ) => string;
   readonly loadCatalog: typeof loadCatalog;
   readonly requestPlannotatorReview: typeof requestPlannotatorReview;
   readonly requestPlannotatorReviewStatus: typeof requestPlannotatorReviewStatus;
   readonly requestPromptGateReview: typeof requestPromptGateReview;
   readonly readDelegationReplayAudit: typeof readDelegationReplayAudit;
   readonly readToolFailureDiagnostic: typeof readToolFailureDiagnostic;
+  readonly auditCompletedDelegationTranscript: typeof auditCompletedDelegationTranscript;
   readonly showWorkflowStatus: typeof showWorkflowStatus;
   readonly createSubagentClient: (
     pi: ExtensionAPI,
@@ -132,15 +140,16 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   readDelegatedResult,
   removeDelegationWorkspace: async (resultDirectory) =>
     rm(resultDirectory, { recursive: true, force: true }),
-  currentWorkingDirectory: () => process.cwd(),
   waitForDelay: async (delayMs) =>
     new Promise((resolve) => setTimeout(resolve, delayMs)),
+  resolveWorkspaceDirectory,
   loadCatalog,
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
   requestPromptGateReview,
   readDelegationReplayAudit,
   readToolFailureDiagnostic,
+  auditCompletedDelegationTranscript,
   showWorkflowStatus,
   createSubagentClient: (pi) => createSubagentDelegationClient(pi.events),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),

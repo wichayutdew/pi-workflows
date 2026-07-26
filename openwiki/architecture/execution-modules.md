@@ -38,7 +38,7 @@ diagnostic concerns.
 | `src/integrations/subagents/child-runtime-types.ts`        | Injected filesystem and child-runtime dependency ports.                                                                        |
 | `src/integrations/subagents/child-runtime-dependencies.ts` | Supplies the Node-backed child dependency defaults.                                                                            |
 | `src/integrations/subagents/child-runtime-policy.ts`       | Projects child policy into a workflow step and renders the child system policy.                                                |
-| `src/integrations/subagents/child-runtime-files.ts`        | Atomically verifies/consumes capabilities, writes bounded results, and detects repository mutation violations.                 |
+| `src/integrations/subagents/child-runtime-files.ts`        | Atomically verifies and consumes capabilities, then writes bounded correlated results.                                         |
 | `src/integrations/subagents/child-runtime-completion.ts`   | Defines `structured_output`, blocks coordination tools, and parses the child's completion call.                                |
 | `src/integrations/subagents/child-runtime.ts`              | Registers child hooks, activates allowed tools, enforces policy, and coordinates completion/result writing.                    |
 | `src/integrations/subagents/diagnostic-types.ts`           | Transcript, tool failure, replay audit, session identity, and filesystem diagnostic types.                                     |
@@ -47,7 +47,7 @@ diagnostic concerns.
 | `src/integrations/subagents/failure-transcript.ts`         | Parses calls, results, completions, messages, ordering, and proof completeness from a child JSONL transcript.                  |
 | `src/integrations/subagents/failure-correlation.ts`        | Correlates terminal errors to transcript failures or a proven hidden Bash false positive and detects completion after failure. |
 | `src/integrations/subagents/hidden-bash-failure.ts`        | Reproduces the narrow upstream Bash false-positive projection from successful transcript evidence.                             |
-| `src/integrations/subagents/replay-safety.ts`              | Classifies actual transcript calls as read-only, pre-execution rejected, or mutation-capable before automatic recovery.        |
+| `src/integrations/subagents/replay-safety.ts`              | Classifies actual transcript calls as known-safe, rejected before execution, or unknown-effect before automatic recovery.      |
 | `src/integrations/subagents/replay-audit.ts`               | Verifies complete transcript structure, original task binding, tool counts, and mutation-safe actual calls.                    |
 | `src/integrations/subagents/session-diagnostics.ts`        | Constrains trusted session paths and reads bounded transcript tails for failure and replay analysis.                           |
 | `src/integrations/subagents/diagnostics.ts`                | Stable facade for diagnostic readers, parsers, formatters, and types.                                                          |
@@ -57,28 +57,19 @@ diagnostic concerns.
 Policy functions return allow/reject decisions. Pi hook registration stays in
 the runtime modules.
 
-| Module                                       | Responsibility                                                                                                    |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `src/policy/tool-types.ts`                   | Inventory, source metadata, and authorization result types.                                                       |
-| `src/policy/tool-selection.ts`               | Matches extension selectors, computes active tools, and recognizes allowed extension tools.                       |
-| `src/policy/tool-call-authorization.ts`      | Dispatches a tool call to core, extension, MCP, and Bash authorization rules.                                     |
-| `src/policy/mcp-authorization.ts`            | Checks MCP proxy server/tool selectors and rejects unsupported proxy input shapes.                                |
-| `src/policy/tools.ts`                        | Stable facade for tool selection, authorization, and public types.                                                |
-| `src/policy/bash-types.ts`                   | Bash decision and restricted token/git command types.                                                             |
-| `src/policy/restricted-command.ts`           | Tokenizes the deliberately small shell grammar and rejects operators, expansion, wrappers, and malformed quoting. |
-| `src/policy/restricted-git.ts`               | Parses a tokenized command into the allowed restricted-git shape.                                                 |
-| `src/policy/bash-authorization.ts`           | Applies deny, read-only, allow-list, unrestricted, and reviewed-command Bash policy.                              |
-| `src/policy/bash-read-only.ts`               | Authorizes known read-only executables, git operations, and hosted-API reads.                                     |
-| `src/policy/bash.ts`                         | Stable facade for Bash authorization and restricted parsers.                                                      |
-| `src/policy/approved-command-extraction.ts`  | Extracts approved commands from selected reviewed sources and narrows them to safe shapes.                        |
-| `src/policy/reviewed-artifact.ts`            | Parses reviewed JSON documents and extracts verification/remote-action command arrays.                            |
-| `src/policy/reviewed-command-shape.ts`       | Rejects malformed or ambiguous reviewed command forms.                                                            |
-| `src/policy/reviewed-command-safety.ts`      | Separates safe local verification from bounded remote publish actions.                                            |
-| `src/policy/reviewed-repository-contract.ts` | Parses reviewed repository paths and validates their directory relationship contract.                             |
-| `src/policy/reviewed-repository-cwd.ts`      | Resolves reviewed repository/bootstrap working directories through an injectable directory-state reader.          |
-| `src/policy/approved-commands.ts`            | Stable facade for reviewed-command extraction, safety, repository resolution, and types.                          |
-| `src/policy/completion-batch.ts`             | Rejects completion tool calls that share a model turn with unrelated tool calls.                                  |
-| `src/policy/immutable-input.ts`              | Deep-clones and freezes tool inputs before asynchronous policy checks use them.                                   |
+| Module                                  | Responsibility                                                                                                    |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/policy/tool-types.ts`              | Inventory, source metadata, and authorization result types.                                                       |
+| `src/policy/tool-selection.ts`          | Matches extension selectors, computes active tools, and recognizes allowed extension tools.                       |
+| `src/policy/tool-call-authorization.ts` | Dispatches a tool call to core, extension, MCP, and Bash authorization rules.                                     |
+| `src/policy/mcp-authorization.ts`       | Checks MCP proxy server/tool selectors and rejects unsupported proxy input shapes.                                |
+| `src/policy/tools.ts`                   | Stable facade for tool selection, authorization, and public types.                                                |
+| `src/policy/bash-types.ts`              | Bash authorization decision and restricted token types.                                                           |
+| `src/policy/restricted-command.ts`      | Tokenizes the deliberately small shell grammar and rejects operators, expansion, wrappers, and malformed quoting. |
+| `src/policy/bash-authorization.ts`      | Applies deny, generic allow-list, and unrestricted Bash policy.                                                   |
+| `src/policy/bash.ts`                    | Stable facade for Bash authorization and restricted parsers.                                                      |
+| `src/policy/completion-batch.ts`        | Rejects completion tool calls that share a model turn with unrelated tool calls.                                  |
+| `src/policy/immutable-input.ts`         | Deep-clones and freezes tool inputs before asynchronous policy checks use them.                                   |
 
 ## Prompt Core
 
@@ -103,17 +94,19 @@ the runtime modules.
 | `src/runtime/main-step-lifecycle.ts`     | Resolves or rejects pending completion when the Pi agent settles.                                    |
 | `src/runtime/main-step-runtime.ts`       | Composes the functional controller and preserves the compatibility `MainStepRuntime` class.          |
 | `src/runtime/serial-task-queue.ts`       | Serializes asynchronous state mutations; exposes a factory and compatibility class.                  |
-| `src/runtime/step-result.ts`             | Validates allowed outcome, summary/artifact bounds, pause rules, and gate artifact requirements.     |
+| `src/runtime/step-result.ts`             | Validates allowed outcome, summary/artifact bounds, and gate artifact requirements.                  |
 
 ## Workflow Status
 
-| Module                                  | Responsibility                                                                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `src/workflow-status/types.ts`          | Snapshot, execution, theme, path, and view port types.                                                       |
-| `src/workflow-status/formatting.ts`     | Status glyphs, colors, labels, titles, timestamps, elapsed time, and inline text helpers.                    |
-| `src/workflow-status/layout.ts`         | ANSI-aware row clamping, boxes, panels, columns, and padding.                                                |
-| `src/workflow-status/render-path.ts`    | Converts run history/current state into path entries and rendered path lines.                                |
-| `src/workflow-status/render-summary.ts` | Renders header and detailed summary lines from a status snapshot.                                            |
-| `src/workflow-status/render-board.ts`   | Chooses wide/narrow layouts and renders populated or empty boards.                                           |
-| `src/workflow-status/format-status.ts`  | Public text/board formatting entry points.                                                                   |
-| `src/workflow-status/view.ts`           | Interactive TUI component, refresh scheduling, close handling, and `showWorkflowStatus` dependency boundary. |
+| Module                                      | Responsibility                                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/workflow-status/types.ts`              | Snapshot, execution, theme, path, and view port types.                                                      |
+| `src/workflow-status/formatting.ts`         | Status glyphs, colors, labels, titles, timestamps, elapsed time, and inline text helpers.                   |
+| `src/workflow-status/layout.ts`             | ANSI-aware row clamping, boxes, panels, columns, and padding.                                               |
+| `src/workflow-status/render-path.ts`        | Converts run history/current state into path entries and rendered path lines.                               |
+| `src/workflow-status/render-summary.ts`     | Renders header and detailed summary lines from a status snapshot.                                           |
+| `src/workflow-status/render-board.ts`       | Chooses wide/narrow layouts and renders populated or empty boards.                                          |
+| `src/workflow-status/render-step-detail.ts` | Resolves a selected path entry and renders persisted tasks, results, gate decisions, and transcript events. |
+| `src/workflow-status/transcript-reader.ts`  | Confines, stably reads, bounds, sanitizes, and redacts common credential forms in child events on demand.   |
+| `src/workflow-status/format-status.ts`      | Public text/board formatting entry points.                                                                  |
+| `src/workflow-status/view.ts`               | Interactive board/detail navigation, transcript loading/cache, refresh scheduling, and overlay boundary.    |

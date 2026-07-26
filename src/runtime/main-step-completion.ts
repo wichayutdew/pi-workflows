@@ -52,6 +52,9 @@ export function registerMainStepCompletion({
           ...(params.artifact !== undefined
             ? { artifact: params.artifact }
             : {}),
+          ...(params.workspace !== undefined
+            ? { workspace: { cwd: params.workspace.cwd } }
+            : {}),
         },
         activeExecution,
       );

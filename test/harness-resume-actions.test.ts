@@ -7,7 +7,11 @@ import {
   pauseRun,
   storeGateResolution,
 } from '../src/engine/transitions.ts';
-import { createRun, type WorkflowRun } from '../src/engine/state.ts';
+import {
+  createRun,
+  MAX_RESUME_INPUT_CHARS,
+  type WorkflowRun,
+} from '../src/engine/state.ts';
 import type { PlannotatorStatusResponse } from '../src/integrations/plannotator.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
 import { createResumeAction } from '../src/harness/resume-action.ts';
@@ -57,6 +61,7 @@ function pausedGateRun(
     '# Plan',
     'gate-request',
     2,
+    'Plan ready',
   );
   if (reviewId) run = attachGateReviewId(run, reviewId, 3);
   return pauseRun(run, 'inspect review', 4);
@@ -112,6 +117,11 @@ function createResumeFixture(
     promptReviews: 0,
     reloads: 0,
     restoredTools: 0,
+    settled: [] as Array<{
+      stepId: string;
+      outcome: string;
+      summary: string;
+    }>,
     statusRequests: 0,
     statusUpdates: 0,
     toolIsolations: 0,
@@ -161,6 +171,15 @@ function createResumeFixture(
     },
     restoreBaselineTools: () => {
       calls.restoredTools += 1;
+    },
+    settleAfterTransition: (
+      _workflow: LoadedWorkflow,
+      report: { stepId: string; outcome: string; summary: string },
+    ) => {
+      calls.settled.push(report);
+      calls.persisted += 1;
+      calls.restoredTools += 1;
+      calls.statusUpdates += 1;
     },
     updateStatus: () => {
       calls.statusUpdates += 1;
@@ -255,6 +274,38 @@ describe('when testing resume actions', () => {
     );
   });
 
+  test('refuses to resume a workflow with a reachable completion trap', async () => {
+    const raw = baseWorkflow();
+    raw.steps = {
+      choose: {
+        prompt: 'Choose',
+        transitions: { finish: '$done', trap: 'trap' },
+      },
+      trap: {
+        prompt: 'Trap',
+        transitions: { wait: '$pause' },
+      },
+    };
+    raw.start = 'choose';
+    const workflow = loadedWorkflow(raw);
+    const fixture = createResumeFixture(pausedRun(workflow), workflow);
+    const command = createCommandContext();
+
+    await action.resumeNow.call(
+      fixture.fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+
+    expect(fixture.fixture.run?.status).toBe('paused');
+    expect(fixture.calls.launched).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain(
+      '/workflow-doctor example',
+    );
+    expect(command.notices.at(-1)?.message).toContain(
+      'reachable step trap cannot reach $done',
+    );
+  });
+
   test('resumes a runnable step and enforces its preflight', async () => {
     const workflow = loadedWorkflow();
     const command = createCommandContext();
@@ -263,8 +314,12 @@ describe('when testing resume actions', () => {
     await action.resumeNow.call(
       runnable.fixture as unknown as HarnessActionContext,
       command.context,
+      '  Inspect the existing partial output before retrying.  ',
     );
     expect(runnable.fixture.run?.status).toBe('running');
+    expect(runnable.fixture.run?.resumeInput).toBe(
+      'Inspect the existing partial output before retrying.',
+    );
     expect(runnable.calls).toMatchObject({
       launched: 1,
       persisted: 1,
@@ -286,6 +341,18 @@ describe('when testing resume actions', () => {
     expect(blocked.calls.launched).toBe(0);
     expect(command.notices.at(-1)?.message).toContain(
       'required tool is unavailable',
+    );
+
+    const oversized = createResumeFixture(pausedRun(workflow), workflow);
+    await action.resumeNow.call(
+      oversized.fixture as unknown as HarnessActionContext,
+      command.context,
+      'x'.repeat(MAX_RESUME_INPUT_CHARS + 1),
+    );
+    expect(oversized.fixture.run?.status).toBe('paused');
+    expect(oversized.calls.reloads).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain(
+      'Resume guidance exceeds',
     );
   });
 
@@ -390,7 +457,14 @@ describe('when testing resume actions', () => {
       gateFeedback: 'revise the plan',
     });
     expect(calls.restoredTools).toBe(1);
-    expect(command.notices.at(-1)?.message).toBe('Workflow is now paused');
+    expect(calls.settled).toEqual([
+      {
+        stepId: 'inspect',
+        outcome: 'blocked',
+        summary: 'Gate rejected: revise the plan',
+      },
+    ]);
+    expect(command.notices).toEqual([]);
   });
 
   test('retries a review missing from Plannotator', async () => {
@@ -477,26 +551,15 @@ describe('when testing resume actions', () => {
     );
   });
 
-  test('reports a stored gate result that no longer matches configuration', async () => {
+  test('restarts a stored gate when its current-step configuration changed', async () => {
     const workflow = gatedWorkflow('prompt');
     const stored = storeGateResolution(
       pausedGateRun(workflow),
       { approved: true, feedback: '', resolvedAt: 5 },
       5,
     );
-    const { fixture } = createResumeFixture(stored, workflow);
-    const ungatedInspect = { ...workflow.definition.steps.inspect! };
-    delete ungatedInspect.gate;
-    const withoutGate: LoadedWorkflow = {
-      ...workflow,
-      definition: {
-        ...workflow.definition,
-        steps: {
-          ...workflow.definition.steps,
-          inspect: ungatedInspect,
-        },
-      },
-    };
+    const { calls, fixture } = createResumeFixture(stored, workflow);
+    const withoutGate = loadedWorkflow();
     fixture.catalog.workflows.set('example', withoutGate);
     const command = createCommandContext();
 
@@ -505,9 +568,11 @@ describe('when testing resume actions', () => {
       command.context,
     );
 
-    expect(fixture.run?.status).toBe('paused');
-    expect(command.notices.at(-1)?.message).toContain(
-      'gated step "inspect" no longer exists',
+    expect(fixture.run?.status).toBe('running');
+    expect(fixture.run?.pendingGate).toBeUndefined();
+    expect(fixture.run?.currentStepDigest).toBe(
+      withoutGate.stepDigests.inspect,
     );
+    expect(calls.launched).toBe(1);
   });
 });

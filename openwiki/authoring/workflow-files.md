@@ -17,6 +17,7 @@ flowchart TD
   Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
   Step --> Gate[optional prompt or Plannotator gate]
+  Step --> Workspace[optional one-time workspace binding]
 ```
 
 ## Minimal Two-Step Graph
@@ -41,7 +42,12 @@ steps:
     prompt: Inspect {{workflow.input}} without modifying files.
     permissions:
       tools: [read, grep, bash]
-      bash: { mode: read-only }
+      bash:
+        mode: allow-list
+        allow:
+          - executable: git
+            argsPrefixes: [[status], [diff]]
+          - executable: rg
     transitions:
       ready: implement
       blocked: $pause
@@ -53,14 +59,32 @@ steps:
       bash:
         mode: allow-list
         allow:
-          - executable: bun
+          - executable: project-check
             argsPrefix: [test]
     transitions:
       done: $done
       blocked: $pause
 ```
 
-Workflow definitions use YAML with either the `.yaml` or `.yml` suffix.
+Workflow definitions use YAML with either the `.yaml` or `.yml` suffix. The
+bundled JSON Schema provides structural editor feedback, including safe
+relative prompt paths. The runtime loader is authoritative for relationships
+that standard JSON Schema cannot derive from user-defined keys: transition and
+gate outcomes, workspace binding outcomes, permission/requirement subsets,
+Bash-tool coupling, and budget ordering.
+
+## Liveness Contract
+
+Before start or resume, Pi Workflows rejects a graph when its start cannot reach
+`$done` or when any reachable step cannot reach `$done`.
+`/workflow-doctor [id]` also reports unreachable steps and cyclic components in
+deterministic order. Cycles that have an exit to `$done` remain valid but
+produce a warning.
+
+At runtime, `maxStepVisits` bounds uninterrupted graph advancement. After a step
+has executed that many times, the next attempted entry pauses at a checkpoint.
+This prevents automatic infinite cycling; an explicit resume may continue and
+time spent inside a step or gate is outside this graph bound.
 
 ## Prompt Rendering
 
@@ -77,17 +101,18 @@ flowchart LR
 
 Supported variables:
 
-| Variable                | Source                                                                                             |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `{{workflow.input}}`    | Command input.                                                                                     |
-| `{{workflow.id}}`       | Workflow definition.                                                                               |
-| `{{run.id}}`            | Runtime run.                                                                                       |
-| `{{step.id}}`           | Current step.                                                                                      |
-| `{{step.title}}`        | Current step.                                                                                      |
-| `{{last.summary}}`      | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt. |
-| `{{gate.feedback}}`     | Latest rejected gate.                                                                              |
-| `{{reviewed.artifact}}` | Immutable artifact from the approved gate.                                                         |
-| `{{reviewed.feedback}}` | Feedback paired with that approval.                                                                |
+| Variable                | Source                                                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `{{workflow.input}}`    | Command input.                                                                                                             |
+| `{{workflow.id}}`       | Workflow definition.                                                                                                       |
+| `{{run.id}}`            | Runtime run.                                                                                                               |
+| `{{step.id}}`           | Current step.                                                                                                              |
+| `{{step.title}}`        | Current step.                                                                                                              |
+| `{{last.summary}}`      | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt.                         |
+| `{{gate.feedback}}`     | Latest rejected gate.                                                                                                      |
+| `{{reviewed.artifact}}` | Immutable artifact from the approved gate.                                                                                 |
+| `{{reviewed.feedback}}` | Feedback paired with that approval.                                                                                        |
+| `{{resume.input}}`      | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
 
 ## Prompt File Safety
 
@@ -115,7 +140,7 @@ flowchart TD
   Permissions --> MCP[mcp server or server/tool selectors]
   Permissions --> Extensions[extension source selectors]
   Permissions --> Skills[intended skills; injected into delegated child]
-  Permissions --> Bash[bash mode, allow rules, approved sources]
+  Permissions --> Bash[bash mode and allow rules]
   Requires[requires] --> ReqTools[required tools]
   Requires --> ReqExt[required extensions]
   Requires --> ReqSkills[required skills]
@@ -124,42 +149,25 @@ flowchart TD
   ReqSkills --> Preflight
 ```
 
-## Reviewed Bash Sources
+## Bash Contract
 
-An `allow-list` may supplement static rules with exact commands from the run's
-most recent human-approved gate artifact:
+`permissions.bash` is a generic execution boundary:
 
-| `approvedSources` value | Fenced JSON path                                 |
-| ----------------------- | ------------------------------------------------ |
-| `verification-worker`   | `repositories[].worker[].command`                |
-| `verification-reviewer` | `repositories[].reviewer[].command`              |
-| `remote-actions`        | Bash `actions[].input.command`                   |
-| `remote-push`           | Exact approved non-force push command            |
-| `remote-drafts`         | Parent-synthesized author-private draft commands |
+- `deny` rejects every Bash call.
+- `allow-list` accepts only safely tokenized commands matching an explicit
+  executable and optional ordered argument prefix.
+- `unrestricted` accepts Bash calls without allow-list matching.
 
-The step must include `bash` in `permissions.tools`. Exact strings are filtered
-by source and correlated into the step policy. Static `gh api` and `glab api`
-rules are default-GET-only; API mutations and non-force pushes require an exact
-reviewed `remote-actions` command. Ordinary summaries and legacy checkpoints
-without reviewed-artifact provenance grant nothing.
+The extension does not know package managers, languages, frameworks, Git
+operations, hosted APIs, or command-specific argument placement. It neither
+rewrites commands nor extracts executable authority from prompts, summaries,
+or gate artifacts. The workflow author declares executable scope in YAML, and
+the agent determines command syntax from its own context.
 
-`handoffSources` optionally permits only `verification-worker` and
-`verification-reviewer` to propose command-only retry repairs. It never grants
-new targets, effects, paths, or authority; a material change must pause or be
-handled by a new workflow.
-
-`approvedSources` selects provenance, not an executable family. For example,
-`verification-worker` extracts only exact
-`repositories[].worker[].command` strings from the latest approved artifact.
-Each cwd-dependent command must encode the exact absolute
-`repositories[].cwd` from the same object. Changing an argument or directory
-produces a different, unauthorized execution. A delegated step currently
-accepts one distinct reviewed directory; repeated identical values are allowed,
-while missing, relative, or multiple different directories fail closed. A
-missing target worktree may bootstrap only from the same contract's one
-existing absolute `sourceCwd`. The child confines edits and writes to the
-reviewed target, and every setup or later Bash command still requires an exact
-reviewed string.
+Gate artifacts are opaque data available through `{{reviewed.artifact}}`.
+Their format and downstream meaning belong to the workflow prompt. Outcome
+names are also opaque labels whose only engine-level behavior is the transition
+target declared beside them.
 
 ## Compact Bash Rules
 
@@ -193,9 +201,32 @@ capability verification, workflow permissions replace the profile's ordinary
 active-tool list. The selected profile still determines which extension
 providers are loaded, so an unavailable provider cannot be activated.
 
-Each child receives the original workflow input plus only the previous step's
-self-contained compact `summary` or approved review artifact. It never inherits
-the parent or sibling transcript.
+Each child receives the original workflow input plus the previous step's
+self-contained compact `summary`. An approved artifact appears only when the
+prompt explicitly uses `{{reviewed.artifact}}`. It never inherits the parent or
+sibling transcript.
+
+## Workspace Binding
+
+The run starts in Pi's captured absolute working directory. One delegated,
+non-gated step may declare:
+
+```yaml
+workspace:
+  bindOn: [ready]
+  allowedRoots: ['..']
+```
+
+On a listed outcome, the structured result must include
+`workspace: { cwd: "/absolute/directory" }`; every other outcome must omit it.
+The harness canonicalizes the existing directory, requires it to remain under
+one allowed root relative to the run-start directory, and accepts only one
+binding. All reachable nonterminal descendants must be delegated. Their first
+visits, cycles, recovery attempts, and resumes receive the same bound cwd.
+
+The prompt owns directory preparation and domain meaning. Pi Workflows neither
+creates worktrees nor knows Git, package managers, languages, frameworks, or
+command syntax. Summaries and gate artifacts cannot select a workspace.
 
 ```mermaid
 flowchart TD
@@ -209,21 +240,27 @@ flowchart TD
   Subagent --> Retry[retryToolFailures<br/>broader Bash recovery opt-in]
 ```
 
-## Example MR Comments Workflow
+## Starter `/mr-comment` Workflow
 
 ```mermaid
 stateDiagram-v2
-  [*] --> inspect
-  inspect --> plan: ready
-  inspect --> paused: blocked
+  [*] --> fetch
+  fetch --> plan: ready
+  fetch --> paused: blocked
   plan --> implement: approved
-  plan --> plan: changes-requested
+  plan --> paused: changes-requested
   plan --> paused: blocked
   implement --> verify: ready
   implement --> paused: blocked
-  verify --> completed: passed
+  verify --> publish: ready
+  verify --> completed: no-actions
   verify --> implement: failed
   verify --> paused: blocked
+  publish --> completed: published
+  publish --> completed: no-actions
+  publish --> paused: blocked
 ```
 
-Business intent: inspect merge-request feedback, create a reviewed plan, implement it, then verify the result.
+Business intent: fetch hosted review comments, create and approve a complete
+fix plan, implement and independently verify it on the current checkout, then
+push and reply through a configured MCP, CLI, or cURL route.

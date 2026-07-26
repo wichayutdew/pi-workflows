@@ -9,6 +9,12 @@ import {
 } from '../engine/transitions.ts';
 import type { PromptGateReviewResult } from '../integrations/prompt-gate.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
+import {
+  conciseStepFailureSummary,
+  conciseStepPauseSummary,
+  reportFailedStep,
+  reportPausedStep,
+} from './step-reporting.ts';
 import type { ActivePromptReview } from './types.ts';
 
 type HarnessActionContext = Pick<
@@ -23,6 +29,7 @@ type HarnessActionContext = Pick<
   | 'mutationQueue'
   | 'pausePromptGate'
   | 'persist'
+  | 'pi'
   | 'queuePromptReviewFailure'
   | 'queuePromptReviewResult'
   | 'restoreBaselineTools'
@@ -205,13 +212,22 @@ async function finishPromptReview(
     return;
   }
   try {
+    const stepId = this.run.currentStepId;
+    const gate = workflow.definition.steps[stepId]?.gate;
+    if (!gate) throw new Error(`gated step "${stepId}" no longer exists`);
     this.run = resolveGate(
       workflow,
       this.run,
       resolution,
       this.dependencies.now(),
     );
-    this.settleAfterTransition(workflow);
+    this.settleAfterTransition(workflow, {
+      stepId,
+      outcome: resolution.approved
+        ? gate.approvedOutcome
+        : gate.rejectedOutcome,
+      summary: this.run.lastSummary,
+    });
   } catch (error) {
     this.pausePromptGate(
       active.requestId,
@@ -234,16 +250,38 @@ function pausePromptGate(
   ) {
     return;
   }
+  const wasAwaitingGate = this.run.status === 'awaiting-gate';
+  const didFail = wasAwaitingGate && isFailed;
+  const didPause = wasAwaitingGate && !isFailed;
   if (this.run.status === 'awaiting-gate') {
     this.run = isFailed
       ? failRun(this.run, reason, this.dependencies.now())
       : pauseRun(this.run, reason, this.dependencies.now());
   }
   this.persist();
+  if (didFail) {
+    reportFailedStep(
+      this.pi,
+      this.catalog.workflows.get(this.run.workflowId),
+      this.run,
+      reason,
+    );
+  } else if (didPause) {
+    reportPausedStep(
+      this.pi,
+      this.catalog.workflows.get(this.run.workflowId),
+      this.run,
+      reason,
+    );
+  }
   this.restoreBaselineTools();
   this.updateStatus();
   this.latestContext?.ui.notify(
-    `Workflow paused at "${this.run.currentStepId}": ${reason}`,
+    `Workflow paused at "${this.run.currentStepId}": ${
+      isFailed
+        ? conciseStepFailureSummary(reason)
+        : conciseStepPauseSummary(reason)
+    }`,
     'warning',
   );
 }

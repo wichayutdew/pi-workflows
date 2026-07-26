@@ -12,6 +12,7 @@ const STRUCTURED_RESULT_KEYS: ReadonlySet<string> = new Set([
   'outcome',
   'summary',
   'artifact',
+  'workspace',
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

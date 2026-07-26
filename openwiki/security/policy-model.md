@@ -51,10 +51,10 @@ flowchart TD
   Policy --> ResultPath[resultPath]
   Policy --> Digest[policyDigest]
   Policy --> Perms[permissions]
-  Policy --> Approved[approvedBashCommands<br/>filtered exact reviewed strings]
   Policy --> Outcomes[allowed outcomes]
   Policy --> Limit[summaryMaxChars]
   Policy --> Gate[optional gateSubmitOutcome]
+  Policy --> Workspace[optional bind outcomes and allowed roots]
 ```
 
 ## Tool Authorization
@@ -83,27 +83,21 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  BashCall[bash command] --> Reviewed{exact reviewed command<br/>from configured source?}
-  Reviewed -- yes --> Allow[allow exact string]
-  Reviewed -- no --> Mode{mode}
+  BashCall[bash command] --> Mode{mode}
   Mode -- deny --> Block[block]
   Mode -- unrestricted --> Allow[allow]
-  Mode -- read-only --> Parse[restricted tokenizer]
   Mode -- allow-list --> Parse
   Parse --> SafeSyntax{no shell operators, substitutions, expansions, wrappers?}
   SafeSyntax -- no --> Block
-  SafeSyntax -- yes --> ReadOnly{read-only mode?}
-  ReadOnly -- yes --> Preset{allowed executable or read-only git subcommand?}
-  Preset -- yes --> Allow
-  Preset -- no --> Block
-  ReadOnly -- no --> Rule{matches executable and normalized argument prefix?}
-  Rule -- yes --> Hosted{gh or glab api?}
-  Hosted -- yes --> GetOnly{default GET and no mutation flags?}
-  GetOnly -- yes --> Allow
-  GetOnly -- no --> Block
-  Hosted -- no --> Allow
+  SafeSyntax -- yes --> Rule{matches executable and normalized argument prefix?}
+  Rule -- yes --> Allow
   Rule -- no --> Block
 ```
+
+Allow-list matching is deliberately domain-neutral. The engine does not
+classify package-manager, framework, version-control, or hosted-API commands,
+and it does not change argument order. Command syntax comes from the agent's
+context; the YAML rule only defines executable scope.
 
 ## Completion Contract
 
@@ -132,17 +126,18 @@ workflow step permissions become the sole active-tool allow-list after the
 child capability is verified. The selected subagent profile still controls
 which extension providers are loaded; unavailable providers fail closed.
 
-For a reviewed repository contract, `edit` and `write` inputs are also confined
-to the sole absolute `repositories[].cwd`. If that target worktree does not yet
-exist, the child may bootstrap from the one reviewed existing `sourceCwd`, but
-relative mutations there are rejected; it must create the target with an exact
-approved Bash command and then use target-rooted paths.
+The harness captures the working directory when a run starts. A configured
+delegated step may bind one canonical existing directory under a YAML-authorized
+root; every reachable downstream step, revisit, recovery attempt, and resume
+then reuses it. Without a binding, the run-start directory remains effective.
+The candidate is accepted only through structured result data for an exact
+configured outcome. Summaries and gate artifacts cannot select a directory,
+and the extension does not create or interpret worktrees.
 
-Reviewed commands come only from the run's persisted human-approved artifact.
-The parent filters them in `src/policy/approved-commands.ts`, includes the list
-in the policy digest, and the child authorizes exact string equality. Ordinary
-step summaries never become command provenance. Legacy checkpoints without the
-field remain readable but receive no reviewed command capabilities.
+Gate artifacts are persisted separately from compact step summaries and remain
+opaque to the engine. A workflow prompt may define any artifact format and use
+it through `{{reviewed.artifact}}`; neither its contents nor an outcome label
+grant additional permissions.
 
 ## Immutable Input Defense
 

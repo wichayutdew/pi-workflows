@@ -21,6 +21,7 @@ export const parseDelegatedStepResult = (
       ...(policy.gateSubmitOutcome
         ? { gateSubmitOutcome: policy.gateSubmitOutcome }
         : {}),
+      ...(policy.workspace ? { workspace: policy.workspace } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

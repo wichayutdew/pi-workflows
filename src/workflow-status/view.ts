@@ -15,8 +15,17 @@ import {
 } from './formatting.ts';
 import { padAnsi } from './layout.ts';
 import { renderBoard, renderEmptyBoard } from './render-board.ts';
+import { buildPathEntries } from './render-path.ts';
+import {
+  renderStepDetail,
+  selectedStepDetail,
+  stepTranscriptCacheKey,
+  type StepTranscriptViewState,
+} from './render-step-detail.ts';
+import { readStepTranscript } from './transcript-reader.ts';
 import type {
   SnapshotProvider,
+  StepTranscriptLoader,
   StatusViewTui,
   WorkflowStatusTheme,
 } from './types.ts';
@@ -31,10 +40,13 @@ export type WorkflowStatusViewDependencies = {
     intervalMilliseconds: number,
   ) => RefreshTimer;
   readonly cancelRefresh: (timer: RefreshTimer) => void;
+  readonly loadStepTranscript: StepTranscriptLoader;
 };
 
 type ViewportState = {
   readonly isClosed: boolean;
+  readonly mode: 'board' | 'detail';
+  readonly selectedIndex: number;
   readonly scrollOffset: number;
   readonly viewportRows: number;
   readonly contentRows: number;
@@ -51,11 +63,20 @@ const DEFAULT_VIEW_DEPENDENCIES = {
   cancelRefresh: (timer) => {
     clearInterval(timer);
   },
+  loadStepTranscript: async (attempt) =>
+    attempt.transcript
+      ? readStepTranscript(attempt.transcript)
+      : {
+          status: 'unavailable',
+          reason: 'No trusted child transcript reference was recorded.',
+        },
 } as const satisfies WorkflowStatusViewDependencies;
 
 function initialViewportState(): ViewportState {
   return {
     isClosed: false,
+    mode: 'board',
+    selectedIndex: -1,
     scrollOffset: 0,
     viewportRows: 0,
     contentRows: 0,
@@ -69,6 +90,7 @@ function paginateBoard(
   terminalRows: number | undefined,
   statusShortcutLabel: string,
   theme: WorkflowStatusTheme,
+  controls: string,
 ): PaginatedBoard {
   const maximumRows =
     terminalRows === undefined
@@ -82,8 +104,8 @@ function paginateBoard(
   const last = Math.min(lines.length, scrollOffset + contentHeight);
   const hint =
     maximumOffset > 0
-      ? `↑/↓ PgUp/PgDn Home/End · rows ${first}-${last}/${lines.length} · ${statusShortcutLabel} / q / Esc hide`
-      : `${statusShortcutLabel} / q / Esc hide · live refresh`;
+      ? `${controls} · rows ${first}-${last}/${lines.length} · ${statusShortcutLabel} / q hide`
+      : `${controls} · ${statusShortcutLabel} / q hide · live refresh`;
   return {
     state: {
       ...state,
@@ -114,6 +136,8 @@ export class WorkflowStatusView implements Component {
   private timer: RefreshTimer | undefined;
   private state = initialViewportState();
   private readonly statusShortcutLabel: string;
+  private readonly dependencies: WorkflowStatusViewDependencies;
+  private readonly transcriptCache = new Map<string, StepTranscriptViewState>();
 
   /**
    * Creates the stateful adapter around the pure status renderer.
@@ -131,9 +155,10 @@ export class WorkflowStatusView implements Component {
     private readonly theme: WorkflowStatusTheme,
     private readonly done: () => void,
     private readonly statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
-    private readonly dependencies: WorkflowStatusViewDependencies = DEFAULT_VIEW_DEPENDENCIES,
+    dependencies: Partial<WorkflowStatusViewDependencies> = {},
   ) {
     this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
+    this.dependencies = { ...DEFAULT_VIEW_DEPENDENCIES, ...dependencies };
   }
 
   /** Start periodic live-refresh requests. */
@@ -158,7 +183,6 @@ export class WorkflowStatusView implements Component {
     if (
       data === 'q' ||
       data === 'Q' ||
-      matchesKey(data, 'escape') ||
       matchesKey(data, 'ctrl+c') ||
       matchesKey(data, 'ctrl+d') ||
       matchesKey(data, this.statusShortcut)
@@ -166,11 +190,43 @@ export class WorkflowStatusView implements Component {
       this.close();
       return;
     }
+    if (matchesKey(data, 'escape')) {
+      if (this.state.mode === 'detail') {
+        this.showBoard();
+      } else {
+        this.close();
+      }
+      return;
+    }
     const pageSize = Math.max(1, this.state.viewportRows - 2);
+    if (this.state.mode === 'detail') {
+      if (matchesKey(data, Key.left) || data === 'h') {
+        this.showBoard();
+      } else if (matchesKey(data, Key.down) || data === 'j') {
+        this.setScrollOffset(this.state.scrollOffset + 1);
+      } else if (matchesKey(data, Key.up) || data === 'k') {
+        this.setScrollOffset(this.state.scrollOffset - 1);
+      } else if (matchesKey(data, Key.pageDown)) {
+        this.setScrollOffset(this.state.scrollOffset + pageSize);
+      } else if (matchesKey(data, Key.pageUp)) {
+        this.setScrollOffset(this.state.scrollOffset - pageSize);
+      } else if (matchesKey(data, Key.home)) {
+        this.setScrollOffset(0);
+      } else if (matchesKey(data, Key.end)) {
+        this.setScrollOffset(Number.MAX_SAFE_INTEGER);
+      }
+      return;
+    }
     if (matchesKey(data, Key.down) || data === 'j') {
-      this.setScrollOffset(this.state.scrollOffset + 1);
+      this.moveSelection(1);
     } else if (matchesKey(data, Key.up) || data === 'k') {
-      this.setScrollOffset(this.state.scrollOffset - 1);
+      this.moveSelection(-1);
+    } else if (
+      matchesKey(data, Key.enter) ||
+      matchesKey(data, Key.right) ||
+      data === 'l'
+    ) {
+      this.openDetail();
     } else if (matchesKey(data, Key.pageDown)) {
       this.setScrollOffset(this.state.scrollOffset + pageSize);
     } else if (matchesKey(data, Key.pageUp)) {
@@ -198,15 +254,28 @@ export class WorkflowStatusView implements Component {
     }
 
     const contentWidth = viewportWidth - 2;
+    if (snapshot) this.normalizeSelection(snapshot);
     const lines = snapshot
-      ? renderBoard(
-          this.theme,
-          snapshot,
-          contentWidth,
-          false,
-          this.statusShortcutLabel,
-        )
+      ? this.state.mode === 'detail'
+        ? renderStepDetail(
+            this.theme,
+            snapshot,
+            this.state.selectedIndex,
+            this.transcriptCache,
+            contentWidth,
+          )
+        : renderBoard(
+            this.theme,
+            snapshot,
+            contentWidth,
+            false,
+            this.statusShortcutLabel,
+            this.state.selectedIndex,
+          )
       : renderEmptyBoard(this.theme, contentWidth);
+    if (snapshot && this.state.mode === 'detail') {
+      this.ensureSelectedTranscripts(snapshot);
+    }
     const rendered = lines.map((line) =>
       padAnsi(truncateToWidth(line, contentWidth, '…'), viewportWidth),
     );
@@ -217,6 +286,9 @@ export class WorkflowStatusView implements Component {
       this.tui.terminal?.rows,
       this.statusShortcutLabel,
       this.theme,
+      this.state.mode === 'detail'
+        ? '↑/↓ or j/k scroll · PgUp/PgDn · ←/h/Esc back'
+        : '↑/↓ or j/k select · Enter/→/l inspect · PgUp/PgDn',
     );
     this.state = page.state;
     return page.lines;
@@ -227,6 +299,81 @@ export class WorkflowStatusView implements Component {
     if (scrollOffset === this.state.scrollOffset) return;
     this.state = { ...this.state, scrollOffset };
     this.tui.requestRender(true);
+  }
+
+  private normalizeSelection(
+    snapshot: NonNullable<ReturnType<SnapshotProvider>>,
+  ): void {
+    const entries = buildPathEntries(snapshot);
+    const selectedIndex =
+      entries.length === 0
+        ? -1
+        : this.state.selectedIndex < 0
+          ? entries.length - 1
+          : Math.min(this.state.selectedIndex, entries.length - 1);
+    if (selectedIndex !== this.state.selectedIndex) {
+      this.state = { ...this.state, selectedIndex };
+    }
+    if (entries.length === 0 && this.state.mode === 'detail') {
+      this.state = { ...this.state, mode: 'board', scrollOffset: 0 };
+    }
+  }
+
+  private moveSelection(delta: number): void {
+    const snapshot = this.getSnapshot();
+    if (!snapshot) return;
+    this.normalizeSelection(snapshot);
+    const entries = buildPathEntries(snapshot);
+    if (entries.length === 0) return;
+    const selectedIndex = Math.max(
+      0,
+      Math.min(this.state.selectedIndex + delta, entries.length - 1),
+    );
+    if (selectedIndex === this.state.selectedIndex) return;
+    this.state = { ...this.state, selectedIndex };
+    this.tui.requestRender(true);
+  }
+
+  private openDetail(): void {
+    const snapshot = this.getSnapshot();
+    if (!snapshot) return;
+    this.normalizeSelection(snapshot);
+    if (!selectedStepDetail(snapshot, this.state.selectedIndex)) return;
+    this.state = { ...this.state, mode: 'detail', scrollOffset: 0 };
+    this.ensureSelectedTranscripts(snapshot);
+    this.tui.requestRender(true);
+  }
+
+  private showBoard(): void {
+    if (this.state.mode === 'board') return;
+    this.state = { ...this.state, mode: 'board', scrollOffset: 0 };
+    this.tui.requestRender(true);
+  }
+
+  private ensureSelectedTranscripts(
+    snapshot: NonNullable<ReturnType<SnapshotProvider>>,
+  ): void {
+    const detail = selectedStepDetail(snapshot, this.state.selectedIndex);
+    if (!detail) return;
+    for (const attempt of detail.attempts) {
+      if (attempt.kind !== 'subagent' || !attempt.transcript) continue;
+      const key = stepTranscriptCacheKey(snapshot.run.runId, attempt);
+      if (this.transcriptCache.has(key)) continue;
+      this.transcriptCache.set(key, { status: 'loading' });
+      void this.dependencies.loadStepTranscript(attempt).then(
+        (result) => {
+          this.transcriptCache.set(key, result);
+          if (!this.state.isClosed) this.tui.requestRender(true);
+        },
+        () => {
+          this.transcriptCache.set(key, {
+            status: 'unavailable',
+            reason: 'The child transcript could not be loaded safely.',
+          });
+          if (!this.state.isClosed) this.tui.requestRender(true);
+        },
+      );
+    }
   }
 
   private close(): void {
@@ -243,7 +390,7 @@ export async function showWorkflowStatus(
   ctx: ExtensionContext,
   getSnapshot: SnapshotProvider,
   statusShortcut: KeyId = DEFAULT_STATUS_SHORTCUT,
-  dependencies: WorkflowStatusViewDependencies = DEFAULT_VIEW_DEPENDENCIES,
+  dependencies: Partial<WorkflowStatusViewDependencies> = {},
 ): Promise<void> {
   await ctx.ui.custom<undefined>(
     (tui, theme, _keybindings, done) => {

@@ -2,6 +2,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { digest } from '../digest.ts';
 import { createDiagnostic, errorCode, errorMessage } from './diagnostics.ts';
 import type { ConfigFileSystem, LoadedDirectory } from './load-types.ts';
+import {
+  digestWorkflowStep,
+  digestWorkflowStepStructure,
+} from './step-digests.ts';
 import type {
   LoadedWorkflow,
   WorkflowDefinition,
@@ -81,7 +85,13 @@ async function loadWorkflowFile(
   const stepDigests = Object.fromEntries(
     Object.entries(definition.steps).map(([stepId, step]) => [
       stepId,
-      digest({ step, prompt: prompts[stepId] }),
+      digestWorkflowStep(step, prompts[stepId] ?? ''),
+    ]),
+  );
+  const stepStructuralDigests = Object.fromEntries(
+    Object.entries(definition.steps).map(([stepId, step]) => [
+      stepId,
+      digestWorkflowStepStructure(step),
     ]),
   );
   return {
@@ -89,6 +99,7 @@ async function loadWorkflowFile(
     prompts,
     digest: digest({ definition, prompts }),
     stepDigests,
+    stepStructuralDigests,
     sourcePath,
     sourceKind,
   };

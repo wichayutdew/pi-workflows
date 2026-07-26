@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { WORKFLOW_COMPLETION_TOOL } from './completion-tool.ts';
+import { armMainStepTrace } from './main-step-trace.ts';
 import type {
   MainStepRuntimeDependencies,
   MainStepRuntimeState,
@@ -26,6 +27,7 @@ export function registerMainStepPolicy({
   });
 
   pi.on('message_end', (event) => {
+    armMainStepTrace(state, event.message);
     if (!state.active) {
       return;
     }
@@ -70,7 +72,6 @@ export function registerMainStepPolicy({
       Object.fromEntries(Object.entries(event.input)),
       state.active.step,
       pi.getAllTools(),
-      state.active.approvedBashCommands,
     );
     if (!authorization.allowed) {
       return {

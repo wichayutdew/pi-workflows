@@ -1,10 +1,19 @@
-import type { PromptSpec, WorkflowGate, WorkflowStep } from '../types.ts';
+import { isAbsolute, win32 } from 'node:path';
+import {
+  MAX_WORKSPACE_ALLOWED_ROOTS,
+  MAX_WORKSPACE_PATH_CHARS,
+  type PromptSpec,
+  type StepWorkspaceBinding,
+  type WorkflowGate,
+  type WorkflowStep,
+} from '../types.ts';
 import { parsePermissions, parseRequirements } from './permissions.ts';
 import {
   isJsonObject,
   OUTCOME_PATTERN,
   readInteger,
   readString,
+  readStringList,
   rejectUnknownKeys,
   type ValidationErrors,
 } from './shared.ts';
@@ -135,12 +144,91 @@ function parseGate(
         rejectedOutcome,
         timeoutMs: readInteger(
           value.timeoutMs,
-          5_000,
+          30_000,
           `${path}.timeoutMs`,
           errors,
           { min: 1_000, max: 30_000 },
         ),
       };
+}
+
+function parseWorkspaceRoots(
+  value: unknown,
+  path: string,
+  errors: ValidationErrors,
+): Array<string> {
+  if (value === undefined) return ['.'];
+  if (!Array.isArray(value)) {
+    errors.push(`${path}: expected an array of relative paths`);
+    return [];
+  }
+  if (value.length > MAX_WORKSPACE_ALLOWED_ROOTS) {
+    errors.push(
+      `${path}: at most ${MAX_WORKSPACE_ALLOWED_ROOTS} relative paths are allowed`,
+    );
+  }
+
+  const roots = value
+    .slice(0, MAX_WORKSPACE_ALLOWED_ROOTS)
+    .reduce<Array<string>>((result, item, index) => {
+      const itemPath = `${path}[${index}]`;
+      if (typeof item !== 'string' || !item || item.trim() !== item) {
+        errors.push(`${itemPath}: expected a non-empty relative path`);
+        return result;
+      }
+      const root = item;
+      if (root.length > MAX_WORKSPACE_PATH_CHARS) {
+        errors.push(
+          `${itemPath}: path exceeds ${MAX_WORKSPACE_PATH_CHARS} characters`,
+        );
+        return result;
+      }
+      if (
+        root.includes('\0') ||
+        isAbsolute(root) ||
+        win32.parse(root).root !== ''
+      ) {
+        errors.push(`${itemPath}: expected a relative path`);
+        return result;
+      }
+      if (result.includes(root)) {
+        errors.push(`${itemPath}: duplicate value "${root}"`);
+        return result;
+      }
+      return [...result, root];
+    }, []);
+  if (roots.length === 0) {
+    errors.push(`${path}: at least one relative path is required`);
+  }
+  return roots;
+}
+
+function parseWorkspace(
+  value: unknown,
+  path: string,
+  errors: ValidationErrors,
+): StepWorkspaceBinding | undefined {
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value)) {
+    errors.push(`${path}: expected an object`);
+    return undefined;
+  }
+  rejectUnknownKeys(value, ['bindOn', 'allowedRoots'], path, errors);
+  const bindOn = readStringList(
+    value.bindOn,
+    `${path}.bindOn`,
+    errors,
+    OUTCOME_PATTERN,
+  );
+  if (bindOn.length === 0) {
+    errors.push(`${path}.bindOn: at least one outcome is required`);
+  }
+  const allowedRoots = parseWorkspaceRoots(
+    value.allowedRoots,
+    `${path}.allowedRoots`,
+    errors,
+  );
+  return { bindOn, allowedRoots };
 }
 
 /** Parse one workflow step and validate relationships within that step. */
@@ -164,6 +252,7 @@ export function parseWorkflowStep(
       'requires',
       'transitions',
       'gate',
+      'workspace',
     ],
     path,
     errors,
@@ -196,6 +285,11 @@ export function parseWorkflowStep(
     errors,
   );
   const gate = parseGate(value.gate, `${path}.gate`, errors);
+  const workspace = parseWorkspace(
+    value.workspace,
+    `${path}.workspace`,
+    errors,
+  );
 
   if (gate) {
     if (!Object.hasOwn(transitions, gate.approvedOutcome)) {
@@ -214,6 +308,15 @@ export function parseWorkflowStep(
       );
     }
   }
+  if (workspace) {
+    workspace.bindOn.forEach((outcome) => {
+      if (!Object.hasOwn(transitions, outcome)) {
+        errors.push(
+          `${path}.workspace.bindOn: unknown transition outcome "${outcome}"`,
+        );
+      }
+    });
+  }
 
   if (!title || !prompt) return undefined;
   return {
@@ -224,5 +327,6 @@ export function parseWorkflowStep(
     requires,
     transitions,
     ...(gate ? { gate } : {}),
+    ...(workspace ? { workspace } : {}),
   };
 }

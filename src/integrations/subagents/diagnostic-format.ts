@@ -26,6 +26,11 @@ export const formatToolFailureDiagnostic = (
           `${hasSuccessfulOutputCorrelation ? 'Successful tool output' : 'Tool error'}: ${diagnostic.output}`,
         ]
       : []),
+    ...(diagnostic.postCompletionWarning
+      ? [
+          `Post-completion watchdog warning: ${diagnostic.postCompletionWarning}`,
+        ]
+      : []),
     ...(diagnostic.correlation === 'latest-before-completion'
       ? [
           'Correlation: latest failed tool call before successful structured_output; terminal text did not identify the call',

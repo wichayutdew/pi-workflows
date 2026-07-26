@@ -120,8 +120,9 @@ sequenceDiagram
 The workflow `subagent.agent` value selects the actual Pi Subagents profile.
 Each v1 request uses `output: false`, the workflow `outputSchema`, and agent
 contract v1. It starts in a clean context with the original workflow input and
-the previous step's compact result or approved artifact. No accumulated parent
-or sibling transcript crosses the step boundary.
+the previous step's compact result. An approved artifact is available only when
+the prompt explicitly renders `{{reviewed.artifact}}`; no accumulated parent or
+sibling transcript crosses the step boundary.
 
 Delegation planning and recovery decisions live in `src/harness/delegation-*.ts`
 and launch through `step-execution-actions.ts`. The parent-side subagent client
@@ -154,10 +155,10 @@ The harness first considers two bounded recovery paths:
    calls prove that no mutation can be repeated.
 
 Configured `edit` or `write` availability is not by itself a veto. An actual
-recorded `edit`, `write`, mutation-capable Bash, or other unknown-effect call
-makes the audit unsafe. Denied and read-only Bash need no opt-in;
-`retryToolFailures` authorizes the same bounded sequence for allow-list or
-unrestricted Bash, but never bypasses the actual-call audit.
+recorded `edit`, `write`, executed Bash, or other unknown-effect call makes the
+audit unsafe. Denied Bash needs no opt-in; `retryToolFailures` authorizes the
+same bounded sequence for allow-list or unrestricted Bash, but never bypasses
+the actual-call audit.
 
 Each recovery launches a fresh child with all previous bounded failure evidence.
 Failures receive a stable semantic fingerprint that excludes request IDs and
@@ -188,20 +189,38 @@ transition, successful recovery, or newly launched attempt.
 flowchart LR
   Run[Workflow checkpoint] --> Board[shortcut-toggleable detail overlay]
   Active[active delegation or main step] --> Board
-  Active --> Footer[one animated working indicator]
+  Active --> Footer[animated workflow and current-step indicator]
 ```
 
-The footer cycles through `◐`, `◓`, `◑`, and `◒` only while work runs and is
-cleared when execution stops. It never renders a below-editor task board.
-Completed steps, failures, pauses, reviews, progress, and full history live in
-the overlay; its rendering clamps long reasons to the available terminal width
-without altering the full persisted reason.
+The footer cycles through `◐`, `◓`, `◑`, and `◒` and identifies the workflow
+and current step only while work runs; it is cleared when execution stops. It
+never renders a below-editor task board. Completed steps, failures, pauses,
+reviews, attempt logs, and full history live in the overlay; its rendering
+clamps long reasons to the available terminal width without altering the full
+persisted reason. Arrow keys or `j`/`k` select a path entry; `Enter`, right, or
+`l` opens its persisted attempt evidence. Detail scroll uses arrows or `j`/`k`,
+while left, `h`, or `Esc` returns. Attempt tasks, results, and gate decisions
+are globally bounded in the checkpoint. Confined child transcript references
+are read on demand through stable no-follow reads; displayed controls and
+common credentials are removed. New main-agent attempts arm trace capture only
+when Pi finalizes the exact workflow task, then persist
+a redacted, size-bounded prefix of finalized assistant and tool events in
+source order. These events remain part of the parent session, but the explorer
+does not read unrelated parent-session traffic; legacy attempts without a log
+still display their bounded task and result.
+
+After a transition is durably checkpointed, the harness posts one visible
+`workflow-step-summary` message without triggering another model turn.
+Successful steps and step-requested pauses relay only the schema-validated
+summary; the final message also marks the workflow complete. Other pauses relay
+their bounded reason. Failures relay a short redacted reason while their full
+diagnostic and attempt history remain confined to the checkpoint and explorer.
 
 The status facade is `src/workflow-status.ts`. Rendering and display details
 are split into `workflow-status/format-status.ts`, `formatting.ts`,
-`layout.ts`, `render-board.ts`, `render-path.ts`, `render-summary.ts`,
-`types.ts`, and `view.ts`; harness status actions call that facade instead of
-formatting the overlay inline.
+`layout.ts`, `render-board.ts`, `render-path.ts`, `render-step-detail.ts`,
+`render-summary.ts`, `transcript-reader.ts`, `types.ts`, and `view.ts`; harness
+status actions call that facade instead of formatting the overlay inline.
 
 ## Pause And Resume
 
@@ -221,19 +240,20 @@ flowchart TD
   Isolate --> BlockResume[resume blocked until child terminal]
   Checkpoint --> Resume["/workflow-resume"]
   Resume --> Reload[reload catalog]
-  Reload --> Reconcile[reconcile digests]
+  Reload --> Doctor[reject reachable completion traps]
+  Doctor --> Reconcile[reconcile digests]
   Reconcile --> Preflight[preflight current step]
   Preflight --> Launch[launch configured main or delegated step]
 ```
 
 A step-requested `$pause` preserves the incoming `stepHandoff` and records the
 failed attempt separately in `lastSummary`; the resumed prompt renders both.
-Reviewed Bash commands derive only from the persisted `reviewedArtifact`.
+The persisted `reviewedArtifact` stays opaque and cannot grant Bash authority.
 
 External effects are not exactly once. If a publish step stops after a remote
-action succeeds but before it checkpoints, resume grants the same exact
-reviewed capability. The step prompt must inspect observable remote state,
-skip only proven-complete actions, and pause on ambiguity.
+action succeeds but before it checkpoints, resume uses the same declarative step
+permissions. The step prompt must inspect observable remote state, skip only
+proven-complete actions, and pause on ambiguity.
 
 Pause and resume are coordinated by `pause-actions.ts`, `resume-action.ts`,
 `delegation-control-actions.ts`, `prompt-gate-actions.ts`, and
@@ -278,9 +298,10 @@ flowchart TD
   Restart --> Pause
 ```
 
-A completed human-approved gate is reconciled from its persisted reviewed
-artifact, so editing or reloading the planning prompt does not ask the planning
-child to run again. This exception applies only while the gate still exists,
+A completed human-approved gate is reconciled from its separately persisted
+reviewed artifact, so editing or reloading that gated step's prompt does not ask
+the step to run again. This exception applies only while the gate still exists,
 its approved outcome matches the recorded outcome, and the recorded history
-summary is the same reviewed artifact. Other completed-step drift still rewinds
-to the earliest changed step.
+retains the same artifact. Legacy checkpoints fall back to their historical
+summary representation. Other completed-step drift still rewinds to the
+earliest changed step.

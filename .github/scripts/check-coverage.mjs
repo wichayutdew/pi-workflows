@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const coveragePath = process.argv[2] ?? 'coverage/lcov.info';
+const coveragePath = process.argv[2] ?? 'coverage/full/lcov.info';
 const minimumPercent = 90;
 const totals = {
   lines: { found: 0, hit: 0 },
@@ -34,13 +34,13 @@ try {
       throw new Error(`${coveragePath} contains no ${name} coverage`);
     }
     const percent = (hit / found) * 100;
-    if (percent <= minimumPercent) {
+    if (percent < minimumPercent) {
       throw new Error(
-        `${name} coverage ${percent.toFixed(2)}% must be above ${minimumPercent}%`,
+        `${name} coverage ${percent.toFixed(2)}% must be at least ${minimumPercent}%`,
       );
     }
     console.log(
-      `${name} coverage: ${percent.toFixed(2)}% (${hit}/${found}), above ${minimumPercent}%`,
+      `${name} coverage: ${percent.toFixed(2)}% (${hit}/${found}), at least ${minimumPercent}%`,
     );
   }
 } catch (error) {

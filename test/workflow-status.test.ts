@@ -4,6 +4,7 @@ import { visibleWidth } from '@earendil-works/pi-tui';
 import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
 import {
+  formatWorkflowProgressStatus,
   formatWorkflowStatusBoard,
   formatWorkflowStatusText,
   WorkflowStatusView,
@@ -32,6 +33,53 @@ describe('when testing workflow status', () => {
   }
 
   describe('should satisfy its behavioral contract', () => {
+    test('the persistent progress line identifies the workflow and current step', () => {
+      // given
+      const raw = baseWorkflow();
+      const steps = raw.steps as Record<string, Record<string, unknown>>;
+      steps.implement = {
+        ...steps.implement,
+        title: 'Implement the approved change',
+      };
+      const workflow = loadedWorkflow(raw);
+      const initial = createRun(
+        workflow,
+        'make the change',
+        [],
+        'run-progress-status',
+        1_000,
+      );
+      const run = {
+        ...initial,
+        currentStepId: 'implement',
+        currentStepDigest: workflow.stepDigests.implement ?? '',
+      };
+
+      // when
+      const output = formatWorkflowProgressStatus(
+        { run, workflow, now: 1_000 },
+        'Ctrl+Alt+W',
+      );
+
+      // then
+      expect(output).toBe(
+        '◐ example · step Implement the approved change (implement) · working · Ctrl+Alt+W',
+      );
+
+      expect(
+        formatWorkflowProgressStatus(
+          {
+            run: { ...run, status: 'awaiting-gate' },
+            workflow,
+            now: 1_000,
+          },
+          'Ctrl+Alt+W',
+        ),
+      ).toBe(
+        '◆ example · step Implement the approved change (implement) · awaiting review · Ctrl+Alt+W',
+      );
+    });
+
     test('the status board shows the live run summary and execution path', () => {
       // given
       const workflow = loadedWorkflow();
@@ -76,6 +124,10 @@ describe('when testing workflow status', () => {
       // then
       expect(output).toMatch(/✦ Workflow Status/);
       expect(output).toMatch(/example/);
+      expect(output).toMatch(/\/example/);
+      expect(output).toMatch(/workflow\s+example/);
+      expect(output).toMatch(/command\s+\/example/);
+      expect(output).toMatch(/about\s+Example workflow/);
       expect(output).toMatch(/\[RUNNING\]/);
       expect(output).toMatch(/inspect/);
       expect(output).toMatch(/COMPLETED · ready/);
@@ -219,6 +271,7 @@ describe('when testing workflow status', () => {
         '# Plan',
         'request-review',
         2_000,
+        'Plan ready',
       );
       run = {
         ...run,
@@ -257,7 +310,9 @@ describe('when testing workflow status', () => {
       });
 
       // then
-      expect(output).toMatch(/Workflow: example/);
+      expect(output).toMatch(/Workflow ID: example/);
+      expect(output).toMatch(/Command: \/example/);
+      expect(output).toMatch(/Description: Example workflow/);
       expect(output).toMatch(/Run: run-text-status/);
       expect(output).toMatch(/Status: running/);
       expect(output).toMatch(
@@ -428,13 +483,13 @@ describe('when testing workflow status', () => {
 
       // when
       const firstPage = view.render(120);
-      view.handleInput('j');
+      view.handleInput('\u001b[6~');
       const secondPage = view.render(120);
 
       // then
       expect(firstPage).toHaveLength(9);
       expect(firstPage.at(-1)).toMatch(/rows 1-8\//);
-      expect(secondPage.at(-1)).toMatch(/rows 2-9\//);
+      expect(secondPage.at(-1)).toMatch(/rows 8-15\//);
       expect(firstPage).not.toEqual(secondPage);
       expect(repaintRequests).toEqual([true]);
       expect(

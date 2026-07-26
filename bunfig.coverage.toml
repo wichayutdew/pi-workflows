@@ -1,0 +1,8 @@
+[test]
+coverage = true
+coverageReporter = [ "text", "lcov" ]
+coverageDir = "coverage/full"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [ "test/**" ]
+# Bun 1.3.14 uses singular keys for per-metric thresholds.
+coverageThreshold = { line = 0.9, function = 0.9, statement = 0.9 }

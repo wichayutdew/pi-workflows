@@ -9,7 +9,7 @@ export type StepContract = {
   readonly outcomes: ReadonlyArray<string>;
   readonly transitionLines: string;
   readonly gateLine: string;
-  readonly recoveryInstructions: ReadonlyArray<string>;
+  readonly workspaceLines: ReadonlyArray<string>;
 };
 
 type CreateStepContractOptions = {
@@ -18,57 +18,8 @@ type CreateStepContractOptions = {
   readonly step: WorkflowStep;
 };
 
-const pauseOutcomesFor = (
-  step: WorkflowStep,
-  allowedOutcomeSet: ReadonlySet<string>,
-): ReadonlyArray<string> =>
-  Object.entries(step.transitions)
-    .filter(
-      ([outcome, target]) =>
-        target === '$pause' && allowedOutcomeSet.has(outcome),
-    )
-    .map(([outcome]) => outcome);
-
-type RecoveryInstructionsOptions = {
-  readonly allowedOutcomeSet: ReadonlySet<string>;
-  readonly pauseOutcomes: ReadonlyArray<string>;
-};
-
-const buildRecoveryInstructions = ({
-  allowedOutcomeSet,
-  pauseOutcomes,
-}: RecoveryInstructionsOptions): ReadonlyArray<string> => {
-  const retryInstruction = allowedOutcomeSet.has('retry')
-    ? [
-        'Use outcome `retry` when the execution contract remains valid and another bounded fresh attempt can safely continue from inspected state. Include the exact failure, attempts, observed state, and next alternative in `summary`.',
-      ]
-    : [];
-  const replanInstruction = allowedOutcomeSet.has('replan')
-    ? [
-        'Use outcome `replan` when recovery requires a material change to reviewed intent, commands, targets, or authority. Include the exact invalid contract evidence and proposed correction in `summary`.',
-      ]
-    : [];
-
-  if (pauseOutcomes.length > 0) {
-    return [
-      ...retryInstruction,
-      ...replanInstruction,
-      `Use a pause outcome (${pauseOutcomes.join(', ')}) only when permitted alternatives and offered recovery outcomes cannot resolve the workflow definition, environment, or execution contract. Describe the exhausted recovery evidence declaratively in \`summary\`.`,
-    ];
-  }
-  if (allowedOutcomeSet.has('retry') || allowedOutcomeSet.has('replan')) {
-    return [...retryInstruction, ...replanInstruction];
-  }
-
-  return [
-    ...retryInstruction,
-    ...replanInstruction,
-    'If the workflow definition, environment, or final execution contract is wrong, do not fabricate success or call the completion tool; end with a concise declarative error so the harness pauses the step.',
-  ];
-};
-
 /**
- * Derives the completion and recovery contract for an active workflow step.
+ * Derives the completion contract for an active workflow step.
  *
  * @param options - Workflow state used to resolve currently allowed outcomes.
  * @returns Immutable text fragments for the step prompt.
@@ -80,7 +31,6 @@ export function createStepContract({
 }: CreateStepContractOptions): StepContract {
   const outcomes = allowedOutcomes(workflow, run);
   const allowedOutcomeSet = new Set(outcomes);
-  const pauseOutcomes = pauseOutcomesFor(step, allowedOutcomeSet);
   const transitionLines = Object.entries(step.transitions)
     .filter(([outcome]) => allowedOutcomeSet.has(outcome))
     .map(([outcome, target]) => `- ${outcome}: ${target}`)
@@ -88,14 +38,18 @@ export function createStepContract({
   const gateLine = step.gate
     ? `- ${step.gate.submitOutcome}: submit the artifact to ${step.gate.provider}; include the full artifact argument`
     : '';
+  const workspaceLines = step.workspace
+    ? [
+        `Workspace-binding outcomes: ${step.workspace.bindOn.join(', ')}`,
+        `For those outcomes, include \`workspace.cwd\` as an absolute directory under one allowed root relative to the run-start directory: ${step.workspace.allowedRoots.join(', ')}`,
+        'For every other outcome, omit `workspace`.',
+      ]
+    : ['This step cannot bind a workspace; omit `workspace`.'];
 
   return {
     outcomes,
     transitionLines,
     gateLine,
-    recoveryInstructions: buildRecoveryInstructions({
-      allowedOutcomeSet,
-      pauseOutcomes,
-    }),
+    workspaceLines,
   };
 }

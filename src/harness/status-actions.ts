@@ -7,7 +7,7 @@ import type { WorkflowCatalog } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
 import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts';
 import {
-  workflowStatusIcon,
+  formatWorkflowProgressStatus,
   type WorkflowStatusExecution,
   type WorkflowStatusSnapshot,
 } from '../workflow-status.ts';
@@ -45,7 +45,6 @@ export type StatusActions = {
   refreshStatusWhileRunning: (this: StatusContext) => void;
   stopStatusRefresh: (this: StatusContext) => void;
   registerWorkflowStatusShortcut: (this: StatusContext) => void;
-  openWorkflowStatus: (this: StatusContext, context: ExtensionContext) => void;
   showWorkflowStatus: (
     this: StatusContext,
     context: ExtensionContext,
@@ -88,13 +87,17 @@ function updateStatus(this: StatusContext): void {
     return;
   }
   const snapshot = this.workflowStatusSnapshot();
-  if (this.run.status !== 'running') {
+  if (this.run.status !== 'running' && this.run.status !== 'awaiting-gate') {
+    this.latestContext.ui.setStatus(STATUS_KEY, undefined);
+    return;
+  }
+  if (!snapshot) {
     this.latestContext.ui.setStatus(STATUS_KEY, undefined);
     return;
   }
   this.latestContext.ui.setStatus(
     STATUS_KEY,
-    `${workflowStatusIcon(this.run, snapshot?.now)} ${this.run.workflowId}: working · ${this.statusShortcutLabel}`,
+    formatWorkflowProgressStatus(snapshot, this.statusShortcutLabel),
   );
 }
 
@@ -132,18 +135,6 @@ function registerWorkflowStatusShortcut(this: StatusContext): void {
       }
       await this.showWorkflowStatus(extensionContext);
     },
-  });
-}
-
-function openWorkflowStatus(
-  this: StatusContext,
-  context: ExtensionContext,
-): void {
-  void this.showWorkflowStatus(context).catch((error: unknown) => {
-    context.ui.notify(
-      `Cannot open workflow status: ${error instanceof Error ? error.message : String(error)}`,
-      'error',
-    );
   });
 }
 
@@ -185,7 +176,6 @@ export function createStatusActions(): StatusActions {
     refreshStatusWhileRunning,
     stopStatusRefresh,
     registerWorkflowStatusShortcut,
-    openWorkflowStatus,
     showWorkflowStatus,
   };
 }

@@ -45,6 +45,8 @@ type RenderStepPromptOptions = {
   readonly execution: StepExecution;
 };
 
+const RESUME_INPUT_PLACEHOLDER = /\{\{\s*resume\.input\s*\}\}/;
+
 const renderStepPrompt = ({
   workflow,
   run,
@@ -53,18 +55,42 @@ const renderStepPrompt = ({
 }: RenderStepPromptOptions): string => {
   const promptTemplate = workflow.prompts[run.currentStepId] ?? '';
   const templateValues = createTemplateValues({ workflow, run, step });
-  const hidesRepeatedHandoff =
+  const hidesRepeatedLastSummary =
     execution === 'delegated' &&
     /\{\{\s*last\.summary\s*\}\}/.test(promptTemplate);
-  const values = hidesRepeatedHandoff
-    ? {
-        ...templateValues,
-        'last.summary':
-          '(Provided once in the Previous step handoff section below.)',
-      }
-    : templateValues;
+  const handoffReference =
+    '(Provided once in the Previous step handoff section below.)';
+  const values = {
+    ...templateValues,
+    ...(hidesRepeatedLastSummary ? { 'last.summary': handoffReference } : {}),
+  };
 
   return renderTemplate(promptTemplate, values);
+};
+
+const buildResumeInputSection = (
+  run: WorkflowRun,
+  promptContainsResumeInput: boolean,
+): ReadonlyArray<string> => {
+  if (!run.resumeInput) return [];
+  const authority =
+    'The user-supplied resume guidance for this attempt is authoritative when it conflicts with task instructions in the step prompt or previous handoff. Inspect current state before applying it. It does not change the workflow graph or the YAML-enforced tools, MCP, extensions, skills, Bash policy, or workspace boundary.';
+  if (promptContainsResumeInput) {
+    return ['## Resume guidance authority', '', authority, ''];
+  }
+  const serialized = JSON.stringify({ input: run.resumeInput }, null, 2)
+    .replaceAll('<', '\\u003c')
+    .replaceAll('>', '\\u003e');
+  return [
+    '## User guidance supplied with `/workflow-resume`',
+    '',
+    authority,
+    '',
+    '<pi-workflows-resume-input-v1>',
+    serialized,
+    '</pi-workflows-resume-input-v1>',
+    '',
+  ];
 };
 
 /**
@@ -77,6 +103,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
   const { execution, workflow, run } = options;
   const step = resolveStep(workflow, run);
   const isDelegated = execution === 'delegated';
+  const promptTemplate = workflow.prompts[run.currentStepId] ?? '';
   const prompt = renderStepPrompt({ workflow, run, step, execution });
   const handoff = currentStepHandoff(run);
   const contract = createStepContract({ workflow, run, step });
@@ -105,6 +132,10 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     prompt,
     '',
     ...(isDelegated ? buildDelegatedHandoffSection(handoff) : []),
+    ...buildResumeInputSection(
+      run,
+      RESUME_INPUT_PLACEHOLDER.test(promptTemplate),
+    ),
     ...buildResourceSection({ execution, step }),
     '## Completion contract',
     '',
@@ -112,11 +143,11 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     `Valid outcomes: ${contract.outcomes.join(', ')}`,
     contract.transitionLines,
     contract.gateLine,
+    ...contract.workspaceLines,
     '',
     'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
-    ...(isDelegated ? buildDelegatedCompletionInstructions(step) : []),
+    ...(isDelegated ? buildDelegatedCompletionInstructions() : []),
     'Do not call the completion tool alongside other tool calls.',
-    ...contract.recoveryInstructions,
   ].join('\n');
 }
 

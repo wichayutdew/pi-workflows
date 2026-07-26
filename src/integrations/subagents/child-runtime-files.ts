@@ -1,50 +1,39 @@
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ChildStepPolicy } from './child-policy-types.ts';
 import type { SubagentChildRuntimeDependencies } from './child-runtime-types.ts';
-
-const FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set(['edit', 'write']);
-
-const errorCode = (error: unknown): unknown =>
-  error !== null && typeof error === 'object' && 'code' in error
-    ? error.code
-    : undefined;
-
-const pathIsInside = (root: string, candidate: string): boolean => {
-  const relativePath = relative(root, candidate);
-  return (
-    relativePath !== '..' &&
-    !relativePath.startsWith(`..${sep}`) &&
-    !isAbsolute(relativePath)
-  );
-};
-
-const nearestCanonicalAncestor = (
-  path: string,
-  dependencies: SubagentChildRuntimeDependencies,
-): string | undefined => {
-  let candidate = path;
-  while (true) {
-    try {
-      dependencies.fileSystem.inspect(candidate);
-    } catch (error) {
-      if (errorCode(error) !== 'ENOENT') return undefined;
-      const parent = dirname(candidate);
-      if (parent === candidate) return undefined;
-      candidate = parent;
-      continue;
-    }
-    try {
-      return dependencies.fileSystem.realPath(candidate);
-    } catch {
-      return undefined;
-    }
-  }
-};
 
 type VerifyChildCapabilityOptions = {
   readonly policy: ChildStepPolicy;
   readonly childAgent: string;
   readonly dependencies: SubagentChildRuntimeDependencies;
+};
+
+/**
+ * Verifies that the delegated child started in the workflow run's captured
+ * working directory.
+ *
+ * @throws When either directory cannot be resolved or they differ.
+ */
+export const verifyChildWorkingDirectory = (
+  policy: ChildStepPolicy,
+  dependencies: SubagentChildRuntimeDependencies,
+): void => {
+  let expected: string;
+  let actual: string;
+  try {
+    expected = dependencies.fileSystem.realPath(policy.cwd);
+    actual = dependencies.fileSystem.realPath(
+      dependencies.currentWorkingDirectory(),
+    );
+  } catch {
+    throw new Error(
+      'child working directory does not match the delegated workflow policy',
+    );
+  }
+  if (expected !== policy.cwd || actual !== expected) {
+    throw new Error(
+      'child working directory does not match the delegated workflow policy',
+    );
+  }
 };
 
 /**
@@ -107,50 +96,4 @@ export const writeChildResult = ({
     }
     throw error;
   }
-};
-
-type RepositoryMutationOptions = {
-  readonly toolName: string;
-  readonly input: Readonly<Record<string, unknown>>;
-  readonly policy: ChildStepPolicy;
-  readonly dependencies: SubagentChildRuntimeDependencies;
-};
-
-/**
- * Returns a policy error when a file mutation escapes the reviewed repository.
- */
-export const repositoryMutationError = ({
-  toolName,
-  input,
-  policy,
-  dependencies,
-}: RepositoryMutationOptions): string | undefined => {
-  if (!policy.repositoryCwd || !FILE_MUTATION_TOOLS.has(toolName)) return;
-  if (typeof input.path !== 'string' || !input.path.trim()) {
-    return `${toolName} must name a path inside the reviewed repository root`;
-  }
-
-  const candidate = resolve(dependencies.currentWorkingDirectory(), input.path);
-  const root = resolve(policy.repositoryCwd);
-  if (!pathIsInside(root, candidate)) {
-    return `${toolName} path is outside the reviewed repository root "${policy.repositoryCwd}"`;
-  }
-
-  let canonicalRoot: string;
-  try {
-    if (!dependencies.fileSystem.stat(root).isDirectory()) {
-      throw new Error('not a directory');
-    }
-    canonicalRoot = dependencies.fileSystem.realPath(root);
-  } catch {
-    return `reviewed repository root is not an existing directory: ${policy.repositoryCwd}`;
-  }
-  const canonicalAncestor = nearestCanonicalAncestor(candidate, dependencies);
-  if (
-    canonicalAncestor === undefined ||
-    !pathIsInside(canonicalRoot, canonicalAncestor)
-  ) {
-    return `${toolName} path is outside the reviewed repository root "${policy.repositoryCwd}"`;
-  }
-  return;
 };

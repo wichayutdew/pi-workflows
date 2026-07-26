@@ -53,6 +53,7 @@ import { createGateSubmissionAction } from './harness/gate-submission-action.ts'
 import { createPromptGateActions } from './harness/prompt-gate-actions.ts';
 import { createPlannotatorResultActions } from './harness/plannotator-result-actions.ts';
 import { createCoreActions } from './harness/core-actions.ts';
+import type { SettledStepReport } from './harness/step-reporting.ts';
 import {
   formatShortcutLabel,
   type WorkflowStatusSnapshot,
@@ -106,14 +107,16 @@ export class WorkflowHarness implements WorkflowCommandController {
     STATUS_ACTIONS.stopStatusRefresh;
   private readonly registerWorkflowStatusShortcut: () => void =
     STATUS_ACTIONS.registerWorkflowStatusShortcut;
-  private readonly openWorkflowStatus: (context: ExtensionContext) => void =
-    STATUS_ACTIONS.openWorkflowStatus;
   private readonly showWorkflowStatus: (
     context: ExtensionContext,
   ) => Promise<void> = STATUS_ACTIONS.showWorkflowStatus;
   private readonly listWorkflows: (
     context: ExtensionCommandContext,
   ) => Promise<void> = START_ACTIONS.listWorkflows;
+  private readonly doctorWorkflows: (
+    workflowId: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void> = START_ACTIONS.doctorWorkflows;
   private readonly startNow: (
     workflowId: string,
     input: string,
@@ -133,6 +136,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   ) => Promise<void> = PAUSE_ACTIONS.abortNow;
   private readonly resumeNow: (
     context: ExtensionCommandContext,
+    input?: string,
   ) => Promise<void> = RESUME_ACTION.resumeNow;
   private readonly registerMultilineCommandInput: () => void =
     LIFECYCLE_ACTIONS.registerMultilineCommandInput;
@@ -149,6 +153,16 @@ export class WorkflowHarness implements WorkflowCommandController {
     run: WorkflowRun,
     step: WorkflowStep,
   ) => void = STEP_EXECUTION_ACTIONS.launchMainStep;
+  private readonly queueMainStepLog: (
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void> = STEP_EXECUTION_ACTIONS.queueMainStepLog;
+  private readonly recordMainStepLog: (
+    identity: MainStepIdentity,
+    lines: ReadonlyArray<string>,
+    context: ExtensionContext,
+  ) => Promise<void> = STEP_EXECUTION_ACTIONS.recordMainStepLog;
   private readonly queueMainStepResult: (
     identity: MainStepIdentity,
     result: WorkflowStepResult | undefined,
@@ -186,11 +200,14 @@ export class WorkflowHarness implements WorkflowCommandController {
     failure: DelegationFailureDetails | undefined,
     reason: string,
   ) => boolean = DELEGATION_CONTROL_ACTIONS.retryDelegationAfterFailure;
-  private readonly pauseForDelegationFailure: (reason: string) => void =
-    DELEGATION_CONTROL_ACTIONS.pauseForDelegationFailure;
+  private readonly pauseForDelegationFailure: (
+    reason: string,
+    failureSummary?: string,
+  ) => void = DELEGATION_CONTROL_ACTIONS.pauseForDelegationFailure;
   private readonly pauseForExecutionFailure: (
     label: string,
     reason: string,
+    failureSummary?: string,
   ) => void = DELEGATION_CONTROL_ACTIONS.pauseForExecutionFailure;
   private readonly retainUnconfirmedDelegation: (
     active: ActiveDelegation,
@@ -203,6 +220,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     workflow: LoadedWorkflow,
     originalRun: WorkflowRun,
     outcome: string,
+    summary: string,
     artifact: string,
   ) => Promise<void> = GATE_SUBMISSION_ACTION.submitGate;
   private readonly launchPromptReview: (
@@ -233,8 +251,10 @@ export class WorkflowHarness implements WorkflowCommandController {
     PLANNOTATOR_RESULT_ACTIONS.registerPlannotatorResults;
   private readonly handlePlannotatorResult: (data: unknown) => Promise<void> =
     PLANNOTATOR_RESULT_ACTIONS.handlePlannotatorResult;
-  private readonly settleAfterTransition: (workflow: LoadedWorkflow) => void =
-    CORE_ACTIONS.settleAfterTransition;
+  private readonly settleAfterTransition: (
+    workflow: LoadedWorkflow,
+    report: SettledStepReport,
+  ) => void = CORE_ACTIONS.settleAfterTransition;
   private readonly preflight: (
     workflow: LoadedWorkflow,
     stepId: string,
@@ -297,6 +317,14 @@ export class WorkflowHarness implements WorkflowCommandController {
     await this.listWorkflows(context);
   }
 
+  /** Diagnoses declarative completion paths and loop risks. */
+  async doctor(
+    workflowId: string,
+    context: ExtensionCommandContext,
+  ): Promise<void> {
+    await this.doctorWorkflows(workflowId, context);
+  }
+
   /** Starts a loaded workflow with the supplied user input. */
   start(
     workflowId: string,
@@ -322,9 +350,9 @@ export class WorkflowHarness implements WorkflowCommandController {
     return this.enqueueMutation(context, () => this.pauseNow(reason, context));
   }
 
-  /** Resumes the active paused workflow after reconciling configuration. */
-  resume(context: ExtensionCommandContext): Promise<void> {
-    return this.enqueueMutation(context, () => this.resumeNow(context));
+  /** Resumes the active paused workflow with optional user guidance. */
+  resume(input: string, context: ExtensionCommandContext): Promise<void> {
+    return this.enqueueMutation(context, () => this.resumeNow(context, input));
   }
 
   /** Aborts the active workflow and cancels any delegated execution. */

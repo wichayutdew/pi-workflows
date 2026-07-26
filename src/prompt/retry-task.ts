@@ -46,6 +46,9 @@ export function automaticRecoveryTask(
   maxAttempts: number,
 ): string {
   const diagnostics = serializeDiagnostics(reasons);
+  const missingStructuredOutput = reasons.some((reason) =>
+    reason.includes('Missing structured_output call'),
+  );
 
   return [
     '## Automatic recovery after subagent failure',
@@ -57,10 +60,15 @@ export function automaticRecoveryTask(
     '</pi-workflows-retry-diagnostic-v1>',
     '',
     'Diagnose and resolve the specific causes before completing the original step. Treat every listed approach as already attempted. When `Failed tool`, `Command` or `Arguments`, and `Tool error` are present, use them to choose a permitted alternative; do not repeat a failing call unchanged.',
-    'This is a continuation, not a blind replay. Inspect current repository and external state first, assume a prior call may already have applied its effect, and do not repeat a side effect that is already present.',
-    'Keep working after a successful recovery and complete the original step; do not return a pause outcome merely because the first call failed.',
+    'This is a continuation, not a blind replay. Inspect current state first, assume a prior call may already have applied its effect, and do not repeat a side effect that is already present.',
+    'Keep working after a successful recovery and complete the original step according to its configured prompt and outcomes.',
+    ...(missingStructuredOutput
+      ? [
+          'A prior child ended without the required `structured_output` call. After completing the original work, call `structured_output` exactly once as the only tool call in its message; a prose final response does not complete this workflow step.',
+        ]
+      : []),
     'Use only tools enabled for this step. If the named tool is unavailable, use an enabled alternative. In restricted Bash modes, use one allowed command per tool call; do not use shell operators, substitutions, escapes in double quotes, environment assignments, or wrappers.',
-    'If no permitted alternative resolves the failure, follow the step outcome contract: use `retry` for another safe attempt or `replan` for an authority change when those outcomes are offered. Use a pause outcome only after those routes cannot resolve it, and include the exact failed call, exact error, alternatives attempted, and why they could not resolve it.',
+    'If no permitted alternative resolves the failure, follow the step prompt when choosing a configured outcome; the engine assigns no special meaning to outcome names. Include the exact failed call, exact error, alternatives attempted, and observed state in the handoff.',
   ].join('\n');
 }
 

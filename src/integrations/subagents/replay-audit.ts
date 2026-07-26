@@ -139,7 +139,6 @@ export const parseDelegationReplayAudit = (
           call,
           diagnostics,
           bashPermission: expectation.bashPermission,
-          approvedBashCommands: expectation.approvedBashCommands,
         }),
       ),
     toolCount: recordedCalls.length,

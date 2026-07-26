@@ -3,6 +3,7 @@ import { buildMainWorkflowNotice } from '../prompt.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { parseAvailableSkills } from './catalog.ts';
 import { waitForEventContextIdle } from './context-idle.ts';
+import { reportFailedStep } from './step-reporting.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -126,12 +127,10 @@ function registerPolicy(this: HarnessActionContext): void {
     if (!this.run || this.run.status !== 'running') return;
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     if (!workflow) {
-      this.run = failRun(
-        this.run,
-        'Workflow configuration disappeared; reload or restore it',
-        this.dependencies.now(),
-      );
+      const reason = 'Workflow configuration disappeared; reload or restore it';
+      this.run = failRun(this.run, reason, this.dependencies.now());
       this.persist();
+      reportFailedStep(this.pi, undefined, this.run, reason);
       this.restoreBaselineTools();
       this.updateStatus();
       return;

@@ -1,5 +1,6 @@
 import type { LoadedWorkflow } from '../config/types.ts';
 import { advanceRun } from './run-advance.ts';
+import { recordCurrentGateDecision } from './step-trace.ts';
 import type { GateResolution, WorkflowRun } from './state-types.ts';
 import { currentStep, withRunUpdate } from './transition-helpers.ts';
 
@@ -12,6 +13,7 @@ import { currentStep, withRunUpdate } from './transition-helpers.ts';
  * @param artifact - Artifact to display for review.
  * @param requestId - Stable gate request identifier.
  * @param now - Update timestamp.
+ * @param summary - Compact step handoff, separate from the review artifact.
  * @returns A new awaiting-gate workflow state.
  * @throws When the run or gate submission is invalid.
  */
@@ -22,6 +24,7 @@ export const beginGate = (
   artifact: string,
   requestId: string,
   now: number,
+  summary: string,
 ): WorkflowRun => {
   if (run.status !== 'running') {
     throw new Error(
@@ -38,6 +41,9 @@ export const beginGate = (
   if (!artifact.trim()) {
     throw new Error('gate submission requires a non-empty artifact');
   }
+  if (!summary.trim()) {
+    throw new Error('gate submission requires a non-empty summary');
+  }
   if (!requestId) throw new Error('gate submission requires a request id');
 
   return withRunUpdate(
@@ -49,6 +55,7 @@ export const beginGate = (
         requestId,
         stepId: run.currentStepId,
         artifact,
+        summary,
         submittedOutcome: outcome,
         requestedAt: now,
       },
@@ -102,6 +109,9 @@ export const failGate = (
           status: 'running',
           pendingGate: undefined,
           gateFeedback: reason,
+          pausedFrom: undefined,
+          pauseReason: undefined,
+          failedStepId: undefined,
         },
         now,
       )
@@ -158,30 +168,69 @@ export const resolveGate = (
   const outcome = resolution.approved
     ? step.gate.approvedOutcome
     : step.gate.rejectedOutcome;
+  const stepStructuralDigest =
+    workflow.stepStructuralDigests[pendingGate.stepId] ?? '';
+  if (resolution.approved && !stepStructuralDigest) {
+    throw new Error(
+      `gated step "${pendingGate.stepId}" has no structural digest`,
+    );
+  }
   const summary = resolution.approved
-    ? pendingGate.artifact
+    ? (pendingGate.summary ?? '')
     : resolution.feedback
       ? `Gate rejected: ${resolution.feedback}`
       : 'Gate rejected';
-  const runnableRun = withRunUpdate(
+  const decidedRun = recordCurrentGateDecision(
     run,
+    {
+      provider: pendingGate.provider,
+      requestId: pendingGate.requestId,
+      approved: resolution.approved,
+      feedback: resolution.feedback,
+      resolvedAt: resolution.resolvedAt,
+      ...(pendingGate.reviewId ? { reviewId: pendingGate.reviewId } : {}),
+    },
+    now,
+  );
+  const runnableRun = withRunUpdate(
+    decidedRun,
     {
       status: 'running',
       pendingGate: undefined,
-      ...(resolution.approved
-        ? {
-            reviewedArtifact: pendingGate.artifact,
-            reviewedFeedback: resolution.feedback,
-          }
-        : {}),
       pausedFrom: undefined,
       pauseReason: undefined,
       gateFeedback: resolution.feedback,
     },
     now,
   );
+  const advanced = advanceRun(workflow, runnableRun, outcome, summary, now);
+  const completedApprovedGate =
+    resolution.approved && advanced.history.length > runnableRun.history.length;
+  const history = completedApprovedGate
+    ? advanced.history.map((entry, index) =>
+        index === advanced.history.length - 1
+          ? {
+              ...entry,
+              artifact: pendingGate.artifact,
+              approval: {
+                requestId: pendingGate.requestId,
+                artifact: pendingGate.artifact,
+                feedback: resolution.feedback,
+                stepStructuralDigest,
+              },
+            }
+          : entry,
+      )
+    : advanced.history;
   return {
-    ...advanceRun(workflow, runnableRun, outcome, summary, now),
+    ...advanced,
+    history,
+    ...(completedApprovedGate
+      ? {
+          reviewedArtifact: pendingGate.artifact,
+          reviewedFeedback: resolution.feedback,
+        }
+      : {}),
     gateFeedback: resolution.feedback,
   };
 };

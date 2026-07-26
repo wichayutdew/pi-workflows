@@ -87,43 +87,50 @@ exposing the main-agent-only `workflow_complete_step` tool.
 The workflow request deliberately owns fresh context, timeout, skills,
 artifacts, and its optional model override. The profile supplies its specialty,
 the step prompt supplies its exact instructions, and the previous step's
-self-contained compact summary or approved gate artifact supplies the only
-cross-step handoff. Parent and sibling transcripts are never inherited. The
-request's skill selection replaces the selected profile's normal skills for
-that step.
+self-contained compact summary supplies the cross-step handoff. An approved
+gate artifact is persisted separately and is available only through the
+explicit `{{reviewed.artifact}}` template value. Parent and sibling transcripts
+are never inherited. The request's skill selection replaces the selected
+profile's normal skills for that step.
 
 Automatic recovery candidates include `failed` and
 `structured_output_failed` responses with an error or nonzero exit, plus
 `timed_out`, `turn_budget_exhausted`, and `tool_budget_exhausted`. The harness
 may launch up to two fresh recovery attempts after distinct failures. Runtime
-first requires a complete trusted transcript proving that every actual call was
-read-only or rejected before execution by the active step policy, using the
-same approved exact commands as the child. Its persisted policy-stripped task
-and per-request binding must also match the active delegation.
+first requires a complete trusted transcript proving that every actual call
+used a known-safe non-Bash tool or was rejected before execution by the active
+step policy. Its persisted policy-stripped task and per-request binding must
+also match the active delegation.
 
-Denied and read-only Bash modes need no additional opt-in.
-`subagent.retryToolFailures: true` authorizes the same bounded recovery sequence
-in allow-list or unrestricted Bash mode. A configured `edit` or `write` tool
-does not disable recovery when it was never called; any recorded `edit`,
-`write`, mutation-capable Bash, or unknown-effect call makes the actual-call
-audit unsafe.
+Denied Bash needs no additional opt-in. `subagent.retryToolFailures: true`
+authorizes the same bounded recovery sequence in allow-list or unrestricted
+Bash mode. A configured `edit` or `write` tool does not disable recovery when
+it was never called; any recorded `edit`, `write`, executed Bash, or other
+unknown-effect call makes the actual-call audit unsafe.
 
 Ordinary tool failures remain inside the same child whenever its runtime can
-continue. The delegated completion contract tells the child to inspect the
-exact error and observed state, try a permitted semantically equivalent
-alternative, and finish the original step. It must not stop after the first
-recoverable error or broaden mutation scope. A terminal pause is reserved for
-exhausted recovery and must carry the failed call, error, attempted
-alternatives, and unresolved blocker.
+continue. The base delegated completion contract only requires the child to
+stay within configured permissions and choose an outcome defined by the step
+prompt. When the harness launches a fresh automatic-recovery child, its task
+also includes bounded failure evidence and asks the child to inspect current
+state before choosing a permitted alternative. The workflow prompt still owns
+the meaning of every outcome and decides how unresolved failures are reported.
 
-When an approved artifact names one repository, the request starts in its
-existing absolute `repositories[].cwd`. A missing target worktree may start
-only in the same contract's existing absolute `sourceCwd` for bootstrap. The
-child policy still confines `edit` and `write` paths to the reviewed target, so
-the source checkout cannot become an accidental fallback.
+The first request starts in the absolute working directory captured when the
+workflow run began. A YAML-authorized delegated step may return a structured
+workspace binding under an allowed root. Once accepted, every reachable later
+step, revisit, recovery attempt, and resume receives that canonical directory.
+Without a binding, they continue to reuse the run-start directory. Summaries
+and gate artifacts cannot select a directory, and the extension does not
+bootstrap or interpret one.
 
-The v1 request sets `output: false`, provides the workflow result as
-`outputSchema`, and declares `agentContract: { version: 1 }`. Pi Subagents
+A legacy checkpoint with no captured run-start directory cannot launch a
+delegated child. Abort that run and start a new one so the directory is captured
+explicitly instead of guessed from the resumed process.
+
+The v1 request sets `output: false`, provides the workflow result—including the
+workspace field only when the active outcome requires it—as `outputSchema`, and
+declares `agentContract: { version: 1 }`. Pi Subagents
 validates `structured_output` and returns one correlated terminal event.
 `output: false` suppresses any profile-default output file; omitted acceptance
 under contract v1 avoids a second gate because Pi Workflows owns declared
@@ -164,15 +171,15 @@ For a terminal error or nonzero exit, Pi Workflows audits a bounded tail of the
 retained Pi child session. It accepts only regular, non-symlink files contained
 by the current parent session's child-run root and requires its persisted
 policy-stripped task and per-request binding to match the active delegation.
-Every actual recorded call must be read-only or rejected by that step's policy
-before execution, including its approved exact-command inputs. Merely exposing
-`edit` or `write` is harmless when neither was called, while a recorded
-mutation-capable call rejects recovery. Denial-like tool output alone is not
-replay proof. A complete zero-tool transcript is also replay-safe. When the
-terminal error identifies a tool, the diagnostic additionally requires its
-output to match and includes the exact call, tool error, exit code, terminal
-error, and validated session path. Otherwise the generic terminal evidence
-remains actionable without attributing an unrelated earlier call.
+Every actual recorded call must use a known-safe non-Bash tool or be rejected
+by policy before execution. Merely exposing `edit` or `write` is harmless when
+neither was called, while an executed Bash or other unknown-effect call rejects
+recovery. Denial-like tool output alone is not replay proof. A complete
+zero-tool transcript is also replay-safe. When the terminal error identifies a
+tool, the diagnostic additionally requires its output to match and includes the
+exact call, tool error, exit code, terminal error, and validated session path.
+Otherwise the generic terminal evidence remains actionable without attributing
+an unrelated earlier call.
 
 A failed process status is accepted without replay when the contained
 transcript proves a matching successful `structured_output` after every failed
@@ -194,23 +201,21 @@ routed through normal serialized failure handling. Temporary workspace cleanup
 is best effort: removal failure warns but cannot interrupt a healthy run or
 recovery attempt.
 
-## Planning And Questions
+## Non-Interactive Child Boundary
 
 Delegated workflow children are non-interactive. The child runtime removes and
 blocks `contact_supervisor`, `subagent_supervisor`, and `intercom`, preventing a
 dependency-level detach from escaping the workflow lifecycle.
 
-Planning steps put unresolved decisions in their plan artifact. Plannotator or
-the user resolves them before approval; the approved artifact becomes the
-implementation handoff. After approval, implementation and verification never
-ask terminal questions. If the approved plan is insufficient or stale, the
-step returns a pause outcome with evidence instead of opening a side channel.
+The extension does not prescribe planning, implementation, verification,
+question handling, or artifact structure. Each workflow prompt defines the
+step's responsibility, accepted evidence, and outcome semantics. A child can
+only return one of the labels declared in that step; the engine applies its
+configured transition without assigning domain meaning to the label.
 
-The installed workflow set uses planning as its only human-decision gate.
-Plan approval may authorize an exact remote-action contract. Later handoffs may
-remove actions but cannot grant new ones: the harness intersects commands from
-the reviewed plan with commands retained by the latest completed-step handoff
-before enabling Bash.
+Human decisions belong in an explicitly configured gate. Gate approval stores
+the submitted artifact as opaque data and does not expand tool, Bash, path, or
+working-directory authority.
 
 ## Agent And Policy Boundary
 

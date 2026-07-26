@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -38,6 +31,7 @@ describe('when testing subagent child runtime', () => {
       runId: 'run-child',
       stepId: 'inspect',
       stepTitle: 'Inspect',
+      cwd: process.cwd(),
       policyDigest: 'c'.repeat(64),
       capabilityPath: join(directory, 'capability'),
       capabilityToken: 'd'.repeat(64),
@@ -47,7 +41,10 @@ describe('when testing subagent child runtime', () => {
         mcp: ['gitlab/get_merge_request'],
         extensions: [],
         skills: [],
-        bash: { mode: 'read-only', allow: [] },
+        bash: {
+          mode: 'allow-list',
+          allow: [{ executable: 'git', argsPrefix: ['status'] }],
+        },
       },
       outcomes: ['ready', 'blocked'],
       pauseOutcomes: ['blocked'],
@@ -132,7 +129,12 @@ describe('when testing subagent child runtime', () => {
     test('child runtime narrows tools, enforces Bash, and writes a correlated result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
-      const policy = childPolicy(directory, { repositoryCwd: directory });
+      const policy = childPolicy(directory, {
+        workspace: {
+          bindOn: ['ready'],
+          allowedRoots: ['../worktrees'],
+        },
+      });
       const rig = runtime(policy.agent);
 
       // when
@@ -188,11 +190,12 @@ describe('when testing subagent child runtime', () => {
           systemPrompt: 'Base child prompt',
         }) as { systemPrompt: string };
         expect(started.systemPrompt).toContain(
-          'finish with a pause outcome and describe the unresolved contract',
+          'Follow the supplied step instructions when choosing one valid outcome',
         );
         expect(started.systemPrompt).toContain(
-          'Keep every edit and write inside the reviewed repository root.',
+          'Workspace-binding outcomes: ready',
         );
+        expect(started.systemPrompt).not.toMatch(/reviewed repository|replan/i);
         await expect(readFile(policy.capabilityPath, 'utf8')).rejects.toThrow(
           /ENOENT/,
         );
@@ -285,6 +288,7 @@ describe('when testing subagent child runtime', () => {
           value: {
             outcome: 'ready',
             summary: 'Inspection complete',
+            workspace: { cwd: '/tmp/worktree' },
           },
         };
         expect(
@@ -305,6 +309,7 @@ describe('when testing subagent child runtime', () => {
           policyDigest: policy.policyDigest,
           outcome: 'ready',
           summary: 'Inspection complete',
+          workspace: { cwd: '/tmp/worktree' },
         });
         expect(
           toolCall({
@@ -315,6 +320,7 @@ describe('when testing subagent child runtime', () => {
               value: {
                 outcome: 'ready',
                 summary: 'Duplicate',
+                workspace: { cwd: '/tmp/worktree' },
               },
             },
           }),
@@ -407,11 +413,11 @@ describe('when testing subagent child runtime', () => {
           'Outcome "ready" requires the complete gate artifact.',
         );
         expect(started.systemPrompt).toMatch(/non-interactive workflow child/i);
-        expect(started.systemPrompt).toMatch(
-          /every unresolved decision in the gate artifact/i,
-        );
         expect(started.systemPrompt).toContain(
-          'choose a pause outcome (blocked)',
+          'outcome names have no built-in domain meaning',
+        );
+        expect(started.systemPrompt).not.toMatch(
+          /unresolved decision|decision-ready|choose a pause outcome/i,
         );
         expect(
           toolCall({
@@ -422,7 +428,7 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'workflow children are non-interactive; use structured_output with a pause outcome and describe the unresolved contract in summary',
+            'workflow children are non-interactive; follow the step prompt and use structured_output with one configured valid outcome',
         });
         expect(mixed.block).toBe(true);
         expect(mixed.reason).toMatch(/must be the only tool call/);
@@ -445,139 +451,7 @@ describe('when testing subagent child runtime', () => {
       }
     });
 
-    test('confines bootstrap file mutations to the reviewed repository root', async () => {
-      // given
-      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
-      const repositoryCwd = join(directory, 'reviewed-repository');
-      const outsideDirectory = join(directory, 'outside-repository');
-      const policy = childPolicy(directory, {
-        repositoryCwd,
-        bootstrapCwd: process.cwd(),
-        permissions: {
-          tools: ['edit', 'write'],
-          mcp: [],
-          extensions: [],
-          skills: [],
-          bash: { mode: 'deny', allow: [] },
-        },
-      });
-      const rig = runtime(policy.agent, [
-        'edit',
-        'write',
-        CHILD_COMPLETION_TOOL,
-      ]);
-
-      // when
-      try {
-        await writeFile(policy.capabilityPath, policy.capabilityToken);
-        const input = rig.handlers.get('input')?.[0];
-        const beforeAgentStart = rig.handlers.get('before_agent_start')?.[0];
-        const toolCall = rig.handlers.get('tool_call')?.[0];
-        expectTruthy(input);
-        expectTruthy(beforeAgentStart);
-        expectTruthy(toolCall);
-        input({ text: `${encodeChildPolicy(policy)}\n\nBootstrap worktree.` });
-        const started = beforeAgentStart({
-          systemPrompt: 'Base child prompt',
-        }) as { systemPrompt: string };
-        const missingPath = toolCall({
-          toolCallId: 'missing-path',
-          toolName: 'write',
-          input: {},
-        });
-        const relativePath = toolCall({
-          toolCallId: 'relative-path',
-          toolName: 'edit',
-          input: { path: 'src/outside.ts' },
-        });
-        const missingRoot = toolCall({
-          toolCallId: 'missing-root',
-          toolName: 'write',
-          input: { path: join(repositoryCwd, 'src', 'before-setup.ts') },
-        });
-        await mkdir(repositoryCwd);
-        await mkdir(outsideDirectory);
-        await symlink(
-          outsideDirectory,
-          join(repositoryCwd, 'outside-link'),
-          'dir',
-        );
-        await symlink(
-          join(outsideDirectory, 'missing-target'),
-          join(repositoryCwd, 'broken-link'),
-          'dir',
-        );
-        const parentPath = toolCall({
-          toolCallId: 'parent-path',
-          toolName: 'write',
-          input: { path: directory },
-        });
-        const symlinkPath = toolCall({
-          toolCallId: 'symlink-path',
-          toolName: 'write',
-          input: {
-            path: join(repositoryCwd, 'outside-link', 'escaped.ts'),
-          },
-        });
-        const brokenSymlinkPath = toolCall({
-          toolCallId: 'broken-symlink-path',
-          toolName: 'write',
-          input: {
-            path: join(repositoryCwd, 'broken-link', 'escaped.ts'),
-          },
-        });
-        const approvedInput = {
-          path: join(repositoryCwd, 'src', 'inside.ts'),
-          content: 'approved',
-        };
-        const approvedPath = toolCall({
-          toolCallId: 'approved-path',
-          toolName: 'write',
-          input: approvedInput,
-        });
-
-        // then
-        expect(started.systemPrompt).toContain(
-          `Reviewed repository root: ${repositoryCwd}`,
-        );
-        expect(started.systemPrompt).toContain(
-          `Bootstrap directory: ${process.cwd()}`,
-        );
-        expect(started.systemPrompt).toMatch(
-          /use absolute paths under the reviewed repository root/i,
-        );
-        expect(missingPath).toEqual({
-          block: true,
-          reason: 'write must name a path inside the reviewed repository root',
-        });
-        expect(relativePath).toEqual({
-          block: true,
-          reason: `edit path is outside the reviewed repository root "${repositoryCwd}"`,
-        });
-        expect(missingRoot).toEqual({
-          block: true,
-          reason: `reviewed repository root is not an existing directory: ${repositoryCwd}`,
-        });
-        expect(parentPath).toEqual({
-          block: true,
-          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
-        });
-        expect(symlinkPath).toEqual({
-          block: true,
-          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
-        });
-        expect(brokenSymlinkPath).toEqual({
-          block: true,
-          reason: `write path is outside the reviewed repository root "${repositoryCwd}"`,
-        });
-        expect(approvedPath).toBe(undefined);
-        expect(Object.isFrozen(approvedInput)).toBe(true);
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
-    });
-
-    test('does not invent a pause outcome when the workflow has none', async () => {
+    test('does not invent outcome semantics when the workflow has no pause target', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, {
@@ -599,10 +473,134 @@ describe('when testing subagent child runtime', () => {
         }) as { systemPrompt: string };
 
         // then
+        expect(started.systemPrompt).toContain('Valid outcomes: done');
         expect(started.systemPrompt).toContain(
-          'do not fabricate success or call the completion tool',
+          'outcome names have no built-in domain meaning',
         );
-        expect(started.systemPrompt).not.toContain('choose a pause outcome');
+        expect(started.systemPrompt).not.toMatch(/fabricate success|replan/i);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('treats retry and replan as opaque user-defined outcome names', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, {
+        outcomes: ['ready', 'retry', 'replan', 'blocked'],
+        pauseOutcomes: ['blocked'],
+      });
+      const rig = runtime(policy.agent);
+
+      // when
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const beforeAgentStart = rig.handlers.get('before_agent_start')?.[0];
+        expectTruthy(input);
+        expectTruthy(beforeAgentStart);
+        input({ text: `${encodeChildPolicy(policy)}\n\nImplement now.` });
+        const started = beforeAgentStart({
+          systemPrompt: 'Base child prompt',
+        }) as { systemPrompt: string };
+
+        // then
+        expect(started.systemPrompt).toContain(
+          'Valid outcomes: ready, retry, replan, blocked',
+        );
+        expect(started.systemPrompt).not.toMatch(
+          /missing, stale, or contradictory|contract remains valid/i,
+        );
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        expectTruthy(toolCall);
+        expect(
+          (
+            toolCall({
+              toolCallId: 'supervisor-replan',
+              toolName: 'contact_supervisor',
+              input: { reason: 'need_decision', message: 'Question?' },
+            }) as { reason: string }
+          ).reason,
+        ).toBe(
+          'workflow children are non-interactive; follow the step prompt and use structured_output with one configured valid outcome',
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('fails closed before enabling tools when the child cwd mismatches', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, { cwd: directory });
+      const rig = runtime(policy.agent);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        expectTruthy(input);
+        expectTruthy(toolCall);
+
+        // when
+        const transformed = input({
+          text: `${encodeChildPolicy(policy)}\n\nInspect.`,
+        }) as { action: string; text: string };
+        const blockedTool = toolCall({
+          toolCallId: 'cwd-mismatch',
+          toolName: 'read',
+          input: { path: 'README.md' },
+        });
+
+        // then
+        expect(transformed.action).toBe('transform');
+        expect(transformed.text).toMatch(
+          /working directory does not match the delegated workflow policy/,
+        );
+        expect(rig.activeTools).toEqual([[]]);
+        expect(blockedTool).toEqual({
+          block: true,
+          reason:
+            'child working directory does not match the delegated workflow policy',
+        });
+        expect(await readFile(policy.capabilityPath, 'utf8')).toBe(
+          policy.capabilityToken,
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('fails closed when the policy cwd no longer resolves to itself', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, { cwd: directory });
+      const dependencies: SubagentChildRuntimeDependencies = {
+        ...DEFAULT_CHILD_RUNTIME_DEPENDENCIES,
+        fileSystem: {
+          ...DEFAULT_CHILD_RUNTIME_DEPENDENCIES.fileSystem,
+          realPath: () => join(tmpdir(), 'redirected-workspace'),
+        },
+        currentWorkingDirectory: () => directory,
+      };
+      const rig = runtime(policy.agent, undefined, dependencies);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        expectTruthy(input);
+
+        const transformed = input({
+          text: `${encodeChildPolicy(policy)}\n\nInspect.`,
+        }) as { action: string; text: string };
+
+        expect(transformed.action).toBe('transform');
+        expect(transformed.text).toMatch(
+          /working directory does not match the delegated workflow policy/,
+        );
+        expect(rig.activeTools).toEqual([[]]);
+        expect(await readFile(policy.capabilityPath, 'utf8')).toBe(
+          policy.capabilityToken,
+        );
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
@@ -724,7 +722,7 @@ describe('when testing subagent child runtime', () => {
         temporaryRoot,
         'pi-workflows-step-injected-runtime',
       );
-      const policy = childPolicy(directory);
+      const policy = childPolicy(directory, { cwd: '/virtual-workspace' });
       const files = new Map([[policy.capabilityPath, policy.capabilityToken]]);
       const inspection = {
         isDirectory: () => true,

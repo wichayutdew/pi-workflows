@@ -54,7 +54,7 @@ flowchart TD
   Tools --> MCP{MCP selectors within ceiling?}
   MCP --> Extensions{extensions within ceiling?}
   Extensions --> Skills{skills within ceiling?}
-  Skills --> Bash{Bash mode, rules, and approved sources within ceiling?}
+  Skills --> Bash{Bash mode and rules within ceiling?}
   Bash --> Delegated{subagent configured?}
   Delegated -- no --> Accept[accept project step]
   Delegated -- yes --> SubCeiling{subagent ceiling present?}
@@ -79,19 +79,23 @@ is verified, the workflow policy is the sole active-tool allow-list inside the
 child; the selected profile still determines which extension providers were
 loaded and therefore available to activate.
 
+Project workflows cannot declare `workspace` binding. Workflows that create,
+choose, or bind a different execution directory must live in the user-owned
+workflow directory instead of `.pi/workflows`.
+
 `retryToolFailures` authorizes up to two fresh automatic recovery attempts in
-allow-list or unrestricted Bash mode. Denied and read-only Bash do not need the
-opt-in. In every mode, each candidate failure still needs a complete trusted
-child transcript, the original task and per-request binding, and an audit
-proving that every actual call was read-only or rejected before execution under
-the same approved exact-command inputs as child execution.
+allow-list or unrestricted Bash mode. Denied Bash does not need the opt-in. In
+every mode, each candidate failure still needs a complete trusted child
+transcript, the original task and per-request binding, and an audit proving that
+every actual call used a known-safe non-Bash tool or was rejected before
+execution.
 
 A step may expose `edit` or `write` and still use automatic recovery when those
 tools were not called. Their availability alone is not a veto; a recorded
-`edit`, `write`, mutation-capable Bash, or unknown-effect call makes that
-attempt unsafe. Recovery also stops when a fresh attempt repeats a previous
-semantic failure fingerprint. Project workflows may enable broader Bash
-recovery only when the user ceiling also sets
+`edit`, `write`, executed Bash, or unknown-effect call makes that attempt
+unsafe. Recovery also stops when a fresh attempt repeats a previous semantic
+failure fingerprint. Project workflows may enable Bash recovery only when the
+user ceiling also sets
 `subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules

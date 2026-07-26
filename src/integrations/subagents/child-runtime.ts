@@ -13,8 +13,8 @@ import {
 } from './child-runtime-completion.ts';
 import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from './child-runtime-dependencies.ts';
 import {
-  repositoryMutationError,
   verifyChildCapability,
+  verifyChildWorkingDirectory,
   writeChildResult,
 } from './child-runtime-files.ts';
 import { childPolicyStep, childSystemPrompt } from './child-runtime-policy.ts';
@@ -109,6 +109,7 @@ export const registerSubagentChildRuntime = (
           'child agent does not match the delegated workflow policy',
         );
       }
+      verifyChildWorkingDirectory(extracted.policy, dependencies);
       verifyChildCapability({
         policy: extracted.policy,
         childAgent,
@@ -221,7 +222,7 @@ export const registerSubagentChildRuntime = (
       return {
         block: true,
         reason:
-          'workflow children are non-interactive; use structured_output with a pause outcome and describe the unresolved contract in summary',
+          'workflow children are non-interactive; follow the step prompt and use structured_output with one configured valid outcome',
       };
     }
 
@@ -231,7 +232,6 @@ export const registerSubagentChildRuntime = (
       input,
       childPolicyStep(activePolicy),
       pi.getAllTools(),
-      activePolicy.approvedBashCommands ?? [],
     );
     if (!authorization.allowed) {
       return {
@@ -246,18 +246,6 @@ export const registerSubagentChildRuntime = (
       };
     }
 
-    const mutationError = repositoryMutationError({
-      toolName: event.toolName,
-      input,
-      policy: activePolicy,
-      dependencies,
-    });
-    if (mutationError) {
-      return {
-        block: true,
-        reason: mutationError,
-      };
-    }
     freezeToolInput(event.input);
   });
 };

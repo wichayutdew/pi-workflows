@@ -87,11 +87,6 @@ export function preflightStep(
       hasResource: (toolName) => toolNames.has(toolName),
       resourceKind: 'tool',
     }),
-    ...(step.permissions.mcp.length > 0 && !toolNames.has('mcp')
-      ? [
-          'MCP selectors are configured, but the "mcp" proxy tool is not installed',
-        ]
-      : []),
     ...(isPlannotatorRequired && !hasExtension('plannotator')
       ? [
           'Plannotator is required by this gate, but its extension is not installed or detectable',

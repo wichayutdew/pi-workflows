@@ -4,6 +4,10 @@ import {
   boundedFailureField,
   MAX_DELEGATION_RECOVERY_ATTEMPTS,
 } from './delegation-retry-policy.ts';
+import {
+  conciseStepFailureSummary,
+  reportFailedStep,
+} from './step-reporting.ts';
 import type { ActiveDelegation, DelegationFailureDetails } from './types.ts';
 
 type HarnessActionContext = Pick<
@@ -20,6 +24,7 @@ type HarnessActionContext = Pick<
   | 'mainSteps'
   | 'pauseForExecutionFailure'
   | 'persist'
+  | 'pi'
   | 'restoreBaselineTools'
   | 'run'
   | 'sessionEpoch'
@@ -45,11 +50,13 @@ export type DelegationControlActions = {
   pauseForDelegationFailure: (
     this: HarnessActionContext,
     reason: string,
+    failureSummary?: string,
   ) => void;
   pauseForExecutionFailure: (
     this: HarnessActionContext,
     label: string,
     reason: string,
+    failureSummary?: string,
   ) => void;
   retainUnconfirmedDelegation: (
     this: HarnessActionContext,
@@ -162,14 +169,16 @@ function retryDelegationAfterFailure(
 function pauseForDelegationFailure(
   this: HarnessActionContext,
   reason: string,
+  failureSummary = reason,
 ): void {
-  this.pauseForExecutionFailure('Subagent step', reason);
+  this.pauseForExecutionFailure('Subagent step', reason, failureSummary);
 }
 
 function pauseForExecutionFailure(
   this: HarnessActionContext,
   label: string,
   reason: string,
+  failureSummary = reason,
 ): void {
   if (!this.run || this.run.status !== 'running') return;
   this.mainSteps.deactivate();
@@ -179,6 +188,12 @@ function pauseForExecutionFailure(
     this.dependencies.now(),
   );
   this.persist();
+  reportFailedStep(
+    this.pi,
+    this.catalog.workflows.get(this.run.workflowId),
+    this.run,
+    failureSummary,
+  );
   if (this.activeDelegation) {
     this.isolateMainSessionTools();
   } else {
@@ -186,7 +201,7 @@ function pauseForExecutionFailure(
   }
   this.updateStatus();
   this.latestContext?.ui.notify(
-    `Workflow paused at "${this.run.currentStepId}": ${reason}`,
+    `Workflow paused at "${this.run.currentStepId}": ${conciseStepFailureSummary(failureSummary)}`,
     'error',
   );
 }
@@ -198,6 +213,7 @@ function retainUnconfirmedDelegation(
 ): void {
   active.cancelling = true;
   active.progress = 'cancellation unconfirmed';
+  let didFail = false;
   if (this.run?.status === 'running') {
     this.run = failRun(
       this.run,
@@ -205,6 +221,15 @@ function retainUnconfirmedDelegation(
       this.dependencies.now(),
     );
     this.persist();
+    didFail = true;
+  }
+  if (didFail && this.run) {
+    reportFailedStep(
+      this.pi,
+      this.catalog.workflows.get(this.run.workflowId),
+      this.run,
+      reason,
+    );
   }
   this.isolateMainSessionTools();
   this.updateStatus();

@@ -1,10 +1,19 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import { RpcClient, type SessionEntry } from '@earendil-works/pi-coding-agent';
 import {
+  E2E_BOOTSTRAP_HANDOFF,
+  E2E_BOOTSTRAP_MARKER,
   E2E_FINAL_SUMMARY,
   E2E_IMPLEMENT_HANDOFF,
   E2E_IMPLEMENT_MARKER,
@@ -13,6 +22,7 @@ import {
   E2E_PLAN_HANDOFF,
   E2E_PLAN_MARKER,
   E2E_PROVIDER_ID,
+  E2E_RETRY_HANDOFF,
   E2E_VERIFY_MARKER,
 } from '../fixtures/e2e-values.ts';
 
@@ -25,6 +35,8 @@ interface WorkflowHistoryEntry {
   stepDigest: string;
   outcome: string;
   summary: string;
+  workspaceCwd?: string;
+  attempts?: unknown[];
   completedAt: number;
 }
 
@@ -33,21 +45,29 @@ interface WorkflowCheckpoint {
   currentStepId: string;
   history: WorkflowHistoryEntry[];
   lastSummary: string;
+  startCwd?: string;
+  cwd?: string;
   pauseReason?: string;
 }
 
 interface Observation {
-  step: 'plan' | 'implement' | 'verify' | 'unknown';
+  step: 'bootstrap' | 'plan' | 'implement' | 'verify' | 'unknown';
+  visit: number;
   runtimeAgent: string;
+  runtimeCwd: string;
   promptLength: number;
   userMessageCount: number;
+  hasBootstrapMarker: boolean;
   hasPlanMarker: boolean;
   hasImplementMarker: boolean;
   hasVerifyMarker: boolean;
+  hasBootstrapHandoff: boolean;
   hasPlanHandoff: boolean;
+  hasRetryHandoff: boolean;
   hasImplementHandoff: boolean;
   hasWorkflowInput: boolean;
   hasExpectedProfile: boolean;
+  hasReplanOutcome: boolean;
   violations: string[];
 }
 
@@ -130,7 +150,7 @@ function parseObservations(text: string): Observation[] {
 
 describe('when running a workflow through real Pi subprocesses', () => {
   test(
-    'preserves correlated completion and passes only compact context between specialized children',
+    'binds one workspace and reuses it across a bounded revisit',
     async () => {
       const repositoryRoot = resolve(
         dirname(fileURLToPath(import.meta.url)),
@@ -140,6 +160,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
       const agentDirectory = join(root, 'agent');
       const workflowDirectory = join(agentDirectory, 'workflows');
       const sessionDirectory = join(root, 'sessions');
+      const launcherDirectory = join(root, 'launcher');
       const workspaceDirectory = join(root, 'workspace');
       const tracePath = join(root, 'child-observations.jsonl');
       const workflowPath = join(workflowDirectory, 'runtime-e2e.workflow.yaml');
@@ -175,9 +196,24 @@ describe('when running a workflow through real Pi subprocesses', () => {
         id: 'runtime-e2e',
         command: 'work',
         description: 'Hermetic real-Pi workflow runtime test',
-        start: 'plan',
+        start: 'bootstrap',
+        maxStepVisits: 3,
         summaryMaxChars: 4_000,
         steps: {
+          bootstrap: {
+            title: 'Bootstrap',
+            prompt: E2E_BOOTSTRAP_MARKER,
+            subagent: 'worker',
+            workspace: {
+              bindOn: ['ready'],
+              allowedRoots: ['..'],
+            },
+            transitions: {
+              ready: 'plan',
+              retry: 'bootstrap',
+              blocked: '$pause',
+            },
+          },
           plan: {
             title: 'Plan',
             prompt: planPrompt,
@@ -192,6 +228,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
             prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
             subagent: 'worker',
             transitions: {
+              retry: 'implement',
               implemented: 'verify',
               blocked: '$pause',
             },
@@ -226,7 +263,10 @@ describe('when running a workflow through real Pi subprocesses', () => {
       try {
         await mkdir(workflowDirectory, { recursive: true });
         await mkdir(sessionDirectory, { recursive: true });
+        await mkdir(launcherDirectory, { recursive: true });
         await mkdir(workspaceDirectory, { recursive: true });
+        const expectedLauncherDirectory = await realpath(launcherDirectory);
+        const expectedWorkspaceDirectory = await realpath(workspaceDirectory);
         await writeFile(
           join(agentDirectory, 'settings.json'),
           JSON.stringify(settings),
@@ -242,7 +282,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
 
         client = new RpcClient({
           cliPath,
-          cwd: workspaceDirectory,
+          cwd: launcherDirectory,
           env: {
             PI_CODING_AGENT_DIR: agentDirectory,
             PI_CODING_AGENT_SESSION_DIR: sessionDirectory,
@@ -256,12 +296,14 @@ describe('when running a workflow through real Pi subprocesses', () => {
             PI_SUBAGENT_EXTRA_AGENT_DIRS: join(repositoryRoot, 'agents'),
             PI_WORKFLOWS_DIR: workflowDirectory,
             PI_WORKFLOWS_E2E_TRACE_PATH: tracePath,
+            PI_WORKFLOWS_E2E_WORKSPACE_CWD: expectedWorkspaceDirectory,
           },
           provider: E2E_PROVIDER_ID,
           model: E2E_MODEL_ID,
           args: ['--offline', '--no-approve'],
         });
         await client.start();
+        await waitForCommand(client, 'workflow-doctor');
         await waitForCommand(client, 'work');
         await client.prompt(
           `/work\n${E2E_INPUT_MARKER}: implement the deterministic subprocess smoke request.`,
@@ -280,11 +322,29 @@ describe('when running a workflow through real Pi subprocesses', () => {
         }
         expect(checkpoint.history).toEqual([
           {
+            stepId: 'bootstrap',
+            outcome: 'ready',
+            summary: E2E_BOOTSTRAP_HANDOFF,
+            workspaceCwd: expectedWorkspaceDirectory,
+            stepDigest: expect.any(String),
+            completedAt: expect.any(Number),
+            attempts: expect.any(Array),
+          },
+          {
             stepId: 'plan',
             outcome: 'planned',
             summary: E2E_PLAN_HANDOFF,
             stepDigest: expect.any(String),
             completedAt: expect.any(Number),
+            attempts: expect.any(Array),
+          },
+          {
+            stepId: 'implement',
+            outcome: 'retry',
+            summary: E2E_RETRY_HANDOFF,
+            stepDigest: expect.any(String),
+            completedAt: expect.any(Number),
+            attempts: expect.any(Array),
           },
           {
             stepId: 'implement',
@@ -292,6 +352,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
             summary: E2E_IMPLEMENT_HANDOFF,
             stepDigest: expect.any(String),
             completedAt: expect.any(Number),
+            attempts: expect.any(Array),
           },
           {
             stepId: 'verify',
@@ -299,60 +360,123 @@ describe('when running a workflow through real Pi subprocesses', () => {
             summary: E2E_FINAL_SUMMARY,
             stepDigest: expect.any(String),
             completedAt: expect.any(Number),
+            attempts: expect.any(Array),
           },
         ]);
         expect(checkpoint.lastSummary).toBe(E2E_FINAL_SUMMARY);
+        expect(checkpoint.startCwd).toBe(expectedLauncherDirectory);
+        expect(checkpoint.cwd).toBe(expectedWorkspaceDirectory);
 
         const observations = parseObservations(
           await readFile(tracePath, 'utf8'),
         );
         expect(observations).toEqual([
           {
-            step: 'plan',
-            runtimeAgent: 'scout',
+            step: 'bootstrap',
+            visit: 1,
+            runtimeAgent: 'worker',
+            runtimeCwd: expectedLauncherDirectory,
             promptLength: expect.any(Number),
             userMessageCount: 1,
+            hasBootstrapMarker: true,
+            hasPlanMarker: false,
+            hasImplementMarker: false,
+            hasVerifyMarker: false,
+            hasBootstrapHandoff: false,
+            hasPlanHandoff: false,
+            hasRetryHandoff: false,
+            hasImplementHandoff: false,
+            hasWorkflowInput: false,
+            hasExpectedProfile: true,
+            hasReplanOutcome: false,
+            violations: [],
+          },
+          {
+            step: 'plan',
+            visit: 1,
+            runtimeAgent: 'scout',
+            runtimeCwd: expectedWorkspaceDirectory,
+            promptLength: expect.any(Number),
+            userMessageCount: 1,
+            hasBootstrapMarker: false,
             hasPlanMarker: true,
             hasImplementMarker: false,
             hasVerifyMarker: false,
+            hasBootstrapHandoff: true,
             hasPlanHandoff: false,
+            hasRetryHandoff: false,
             hasImplementHandoff: false,
             hasWorkflowInput: true,
             hasExpectedProfile: true,
+            hasReplanOutcome: false,
             violations: [],
           },
           {
             step: 'implement',
+            visit: 1,
             runtimeAgent: 'worker',
+            runtimeCwd: expectedWorkspaceDirectory,
             promptLength: expect.any(Number),
             userMessageCount: 1,
+            hasBootstrapMarker: false,
             hasPlanMarker: false,
             hasImplementMarker: true,
             hasVerifyMarker: false,
+            hasBootstrapHandoff: false,
             hasPlanHandoff: true,
+            hasRetryHandoff: false,
             hasImplementHandoff: false,
             hasWorkflowInput: false,
             hasExpectedProfile: true,
+            hasReplanOutcome: false,
+            violations: [],
+          },
+          {
+            step: 'implement',
+            visit: 2,
+            runtimeAgent: 'worker',
+            runtimeCwd: expectedWorkspaceDirectory,
+            promptLength: expect.any(Number),
+            userMessageCount: 1,
+            hasBootstrapMarker: false,
+            hasPlanMarker: false,
+            hasImplementMarker: true,
+            hasVerifyMarker: false,
+            hasBootstrapHandoff: false,
+            hasPlanHandoff: false,
+            hasRetryHandoff: true,
+            hasImplementHandoff: false,
+            hasWorkflowInput: false,
+            hasExpectedProfile: true,
+            hasReplanOutcome: false,
             violations: [],
           },
           {
             step: 'verify',
+            visit: 1,
             runtimeAgent: 'reviewer',
+            runtimeCwd: expectedWorkspaceDirectory,
             promptLength: expect.any(Number),
             userMessageCount: 1,
+            hasBootstrapMarker: false,
             hasPlanMarker: false,
             hasImplementMarker: false,
             hasVerifyMarker: true,
+            hasBootstrapHandoff: false,
             hasPlanHandoff: false,
+            hasRetryHandoff: false,
             hasImplementHandoff: true,
             hasWorkflowInput: false,
             hasExpectedProfile: true,
+            hasReplanOutcome: false,
             violations: [],
           },
         ]);
-        expect(observations[0]?.promptLength).toBeGreaterThan(8_000);
-        expect(observations[1]?.promptLength).toBeLessThan(8_000);
+        expect(observations[1]?.promptLength).toBeGreaterThan(8_000);
+        expect(observations[0]?.promptLength).toBeLessThan(8_000);
         expect(observations[2]?.promptLength).toBeLessThan(8_000);
+        expect(observations[3]?.promptLength).toBeLessThan(8_000);
+        expect(observations[4]?.promptLength).toBeLessThan(8_000);
       } finally {
         await client?.stop();
         await rm(root, { recursive: true, force: true });

@@ -35,6 +35,7 @@ type RequestResponseOptions<TResponse> = {
   readonly timeoutMs: number;
   readonly timeoutResponse: TResponse;
   readonly normalize: (response: unknown) => TResponse;
+  readonly ignoreResponse?: (response: unknown) => boolean;
   readonly dependencies: PlannotatorDependencies;
 };
 
@@ -44,12 +45,13 @@ const requestResponse = <TResponse>({
   timeoutMs,
   timeoutResponse,
   normalize,
+  ignoreResponse,
   dependencies,
 }: RequestResponseOptions<TResponse>): Promise<TResponse> =>
   new Promise((resolve) => {
     let isSettled = false;
     const finish = (response: unknown): void => {
-      if (isSettled) return;
+      if (isSettled || ignoreResponse?.(response)) return;
       isSettled = true;
       dependencies.cancelTimeout(timer);
       resolve(normalize(response));
@@ -64,6 +66,39 @@ const requestResponse = <TResponse>({
       respond: finish,
     });
   });
+
+const MISSING_PLAN_CONTENT_RESPONSE =
+  'Missing planContent for plan-review request.';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isUnclaimedPlanReviewResponse = (response: unknown): boolean =>
+  isRecord(response) &&
+  response.status === 'error' &&
+  response.error === MISSING_PLAN_CONTENT_RESPONSE;
+
+/**
+ * Pi keeps its shared event bus across extension reloads. Plannotator versions
+ * that do not dispose their request listener can therefore receive one request
+ * multiple times and open one browser pane per stale listener. A consumable
+ * plan value lets exactly one listener claim the side-effecting request.
+ */
+const singleConsumerPlanPayload = (
+  planContent: string,
+  origin: string,
+): Readonly<Record<string, unknown>> => {
+  let claimed = false;
+
+  return {
+    get planContent(): string | undefined {
+      if (claimed) return undefined;
+      claimed = true;
+      return planContent;
+    },
+    origin,
+  };
+};
 
 /**
  * Requests a new Plannotator plan review through the injected event bus.
@@ -83,10 +118,7 @@ export const requestPlannotatorReview = (
     request: {
       requestId,
       action: 'plan-review',
-      payload: {
-        planContent: content,
-        origin,
-      },
+      payload: singleConsumerPlanPayload(content, origin),
     },
     timeoutMs,
     timeoutResponse: {
@@ -94,6 +126,9 @@ export const requestPlannotatorReview = (
       error: `Plannotator did not respond within ${timeoutMs}ms`,
     },
     normalize: normalizePlannotatorStartResponse,
+    ...(content.trim()
+      ? { ignoreResponse: isUnclaimedPlanReviewResponse }
+      : {}),
     dependencies,
   });
 

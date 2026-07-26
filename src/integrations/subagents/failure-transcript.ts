@@ -12,7 +12,54 @@ import type {
   RecordedToolCall,
   RecordedToolFailure,
   RecordedToolSuccess,
+  RecordedTranscriptWarning,
 } from './diagnostic-types.ts';
+
+const WATCHDOG_WARNING_TYPE = 'subagent_watchdog_warning';
+const MAX_WARNING_FIELD_CHARS = 600;
+
+const boundedWarningField = (value: string): string => {
+  const normalized = value.trim().replaceAll(/\s+/g, ' ');
+  return normalized.length <= MAX_WARNING_FIELD_CHARS
+    ? normalized
+    : `${normalized.slice(0, MAX_WARNING_FIELD_CHARS - 1)}…`;
+};
+
+const transcriptWarningContent = (
+  entry: Readonly<Record<string, unknown>>,
+): string | undefined => {
+  if (
+    entry.type !== 'custom_message' ||
+    entry.customType !== WATCHDOG_WARNING_TYPE
+  ) {
+    return undefined;
+  }
+  const details = entry.details;
+  if (isDiagnosticRecord(details)) {
+    const fields = [
+      typeof details.summary === 'string' ? details.summary : undefined,
+      typeof details.evidence === 'string' ? details.evidence : undefined,
+      typeof details.recommendedAction === 'string'
+        ? `Recommended action: ${details.recommendedAction}`
+        : undefined,
+    ].filter((field): field is string => Boolean(field?.trim()));
+    if (fields.length > 0) return boundedWarningField(fields.join(' '));
+  }
+  return typeof entry.content === 'string' && entry.content.trim()
+    ? boundedWarningField(entry.content)
+    : 'The child emitted an unresolved watchdog warning after completion.';
+};
+
+const isBenignTerminalAssistant = (
+  message: Readonly<Record<string, unknown>>,
+): boolean =>
+  message.stopReason === 'stop' &&
+  message.errorMessage === undefined &&
+  Array.isArray(message.content) &&
+  message.content.length === 1 &&
+  isDiagnosticRecord(message.content[0]) &&
+  message.content[0].type === 'text' &&
+  message.content[0].text === '';
 
 /**
  * Parses the tool calls, results, completions, and structural evidence needed
@@ -26,6 +73,7 @@ export const parseFailureTranscript = (
   const diagnostics: Array<RecordedToolFailure> = [];
   const successfulResults: Array<RecordedToolSuccess> = [];
   const successfulCompletions: Array<RecordedCompletion> = [];
+  const transcriptWarnings: Array<RecordedTranscriptWarning> = [];
   const recordedMessages: Array<RecordedMessage> = [];
   const resultCallIds = new Set<string>();
   let hasValidFalsePositiveProof = true;
@@ -42,6 +90,14 @@ export const parseFailureTranscript = (
     } catch {
       hasValidFalsePositiveProof = false;
       continue;
+    }
+    if (isDiagnosticRecord(entry)) {
+      const warning = transcriptWarningContent(entry);
+      if (warning) {
+        transcriptWarnings.push({ order, content: warning });
+        lastInteractionOrder = order;
+        continue;
+      }
     }
     if (!isDiagnosticRecord(entry) || entry.type !== 'message') continue;
     const message = entry.message;
@@ -65,7 +121,9 @@ export const parseFailureTranscript = (
         hasValidFalsePositiveProof = false;
         continue;
       }
-      lastInteractionOrder = order;
+      if (!isBenignTerminalAssistant(message)) {
+        lastInteractionOrder = order;
+      }
       const toolCalls = message.content.filter(
         (item): item is Record<string, unknown> =>
           isDiagnosticRecord(item) &&
@@ -184,6 +242,7 @@ export const parseFailureTranscript = (
     diagnostics,
     successfulResults,
     successfulCompletions,
+    transcriptWarnings,
     recordedMessages,
     resultCallIds,
     hasValidFalsePositiveProof,
