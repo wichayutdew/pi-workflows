@@ -9,6 +9,23 @@ tools, prompts, approvals, and outcomes in YAML; it provides bounded execution,
 durable checkpoints, isolated subagent work, and a live status view without
 dictating your language, framework, or delivery process.
 
+## See it in action
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/wichayutdew/pi-workflows/main/assets/video.mp4">
+    <img src="https://raw.githubusercontent.com/wichayutdew/pi-workflows/main/assets/demo.gif" alt="Animated terminal demonstration of a Pi workflow" width="960">
+  </a>
+</p>
+
+<p align="center"><em>Animated preview — select it to download the full 73-second MP4.</em></p>
+
+## At a glance
+
+| Summary and status                                                                                                                                     | Workflow details                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="https://raw.githubusercontent.com/wichayutdew/pi-workflows/main/assets/Summary.png" alt="Pi Workflows summary and status view" width="100%"> | <img src="https://raw.githubusercontent.com/wichayutdew/pi-workflows/main/assets/Details.png" alt="Pi Workflows detailed workflow view" width="100%"> |
+| See progress, approvals, and outcome at a glance.                                                                                                      | Inspect each workflow step and its execution details.                                                                                                 |
+
 ## Why Pi Workflows
 
 - Turn multi-step agent work into clear, reviewable workflow definitions.
