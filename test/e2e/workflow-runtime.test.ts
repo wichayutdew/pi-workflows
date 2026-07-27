@@ -157,6 +157,21 @@ async function waitForTerminalCheckpoint(
 }
 
 async function startWorkflow(client: RpcClient, prompt: string): Promise<void> {
+  const notifications: string[] = [];
+  const unsubscribe = client.onEvent((event) => {
+    const uiEvent = event as unknown as {
+      readonly type?: unknown;
+      readonly method?: unknown;
+      readonly message?: unknown;
+    };
+    if (
+      uiEvent.type === 'extension_ui_request' &&
+      uiEvent.method === 'notify' &&
+      typeof uiEvent.message === 'string'
+    ) {
+      notifications.push(uiEvent.message);
+    }
+  });
   const waitForCheckpoint = async (): Promise<boolean> => {
     const deadline = Date.now() + START_TIMEOUT_MS;
     do {
@@ -166,19 +181,23 @@ async function startWorkflow(client: RpcClient, prompt: string): Promise<void> {
     return false;
   };
 
-  await client.prompt(prompt);
-  if (await waitForCheckpoint()) return;
+  try {
+    await client.prompt(prompt);
+    if (await waitForCheckpoint()) return;
 
-  // Pi registers extension commands before its async session_start hooks
-  // finish. A slow runner can therefore accept the first prompt while this
-  // extension is still initializing. Retrying is safe: the workflow mutation
-  // queue rejects the duplicate once the first request has started a run.
-  await client.prompt(prompt);
-  if (await waitForCheckpoint()) return;
+    // Pi registers extension commands before its async session_start hooks
+    // finish. A slow runner can therefore accept the first prompt while this
+    // extension is still initializing. Retrying is safe: the workflow mutation
+    // queue rejects the duplicate once the first request has started a run.
+    await client.prompt(prompt);
+    if (await waitForCheckpoint()) return;
 
-  throw new Error(
-    `Workflow did not create an initial checkpoint after retry. Pi stderr:\n${client.getStderr()}`,
-  );
+    throw new Error(
+      `Workflow did not create an initial checkpoint after retry. Extension notifications:\n${notifications.slice(-10).join('\n') || '(none)'}\nPi stderr:\n${client.getStderr()}`,
+    );
+  } finally {
+    unsubscribe();
+  }
 }
 
 function parseObservations(text: string): Observation[] {
@@ -334,6 +353,8 @@ describe('when running a workflow through real Pi subprocesses', () => {
             // only for delegated child processes.
             PI_SUBAGENT_CHILD: '',
             PI_SUBAGENT_CHILD_AGENT: '',
+            // Do not depend on a globally installed `pi` executable in CI.
+            PI_SUBAGENT_PI_BINARY: cliPath,
             PI_SUBAGENT_EXTRA_AGENT_DIRS: join(repositoryRoot, 'agents'),
             PI_WORKFLOWS_DIR: workflowDirectory,
             PI_WORKFLOWS_E2E_TRACE_PATH: tracePath,
@@ -652,6 +673,8 @@ describe('when running a workflow through real Pi subprocesses', () => {
             PI_SKIP_VERSION_CHECK: '1',
             PI_SUBAGENT_CHILD: '',
             PI_SUBAGENT_CHILD_AGENT: '',
+            // Do not depend on a globally installed `pi` executable in CI.
+            PI_SUBAGENT_PI_BINARY: cliPath,
             PI_SUBAGENT_EXTRA_AGENT_DIRS: join(repositoryRoot, 'agents'),
             PI_WORKFLOWS_DIR: workflowDirectory,
             PI_WORKFLOWS_GATE_E2E_PROVIDER_TRACE: providerTracePath,
