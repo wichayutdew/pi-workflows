@@ -133,19 +133,21 @@ flowchart LR
 
 Supported variables:
 
-| Variable                | Source                                                                                                                     |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `{{workflow.input}}`    | Command input.                                                                                                             |
-| `{{workflow.id}}`       | Workflow definition.                                                                                                       |
-| `{{run.id}}`            | Runtime run.                                                                                                               |
-| `{{step.id}}`           | Current step.                                                                                                              |
-| `{{step.title}}`        | Current step.                                                                                                              |
-| `{{last.summary}}`      | Previous completed handoff; during a pause or same-step revision, combines it with the current-step summary.               |
-| `{{gate.artifact}}`     | Opaque artifact returned by the latest rejected or failed gate.                                                            |
-| `{{gate.feedback}}`     | Latest rejected gate.                                                                                                      |
-| `{{reviewed.artifact}}` | Immutable artifact from the approved gate.                                                                                 |
-| `{{reviewed.feedback}}` | Feedback paired with that approval.                                                                                        |
-| `{{resume.input}}`      | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
+| Variable                 | Source                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `{{workflow.input}}`     | Command input.                                                                                                             |
+| `{{workflow.id}}`        | Workflow definition.                                                                                                       |
+| `{{workflow.iteration}}` | One-based iteration; increments when a completed workflow is restarted.                                                    |
+| `{{run.id}}`             | Runtime run.                                                                                                               |
+| `{{step.id}}`            | Current step.                                                                                                              |
+| `{{step.title}}`         | Current step.                                                                                                              |
+| `{{last.summary}}`       | Previous completed handoff; during a pause or same-step revision, combines it with the current-step summary.               |
+| `{{gate.artifact}}`      | Opaque artifact returned by the latest rejected or failed gate.                                                            |
+| `{{gate.feedback}}`      | Latest rejected gate.                                                                                                      |
+| `{{reviewed.artifact}}`  | Immutable artifact from the approved gate.                                                                                 |
+| `{{reviewed.feedback}}`  | Feedback paired with that approval.                                                                                        |
+| `{{resume.input}}`       | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
+| `{{restart.workspace}}`  | Exact prior workspace that a restarted iteration must rebind; empty for a first iteration.                                 |
 
 ## Prompt File Safety
 
@@ -267,6 +269,13 @@ command syntax. Summaries and gate artifacts cannot select a workspace. A
 workflow may define a separate bounded transition back to its binding step for
 domain-specific refresh work, such as the starter kit's guarded clean-branch
 rebase; that policy remains user-authored prompt data.
+
+After a completed run, `/workflow-restart [input]` starts a new iteration with
+the same stable run identity and source directory. If the completed iteration
+bound a workspace, the new binding outcome must reaffirm that exact canonical
+path; a different or missing replacement is rejected. The previous iteration's
+checkpoint remains in the append-only Pi session history, while the active
+restart begins with fresh visits, gate state, and step history.
 
 ```mermaid
 flowchart TD

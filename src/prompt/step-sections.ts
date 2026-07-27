@@ -58,6 +58,20 @@ export function buildDelegatedHandoffSection(
   ];
 }
 
+/** Builds the immutable same-worktree constraint for a restarted iteration. */
+export function buildRestartWorkspaceSection(
+  workspaceCwd: string | undefined,
+): ReadonlyArray<string> {
+  if (!workspaceCwd) return [];
+  return [
+    '## Restart workspace constraint',
+    '',
+    `This iteration must reuse and rebind exactly this existing workspace: ${workspaceCwd}`,
+    'Do not create or substitute another workspace. If it cannot be safely reused, complete with a configured non-binding outcome that pauses the workflow.',
+    '',
+  ];
+}
+
 /**
  * Builds non-interactive recovery guidance specific to delegated steps.
  *

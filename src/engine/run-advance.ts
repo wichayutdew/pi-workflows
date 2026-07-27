@@ -88,6 +88,15 @@ export const advanceRun = (
         : `outcome "${outcome}" cannot bind a workspace`,
     );
   }
+  if (
+    shouldBindWorkspace &&
+    run.restartWorkspaceCwd !== undefined &&
+    effects.workspaceCwd !== run.restartWorkspaceCwd
+  ) {
+    throw new Error(
+      `restarted workflow must rebind workspace "${run.restartWorkspaceCwd}"`,
+    );
+  }
   if (target === '$pause') {
     return withRunUpdate(
       run,
@@ -105,6 +114,11 @@ export const advanceRun = (
   const completed = completedStep(run, outcome, summary, now, effects);
   const cwd = effects.workspaceCwd ?? run.cwd;
   if (target === '$done') {
+    if (run.restartWorkspaceCwd !== undefined) {
+      throw new Error(
+        `restarted workflow completed before rebinding workspace "${run.restartWorkspaceCwd}"`,
+      );
+    }
     return withRunUpdate(
       run,
       {
@@ -113,6 +127,7 @@ export const advanceRun = (
         currentStepAttempts: undefined,
         currentStepOmittedAttempts: undefined,
         ...(cwd ? { cwd } : {}),
+        ...(effects.workspaceCwd ? { restartWorkspaceCwd: undefined } : {}),
         stepHandoff: summary,
         lastSummary: summary,
         gateArtifact: '',
@@ -161,6 +176,7 @@ export const advanceRun = (
       currentStepAttempts: undefined,
       currentStepOmittedAttempts: undefined,
       ...(cwd ? { cwd } : {}),
+      ...(effects.workspaceCwd ? { restartWorkspaceCwd: undefined } : {}),
       stepHandoff: preservesGateRevisionContext ? run.stepHandoff : summary,
       lastSummary: summary,
       gateArtifact: preservesGateRevisionContext ? run.gateArtifact : '',

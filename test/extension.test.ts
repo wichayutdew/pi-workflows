@@ -50,6 +50,7 @@ describe('when testing extension', () => {
         expect(commands.has('workflow-start')).toBe(true);
         expect(commands.has('workflow-pause')).toBe(true);
         expect(commands.has('workflow-resume')).toBe(true);
+        expect(commands.has('workflow-restart')).toBe(true);
         expect(commands.has('workflow-status')).toBe(false);
         expect(shortcuts.has('ctrl+alt+w')).toBe(true);
         expect(events.has('before_agent_start')).toBe(true);

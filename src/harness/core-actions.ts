@@ -190,6 +190,8 @@ function enqueueMutation(
 function persist(this: HarnessActionContext): void {
   if (this.run) {
     this.pi.appendEntry(STATE_ENTRY_TYPE, structuredClone(this.run));
+    const session = this.latestContext?.sessionManager;
+    if (session) this.dependencies.flushUnwrittenSession(session);
   }
 }
 

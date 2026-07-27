@@ -107,9 +107,22 @@ function registerLifecycle(this: HarnessActionContext): void {
     this.isSessionActive = true;
   });
 
-  this.pi.on('session_shutdown', async () => {
+  this.pi.on('session_shutdown', async (_event, context) => {
     this.sessionEpoch += 1;
     this.isSessionActive = false;
+    if (this.run) {
+      this.latestContext = context;
+      try {
+        this.persist();
+      } catch (error) {
+        context.ui.notify(
+          `Workflow checkpoint could not be saved before shutdown: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          'error',
+        );
+      }
+    }
     this.cancelPromptReview();
     this.mainSteps.deactivate();
     await this.cancelActiveDelegation('Pi session shut down');

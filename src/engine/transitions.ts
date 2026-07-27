@@ -11,6 +11,7 @@ export {
   allowedOutcomes,
   failRun,
   pauseRun,
+  restartRun,
   resumeRun,
   setResumeInput,
 } from './run-lifecycle.ts';

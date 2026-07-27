@@ -7,7 +7,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import type {
   ExtensionAPI,
@@ -223,6 +223,8 @@ describe('when testing harness subagent', () => {
       getSystemPromptOptions: () => ({ skills: [] }),
       sessionManager: {
         getBranch: () => sessionBranch,
+        getEntries: () => sessionBranch,
+        getHeader: () => undefined,
         getSessionFile: () => join(cwd, 'sessions.jsonl'),
       },
     } as unknown as ExtensionCommandContext;
@@ -363,6 +365,39 @@ describe('when testing harness subagent', () => {
               done: '$done',
               blocked: '$pause',
             },
+          },
+        },
+      }),
+    );
+  }
+
+  async function writeRestartableWorkspaceWorkflow(
+    directory: string,
+  ): Promise<void> {
+    await writeFile(
+      join(directory, 'restartable-workspace.workflow.yaml'),
+      JSON.stringify({
+        version: 1,
+        id: 'restartable-workspace',
+        command: 'restartable-workspace',
+        description: 'Prepare one reusable workspace and implement work',
+        start: 'prepare',
+        steps: {
+          prepare: {
+            prompt:
+              'Prepare {{workflow.input}} in {{restart.workspace}} when supplied.',
+            subagent: { agent: 'worker' },
+            workspace: { bindOn: ['ready'], allowedRoots: ['..'] },
+            permissions: { tools: ['read'] },
+            requires: { tools: ['read'] },
+            transitions: { ready: 'implement', blocked: '$pause' },
+          },
+          implement: {
+            prompt: 'Implement {{workflow.input}}.',
+            subagent: { agent: 'worker' },
+            permissions: { tools: ['read'] },
+            requires: { tools: ['read'] },
+            transitions: { done: '$done', blocked: '$pause' },
           },
         },
       }),
@@ -872,7 +907,13 @@ describe('when testing harness subagent', () => {
       try {
         await writeMainWorkflow(directory);
         const fixture = createHarnessFixture(directory);
-        const harness = await initialize(fixture);
+        let unwrittenSessionsFlushed = 0;
+        const harness = await initialize(fixture, undefined, {
+          flushUnwrittenSession: () => {
+            unwrittenSessionsFlushed += 1;
+            return true;
+          },
+        });
         const start = fixture.commands.get('main-workflow');
         const abort = fixture.commands.get('workflow-abort');
         const reload = fixture.commands.get('workflow-reload');
@@ -900,6 +941,7 @@ describe('when testing harness subagent', () => {
         await emitLifecycle(fixture, 'session_tree', {
           type: 'session_tree',
         });
+        await start('persist before shutdown', fixture.context);
         await emitLifecycle(fixture, 'session_shutdown', {
           type: 'session_shutdown',
         });
@@ -948,6 +990,7 @@ describe('when testing harness subagent', () => {
             message.includes('has not confirmed cancellation'),
           ),
         ).toBe(true);
+        expect(unwrittenSessionsFlushed).toBeGreaterThan(1);
         expect(harness).toBeTruthy();
       } finally {
         if (previousDirectory === undefined)
@@ -4259,6 +4302,101 @@ describe('when testing harness subagent', () => {
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
         await rm(runDirectory, { recursive: true, force: true });
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('restarts a completed workspace workflow in the exact same worktree', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-restart-'));
+      const workspaceDirectory = await mkdtemp(
+        join(dirname(directory), 'pi-workflows-restart-worktree-'),
+      );
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      process.env.PI_WORKFLOWS_DIR = directory;
+
+      try {
+        await writeRestartableWorkspaceWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        const requests: SubagentDelegationRequest[] = [];
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          const request = data as SubagentDelegationRequest;
+          requests.push(request);
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify(
+              extracted.policy.stepId === 'prepare'
+                ? {
+                    version: 1,
+                    policyDigest: extracted.policy.policyDigest,
+                    outcome: 'ready',
+                    summary: `Prepared iteration ${requests.length}`,
+                    workspace: { cwd: workspaceDirectory },
+                  }
+                : {
+                    version: 1,
+                    policyDigest: extracted.policy.policyDigest,
+                    outcome: 'done',
+                    summary: `Completed iteration ${requests.length}`,
+                  },
+            ),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('restartable-workspace');
+        const restart = fixture.commands.get('workflow-restart');
+        expectTruthy(start);
+        expectTruthy(restart);
+
+        await start('first enhancement', fixture.context);
+        await eventually(() => {
+          expect(requests).toHaveLength(2);
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+
+        await restart('second enhancement', fixture.context);
+        await eventually(() => {
+          expect(requests).toHaveLength(4);
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+
+        const canonicalDirectory = await realpath(directory);
+        const canonicalWorkspaceDirectory = await realpath(workspaceDirectory);
+        const policies = requests.map((request) => {
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          return extracted.policy;
+        });
+        expect(policies.map((policy) => policy.cwd)).toEqual([
+          canonicalDirectory,
+          canonicalWorkspaceDirectory,
+          canonicalDirectory,
+          canonicalWorkspaceDirectory,
+        ]);
+        expect(policies[2]?.runId).toBe(policies[0]?.runId);
+        expect(requests[2]?.task).toContain('## Restart workspace constraint');
+        expect(requests[2]?.task).toContain(canonicalWorkspaceDirectory);
+        expect(latestRun(fixture)).toMatchObject({
+          iteration: 2,
+          input: 'second enhancement',
+          cwd: canonicalWorkspaceDirectory,
+        });
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(workspaceDirectory, { recursive: true, force: true });
         await rm(directory, { recursive: true, force: true });
       }
     });

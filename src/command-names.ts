@@ -7,6 +7,7 @@ export const HARNESS_COMMAND_NAMES = [
   'workflow-list',
   'workflow-pause',
   'workflow-reload',
+  'workflow-restart',
   'workflow-resume',
   'workflow-start',
 ] as const;

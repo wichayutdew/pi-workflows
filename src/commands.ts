@@ -23,6 +23,11 @@ export type WorkflowCommandController = {
     input: string,
     context: ExtensionCommandContext,
   ) => Promise<void>;
+  /** Restarts a completed workflow in its existing worktree. */
+  readonly restart: (
+    input: string,
+    context: ExtensionCommandContext,
+  ) => Promise<void>;
   /** Pauses the active workflow. */
   readonly pause: (
     reason: string,
@@ -126,6 +131,15 @@ export function createHarnessCommands(
       },
     },
     createStartCommand(controller),
+    {
+      name: 'workflow-restart',
+      options: {
+        description:
+          'Restart the completed workflow in its worktree: /workflow-restart [input]',
+        handler: async (input, context) =>
+          controller.restart(input.trim(), context),
+      },
+    },
     {
       name: 'workflow-pause',
       options: {
