@@ -76,7 +76,7 @@ steps:
       timeoutMs: 30000
     transitions:
       approved: implement
-      changes-requested: $pause
+      changes-requested: plan
       blocked: $pause
 
   implement:

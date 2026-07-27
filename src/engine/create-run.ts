@@ -41,6 +41,7 @@ export const createRun = (
     ...(cwd ? { startCwd: cwd, cwd } : {}),
     stepHandoff: '',
     lastSummary: '',
+    gateArtifact: '',
     gateFeedback: '',
   };
 };

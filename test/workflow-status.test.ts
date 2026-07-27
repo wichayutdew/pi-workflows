@@ -531,6 +531,18 @@ describe('when testing workflow status', () => {
       escapeView.handleInput('\u001b');
       expect(escapeClosed).toBe(1);
 
+      let ctrlDClosed = 0;
+      const ctrlDView = new WorkflowStatusView(
+        () => ({ run, workflow, now: 2_000 }),
+        { requestRender() {} },
+        plainTheme,
+        () => {
+          ctrlDClosed += 1;
+        },
+      );
+      ctrlDView.handleInput('\u0004');
+      expect(ctrlDClosed).toBe(1);
+
       let shortcutClosed = 0;
       const shortcutView = new WorkflowStatusView(
         () => ({ run, workflow, now: 2_000 }),

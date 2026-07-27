@@ -503,10 +503,12 @@ describe('when testing harness subagent', () => {
         command: 'gated',
         description: 'Delegate a gated step',
         start: 'plan',
+        maxStepVisits: 1,
         steps: {
           plan: {
             subagent: {},
-            prompt: 'Prepare a plan for {{workflow.input}}.',
+            prompt:
+              'Prepare a plan for {{workflow.input}}. Rejected artifact: {{gate.artifact}}. Feedback: {{gate.feedback}}.',
             permissions: {
               tools: ['read'],
               extensions: ['plannotator'],
@@ -545,9 +547,11 @@ describe('when testing harness subagent', () => {
         command: 'main-workflow',
         description: 'Run in the main agent',
         start: 'plan',
+        ...(gated ? { maxStepVisits: 1 } : {}),
         steps: {
           plan: {
-            prompt: 'Plan {{workflow.input}}. Feedback: {{gate.feedback}}',
+            prompt:
+              'Plan {{workflow.input}}. Rejected artifact: {{gate.artifact}}. Feedback: {{gate.feedback}}',
             permissions: {
               tools: ['read'],
             },
@@ -1555,6 +1559,7 @@ describe('when testing harness subagent', () => {
         expect(fixture.sentUserMessages[1] ?? '').toMatch(
           /Add a rollback check/,
         );
+        expect(fixture.sentUserMessages[1] ?? '').toContain('# Plan v1');
 
         await completion.execute('completion-2', {
           outcome: 'submit',
@@ -3811,6 +3816,115 @@ describe('when testing harness subagent', () => {
           (latestRun(fixture).pendingGate as { artifact?: string } | undefined)
             ?.artifact,
         ).toBe(artifact);
+      } finally {
+        if (previousDirectory === undefined)
+          delete process.env.PI_WORKFLOWS_DIR;
+        else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('Plannotator feedback relaunches the gated step until approval', async () => {
+      // given
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-harness-'));
+      const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      // when
+      process.env.PI_WORKFLOWS_DIR = directory;
+      // then
+      try {
+        await writeGatedWorkflow(directory);
+        const fixture = createHarnessFixture(directory);
+        const childTasks: string[] = [];
+        let childRequests = 0;
+        let gateRequests = 0;
+        fixture.events.on(SUBAGENT_DELEGATION_REQUEST_EVENT, async (data) => {
+          childRequests += 1;
+          const request = data as SubagentDelegationRequest;
+          childTasks.push(request.task);
+          const extracted = extractChildPolicy(request.task);
+          expectTruthy(extracted);
+          await writeFile(
+            extracted.policy.resultPath,
+            JSON.stringify({
+              version: 1,
+              policyDigest: extracted.policy.policyDigest,
+              outcome: 'submit',
+              summary: `Plan v${childRequests} ready`,
+              artifact: `# Plan v${childRequests}\n\nExact proposal.`,
+            }),
+          );
+          fixture.events.emit(SUBAGENT_DELEGATION_STARTED_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+          });
+          fixture.events.emit(SUBAGENT_DELEGATION_RESPONSE_EVENT, {
+            version: 1,
+            requestId: request.requestId,
+            status: 'completed',
+          });
+        });
+        fixture.events.on(PLANNOTATOR_REQUEST_CHANNEL, (data) => {
+          const request = data as {
+            action: string;
+            respond: (response: unknown) => void;
+          };
+          if (request.action !== 'plan-review') return;
+          gateRequests += 1;
+          request.respond({
+            status: 'handled',
+            result: {
+              status: 'pending',
+              reviewId: `review-${gateRequests}`,
+            },
+          });
+        });
+
+        await initialize(fixture);
+        const start = fixture.commands.get('gated');
+        expectTruthy(start);
+        await start('the change', fixture.context);
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('awaiting-gate');
+          expect(
+            (latestRun(fixture).pendingGate as { reviewId?: string }).reviewId,
+          ).toBe('review-1');
+        });
+
+        fixture.events.emit(PLANNOTATOR_RESULT_CHANNEL, {
+          reviewId: 'review-1',
+          approved: false,
+          feedback:
+            '# Plan Feedback\n\n## 1. [👍 Looks good] Keep this alternative.',
+        });
+        await eventually(() => {
+          expect(childRequests).toBe(2);
+          expect(latestRun(fixture).status).toBe('awaiting-gate');
+          expect(
+            (latestRun(fixture).pendingGate as { reviewId?: string }).reviewId,
+          ).toBe('review-2');
+        });
+
+        expect(childTasks[1]).toContain('# Plan v1\n\nExact proposal.');
+        expect(childTasks[1]).toContain('👍 Looks good');
+        expect((latestRun(fixture).visits as Record<string, number>).plan).toBe(
+          2,
+        );
+
+        fixture.events.emit(PLANNOTATOR_RESULT_CHANNEL, {
+          reviewId: 'review-2',
+          approved: true,
+          feedback: 'Approved',
+        });
+        await eventually(() => {
+          expect(latestRun(fixture).status).toBe('completed');
+        });
+
+        expect(gateRequests).toBe(2);
+        expect(latestRun(fixture).reviewedArtifact).toBe(
+          '# Plan v2\n\nExact proposal.',
+        );
+        expect(latestRun(fixture).gateArtifact).toBe('');
+        expect(latestRun(fixture).gateFeedback).toBe('');
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;

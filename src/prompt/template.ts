@@ -7,8 +7,8 @@ import type { WorkflowRun } from '../engine/state.ts';
 export type TemplateValues = Readonly<Record<string, string>>;
 
 /**
- * Combines the incoming handoff with the latest paused-attempt
- * summary without duplicating identical content.
+ * Combines the incoming handoff with the latest current-step summary without
+ * duplicating identical content.
  *
  * @param run - Current workflow run.
  * @returns The handoff text for the active step.
@@ -27,7 +27,7 @@ export function currentStepHandoff(run: WorkflowRun): string {
     'Incoming previous-step handoff:',
     incomingHandoff,
     '',
-    'Latest paused attempt:',
+    'Latest current-step summary:',
     run.lastSummary,
   ].join('\n');
 }
@@ -78,6 +78,7 @@ export function createTemplateValues({
     'last.summary': currentStepHandoff(run),
     'reviewed.artifact': run.reviewedArtifact ?? '',
     'reviewed.feedback': run.reviewedFeedback ?? '',
+    'gate.artifact': run.gateArtifact ?? '',
     'gate.feedback': run.gateFeedback,
     'resume.input': run.resumeInput ?? '',
   };

@@ -35,7 +35,7 @@ describe('when testing example', () => {
       );
       expect(example?.steps.plan?.transitions).toMatchObject({
         approved: 'implement',
-        'changes-requested': '$pause',
+        'changes-requested': 'plan',
         blocked: '$pause',
       });
       expect(example?.steps.implement?.transitions).toMatchObject({
@@ -61,6 +61,7 @@ describe('when testing example', () => {
         /format is defined by this\s+workflow prompt/i,
       );
       expect(planPrompt).toMatch(/treats the artifact as opaque/i);
+      expect(planPrompt).toContain('{{gate.artifact}}');
       expect(catalog.workflows.get('mr-comments')?.prompts.implement).toContain(
         '{{reviewed.artifact}}',
       );
@@ -212,11 +213,46 @@ describe('when testing example', () => {
         expect(workflow.prompts['prepare-workspace']).toMatch(
           /regardless of whether the source\s+checkout is primary or linked/i,
         );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /source HEAD is already an ancestor[\s\S]*rebasing would be a no-op/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /selected worktree is dirty[\s\S]*without stashing or rebasing/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /selected worktree is clean[\s\S]*rebase only the exact run-owned branch/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /Abort only the rebase started by this attempt[\s\S]*pre-attempt selected HEAD and status were restored/i,
+        );
         expect(workflow.definition.steps.plan?.transitions).toMatchObject({
           approved: 'implement',
-          'changes-requested': '$pause',
+          'changes-requested': 'plan',
+          'workspace-refresh': 'prepare-workspace',
           blocked: '$pause',
         });
+        expect(workflow.prompts.plan).toContain('{{gate.artifact}}');
+        expect(workflow.prompts.plan).toContain('{{gate.feedback}}');
+        expect(workflow.prompts.plan).toMatch(
+          /captured source HEAD and initially selected HEAD\s+as\s+historical provenance/i,
+        );
+        expect(workflow.prompts.plan).toMatch(
+          /Plan from the observed selected HEAD[\s\S]*cleanliness is not required/i,
+        );
+        expect(workflow.prompts.plan).toMatch(
+          /Use outcome `workspace-refresh` only when[\s\S]*selected checkout is clean/i,
+        );
+        const planGitRules =
+          workflow.definition.steps.plan?.permissions.bash.allow?.filter(
+            (rule) => rule.executable === 'git',
+          ) ?? [];
+        expect(planGitRules).toEqual(
+          expect.arrayContaining([
+            { executable: 'git', argsPrefix: ['merge-base'] },
+            { executable: 'git', argsPrefix: ['rev-list'] },
+            { executable: 'git', argsPrefix: ['worktree', 'list'] },
+          ]),
+        );
       }
 
       const review = catalog.workflows.get('mr-review')!;
@@ -229,8 +265,10 @@ describe('when testing example', () => {
       );
       expect(review.definition.steps.review?.transitions).toMatchObject({
         approved: 'publish',
-        'changes-requested': '$pause',
+        'changes-requested': 'review',
       });
+      expect(review.prompts.review).toContain('{{gate.artifact}}');
+      expect(review.prompts.review).toContain('{{gate.feedback}}');
       for (const step of Object.values(review.definition.steps)) {
         expect(step.requires.tools).not.toContain('mcp');
       }
@@ -248,8 +286,10 @@ describe('when testing example', () => {
       }
       expect(comment.definition.steps.plan?.transitions).toMatchObject({
         approved: 'implement',
-        'changes-requested': '$pause',
+        'changes-requested': 'plan',
       });
+      expect(comment.prompts.plan).toContain('{{gate.artifact}}');
+      expect(comment.prompts.plan).toContain('{{gate.feedback}}');
       expect(comment.definition.steps.verify?.transitions.failed).toBe(
         'implement',
       );

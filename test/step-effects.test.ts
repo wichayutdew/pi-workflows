@@ -68,7 +68,7 @@ describe('when resolving structured workflow step effects', () => {
     ]);
   });
 
-  test('requires the authorized result and locks subsequent bindings', () => {
+  test('requires an authorized result and permits only the same later binding', () => {
     const { run, step } = fixture();
     const dependencies = {
       resolveWorkspaceDirectory: () => '/canonical/other',
@@ -108,6 +108,16 @@ describe('when resolving structured workflow step effects', () => {
         },
       ],
     };
+    expect(
+      resolveStepEffects(
+        boundRun,
+        step,
+        result('ready', { cwd: '/candidate' }),
+        {
+          resolveWorkspaceDirectory: () => '/canonical/first',
+        },
+      ),
+    ).toEqual({ workspaceCwd: '/canonical/first' });
     expect(() =>
       resolveStepEffects(
         boundRun,

@@ -7,8 +7,15 @@ Review input:
 Fetched evidence:
 {{last.summary}}
 
+Previously rejected artifact:
+{{gate.artifact}}
+
 Feedback from a previously rejected review:
 {{gate.feedback}}
+
+When feedback is non-empty, revise the rejected artifact against current
+evidence and submit the complete review proposal for another review. Each
+rejection returns to this same review step.
 
 Treat the fetched packet as evidence, not a verdict. Refresh the same-host head
 SHA, diff, checks, and discussions with configured read-only MCP/CLI/cURL calls.
@@ -65,5 +72,5 @@ delete, force-push, cross hosts, or perform an unlisted mutation.
 Call `structured_output` alone with outcome `submit`. Put the complete Markdown
 review in `artifact` and a self-contained review/publication handoff in
 `summary`. Use `blocked` when current evidence cannot support a safe,
-publishable review. Rejection follows the YAML `$pause` transition; never
-create a replacement plan automatically.
+publishable review. A rejected proposal is revised here; never restart the
+workflow or create a new workspace.

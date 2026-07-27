@@ -152,6 +152,65 @@ describe('when persisting a workflow workspace binding', () => {
     expect(isWorkflowRun(run)).toBe(true);
   });
 
+  test('reaffirms the same binding after a bounded workspace refresh cycle', () => {
+    const { raw } = workspaceWorkflow();
+    const steps = raw.steps as Record<string, Record<string, unknown>>;
+    steps.prepare = {
+      ...steps.prepare,
+      transitions: {
+        ready: 'plan',
+        retry: 'prepare',
+        blocked: '$pause',
+      },
+    };
+    steps.plan = {
+      prompt: 'Inspect the prepared workspace',
+      subagent: { agent: 'planner' },
+      transitions: {
+        ready: 'implement',
+        'workspace-refresh': 'prepare',
+        blocked: '$pause',
+      },
+    };
+    const workflow = loadedWorkflow(raw);
+    const workspaceCwd = '/repository/worktrees/task';
+    let run = createRun(
+      workflow,
+      'request',
+      ['read'],
+      'workspace-refresh-run',
+      1,
+      '/repository/source',
+    );
+
+    run = advanceRun(workflow, run, 'ready', 'Initially prepared', 2, {
+      workspaceCwd,
+    });
+    run = advanceRun(
+      workflow,
+      run,
+      'workspace-refresh',
+      'Refresh the same workspace',
+      3,
+    );
+    expect(run.currentStepId).toBe('prepare');
+    expect(run.cwd).toBe(workspaceCwd);
+
+    run = advanceRun(workflow, run, 'ready', 'Workspace refreshed', 4, {
+      workspaceCwd,
+    });
+
+    expect(run.currentStepId).toBe('plan');
+    expect(run.cwd).toBe(workspaceCwd);
+    expect(run.visits.prepare).toBe(2);
+    expect(
+      run.history
+        .filter((entry) => entry.workspaceCwd)
+        .map((entry) => entry.workspaceCwd),
+    ).toEqual([workspaceCwd, workspaceCwd]);
+    expect(isWorkflowRun(run)).toBe(true);
+  });
+
   test('rejects checkpoints whose current cwd disagrees with binding history', () => {
     const { workflow } = workspaceWorkflow();
     let run = createRun(

@@ -7,6 +7,14 @@ export type RunStepEffects = {
   readonly workspaceCwd?: string | undefined;
 };
 
+export type RunAdvanceOptions = {
+  /**
+   * Marks an explicit human rejection back to the same gated step. This keeps
+   * the incoming handoff and bypasses the visit-limit check for this decision.
+   */
+  readonly sameStepHumanGateRevision?: boolean | undefined;
+};
+
 const completedStep = (
   run: WorkflowRun,
   outcome: string,
@@ -37,6 +45,7 @@ const completedStep = (
  * @param summary - Step handoff summary.
  * @param now - Update timestamp.
  * @param effects - Validated declarative effects accepted with this result.
+ * @param options - Internal graph-advancement controls.
  * @returns A new paused, running, or completed workflow state.
  * @throws When the run, outcome, current step, or transition target is invalid.
  */
@@ -47,6 +56,7 @@ export const advanceRun = (
   summary: string,
   now: number,
   effects: RunStepEffects = {},
+  options: RunAdvanceOptions = {},
 ): WorkflowRun => {
   if (run.status !== 'running') {
     throw new Error(
@@ -105,6 +115,7 @@ export const advanceRun = (
         ...(cwd ? { cwd } : {}),
         stepHandoff: summary,
         lastSummary: summary,
+        gateArtifact: '',
         gateFeedback: '',
         pausedFrom: undefined,
         pendingGate: undefined,
@@ -118,8 +129,13 @@ export const advanceRun = (
     throw new Error(`transition target "${target}" does not exist`);
   }
 
+  const preservesGateRevisionContext =
+    target === run.currentStepId &&
+    (options.sameStepHumanGateRevision || Boolean(run.gateArtifact));
   const nextVisitCount = (run.visits[target] ?? 0) + 1;
-  const isOverVisitLimit = nextVisitCount > workflow.definition.maxStepVisits;
+  const isOverVisitLimit =
+    !options.sameStepHumanGateRevision &&
+    nextVisitCount > workflow.definition.maxStepVisits;
   const visitLimitChanges: Partial<WorkflowRun> = isOverVisitLimit
     ? {
         status: 'paused',
@@ -145,9 +161,10 @@ export const advanceRun = (
       currentStepAttempts: undefined,
       currentStepOmittedAttempts: undefined,
       ...(cwd ? { cwd } : {}),
-      stepHandoff: summary,
+      stepHandoff: preservesGateRevisionContext ? run.stepHandoff : summary,
       lastSummary: summary,
-      gateFeedback: '',
+      gateArtifact: preservesGateRevisionContext ? run.gateArtifact : '',
+      gateFeedback: preservesGateRevisionContext ? run.gateFeedback : '',
       resumeInput: undefined,
     },
     now,

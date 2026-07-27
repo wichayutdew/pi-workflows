@@ -120,9 +120,10 @@ sequenceDiagram
 The workflow `subagent.agent` value selects the actual Pi Subagents profile.
 Each v1 request uses `output: false`, the workflow `outputSchema`, and agent
 contract v1. It starts in a clean context with the original workflow input and
-the previous step's compact result. An approved artifact is available only when
-the prompt explicitly renders `{{reviewed.artifact}}`; no accumulated parent or
-sibling transcript crosses the step boundary.
+the previous step's compact result. Approved and rejected artifacts are
+available only when the prompt explicitly renders `{{reviewed.artifact}}` or
+`{{gate.artifact}}`; no accumulated parent or sibling transcript crosses the
+step boundary.
 
 Delegation planning and recovery decisions live in `src/harness/delegation-*.ts`
 and launch through `step-execution-actions.ts`. The parent-side subagent client
@@ -199,11 +200,13 @@ reviews, attempt logs, and full history live in the overlay; its rendering
 clamps long reasons to the available terminal width without altering the full
 persisted reason. Arrow keys or `j`/`k` select a path entry; `Enter`, right, or
 `l` opens its persisted attempt evidence. Detail scroll uses arrows or `j`/`k`,
-while left, `h`, or `Esc` returns. Attempt tasks, results, and gate decisions
-are globally bounded in the checkpoint. Confined child transcript references
-are read on demand through stable no-follow reads; displayed controls and
-common credentials are removed. New main-agent attempts arm trace capture only
-when Pi finalizes the exact workflow task, then persist
+with `Ctrl+D`/`Ctrl+U` moving down/up by half a page, `gg`/`G` jumping to the
+top/bottom, and left, `h`, or `Esc` returning. Attempt tasks, results, and gate
+decisions are globally bounded in the checkpoint. Confined child transcript
+references are read on demand through stable no-follow reads; displayed
+controls and common credentials are removed.
+New main-agent attempts arm trace capture only when Pi finalizes the exact
+workflow task, then persist
 a redacted, size-bounded prefix of finalized assistant and tool events in
 source order. These events remain part of the parent session, but the explorer
 does not read unrelated parent-session traffic; legacy attempts without a log

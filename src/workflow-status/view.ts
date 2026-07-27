@@ -135,6 +135,7 @@ function nextScrollOffset(state: ViewportState, value: number): number {
 export class WorkflowStatusView implements Component {
   private timer: RefreshTimer | undefined;
   private state = initialViewportState();
+  private pendingDetailTopKey = false;
   private readonly statusShortcutLabel: string;
   private readonly dependencies: WorkflowStatusViewDependencies;
   private readonly transcriptCache = new Map<string, StepTranscriptViewState>();
@@ -180,11 +181,15 @@ export class WorkflowStatusView implements Component {
 
   /** Handle close and scrolling key input. */
   handleInput(data: string): void {
+    const isDetailHalfPageDown =
+      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('d'));
+    const isDetailHalfPageUp =
+      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('u'));
     if (
       data === 'q' ||
       data === 'Q' ||
       matchesKey(data, 'ctrl+c') ||
-      matchesKey(data, 'ctrl+d') ||
+      (this.state.mode !== 'detail' && matchesKey(data, 'ctrl+d')) ||
       matchesKey(data, this.statusShortcut)
     ) {
       this.close();
@@ -199,13 +204,31 @@ export class WorkflowStatusView implements Component {
       return;
     }
     const pageSize = Math.max(1, this.state.viewportRows - 2);
+    const contentHeight = Math.max(1, this.state.viewportRows - 1);
+    const halfPageSize = Math.max(1, Math.floor(contentHeight / 2));
     if (this.state.mode === 'detail') {
-      if (matchesKey(data, Key.left) || data === 'h') {
+      if (data === 'gg' || (data === 'g' && this.pendingDetailTopKey)) {
+        this.pendingDetailTopKey = false;
+        this.setScrollOffset(0);
+        return;
+      }
+      if (data === 'g') {
+        this.pendingDetailTopKey = true;
+        return;
+      }
+      this.pendingDetailTopKey = false;
+      if (data === 'G') {
+        this.setScrollOffset(Number.MAX_SAFE_INTEGER);
+      } else if (matchesKey(data, Key.left) || data === 'h') {
         this.showBoard();
       } else if (matchesKey(data, Key.down) || data === 'j') {
         this.setScrollOffset(this.state.scrollOffset + 1);
       } else if (matchesKey(data, Key.up) || data === 'k') {
         this.setScrollOffset(this.state.scrollOffset - 1);
+      } else if (isDetailHalfPageDown) {
+        this.setScrollOffset(this.state.scrollOffset + halfPageSize);
+      } else if (isDetailHalfPageUp) {
+        this.setScrollOffset(this.state.scrollOffset - halfPageSize);
       } else if (matchesKey(data, Key.pageDown)) {
         this.setScrollOffset(this.state.scrollOffset + pageSize);
       } else if (matchesKey(data, Key.pageUp)) {
@@ -217,6 +240,7 @@ export class WorkflowStatusView implements Component {
       }
       return;
     }
+    this.pendingDetailTopKey = false;
     if (matchesKey(data, Key.down) || data === 'j') {
       this.moveSelection(1);
     } else if (matchesKey(data, Key.up) || data === 'k') {
@@ -287,7 +311,7 @@ export class WorkflowStatusView implements Component {
       this.statusShortcutLabel,
       this.theme,
       this.state.mode === 'detail'
-        ? '↑/↓ or j/k scroll · PgUp/PgDn · ←/h/Esc back'
+        ? '↑↓/jk · Ctrl+D/U half-page · gg/G top/bottom · PgUp/PgDn · ←/h/Esc'
         : '↑/↓ or j/k select · Enter/→/l inspect · PgUp/PgDn',
     );
     this.state = page.state;
@@ -339,6 +363,7 @@ export class WorkflowStatusView implements Component {
     if (!snapshot) return;
     this.normalizeSelection(snapshot);
     if (!selectedStepDetail(snapshot, this.state.selectedIndex)) return;
+    this.pendingDetailTopKey = false;
     this.state = { ...this.state, mode: 'detail', scrollOffset: 0 };
     this.ensureSelectedTranscripts(snapshot);
     this.tui.requestRender(true);
@@ -346,6 +371,7 @@ export class WorkflowStatusView implements Component {
 
   private showBoard(): void {
     if (this.state.mode === 'board') return;
+    this.pendingDetailTopKey = false;
     this.state = { ...this.state, mode: 'board', scrollOffset: 0 };
     this.tui.requestRender(true);
   }

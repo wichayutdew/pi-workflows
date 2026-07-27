@@ -110,6 +110,7 @@ flowchart LR
   StepSummary[separate compact step summary] --> Approved
   Approved --> LastSummary[stepHandoff and last.summary]
   ReviewerFeedback[review feedback] --> Rejected[rejected gate]
+  Rejected --> GateArtifact[gate.artifact template value]
   Rejected --> GateFeedback[gate.feedback template value]
 ```
 
@@ -117,3 +118,12 @@ Approval and rejection outcome names are opaque transition labels. The
 extension does not infer planning, retry, replan, or implementation semantics
 from them. The approved artifact remains separate from the compact summary, and
 neither value changes permissions or the run's captured working directory.
+Plannotator's `approved` boolean is authoritative; annotation labels and
+feedback text are never parsed as decisions. If a rejected outcome targets the
+same gated step, the harness starts a fresh attempt with `{{gate.feedback}}`
+and the opaque rejected draft in `{{gate.artifact}}`, while preserving the
+step's original incoming handoff, then waits at a new review. These explicitly
+human-mediated transitions bypass the visit-limit check and can continue until
+approval. Each visit remains recorded, so later automatic entries are still
+guarded. A same-step retry produced by the revision agent keeps the rejected
+artifact and feedback available but remains subject to the normal limit.

@@ -110,6 +110,7 @@ export const reconcileRun = (
           pausedFrom: 'running',
           failedStepId: undefined,
           pauseReason: `Configuration changed; restarted step "${restartedStep}"`,
+          gateArtifact: '',
           gateFeedback: '',
         },
         now,
@@ -127,6 +128,7 @@ export const reconcileRun = (
         pausedFrom: 'running',
         failedStepId: undefined,
         pauseReason: `Configuration changed; restarted step "${run.currentStepId}"`,
+        gateArtifact: '',
         gateFeedback: '',
       }
     : {};

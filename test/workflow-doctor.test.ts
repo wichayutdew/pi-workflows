@@ -60,6 +60,9 @@ describe('when diagnosing workflow liveness', () => {
     expect(formatWorkflowDoctor([report])).toMatch(
       /maxStepVisits=3 bounds uninterrupted graph cycling/i,
     );
+    expect(formatWorkflowDoctor([report])).toMatch(
+      /human rejection back to the same gated step bypasses that check/i,
+    );
   });
 
   test('warns about a bounded cycle that still has a completion path', () => {

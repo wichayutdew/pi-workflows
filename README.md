@@ -145,10 +145,14 @@ workspace:
 `/work` and `/ticket` bind the exact worktree returned by their user-authored
 preparation prompt. `/mr-comment` intentionally has no workspace-binding step:
 every child stays on the branch and worktree from which the run started.
-Approval rejection pauses either review workflow; it never launches an
-automatic replacement plan. Remote publication prompts first check whether an
-approved effect already exists because the harness cannot guarantee
-exactly-once external side effects.
+Requested changes return only to the gated plan or review step with the user's
+feedback; they never restart workspace preparation or the whole workflow. The
+starter `/work` and `/ticket` planners use a separate `workspace-refresh`
+outcome only for source-ancestry drift. It revisits preparation in the same
+canonical worktree; the prompt may safely rebase its clean run-owned branch but
+can never bind a replacement directory.
+Remote publication prompts first check whether an approved effect already
+exists because the harness cannot guarantee exactly-once external side effects.
 
 ## Add a workflow
 
@@ -218,16 +222,16 @@ loaded extensions or prompt resources are diagnosed before aliases register.
 
 Top-level fields:
 
-| Field             | Required | Default | Description                                                                                        |
-| ----------------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `version`         | Yes      | —       | Configuration contract version. Currently `1`.                                                     |
-| `id`              | Yes      | —       | Stable workflow identifier.                                                                        |
-| `command`         | Yes      | —       | Slash command without `/`.                                                                         |
-| `description`     | Yes      | —       | Command description.                                                                               |
-| `start`           | Yes      | —       | First step identifier.                                                                             |
-| `steps`           | Yes      | —       | Step map. Order is controlled by transitions, not file order.                                      |
-| `maxStepVisits`   | No       | `5`     | Loop guard for each step.                                                                          |
-| `summaryMaxChars` | No       | `4000`  | Maximum step `summary` length. Reviewed gate artifacts use their separate 200,000-character limit. |
+| Field             | Required | Default | Description                                                                               |
+| ----------------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `version`         | Yes      | —       | Configuration contract version. Currently `1`.                                            |
+| `id`              | Yes      | —       | Stable workflow identifier.                                                               |
+| `command`         | Yes      | —       | Slash command without `/`.                                                                |
+| `description`     | Yes      | —       | Command description.                                                                      |
+| `start`           | Yes      | —       | First step identifier.                                                                    |
+| `steps`           | Yes      | —       | Step map. Order is controlled by transitions, not file order.                             |
+| `maxStepVisits`   | No       | `5`     | Loop guard for each step.                                                                 |
+| `summaryMaxChars` | No       | `4000`  | Maximum step `summary` length. Gate artifacts use their separate 200,000-character limit. |
 
 Each step supports:
 
@@ -253,6 +257,7 @@ Supported prompt variables:
 {{last.summary}}
 {{reviewed.artifact}}
 {{reviewed.feedback}}
+{{gate.artifact}}
 {{gate.feedback}}
 {{resume.input}}
 ```
@@ -260,10 +265,11 @@ Supported prompt variables:
 Unknown variables fail configuration loading.
 
 `{{last.summary}}` normally contains the previous completed step's handoff.
-After a step-requested `$pause`, it contains both the preserved incoming
-previous-step handoff and the latest paused-attempt summary. Gate artifacts and
-summaries stay separate: prompts opt into the opaque approved artifact through
-`{{reviewed.artifact}}`.
+During a step-requested `$pause` or same-step human gate revision, it contains
+both the preserved incoming handoff and latest current-step summary. Gate
+artifacts and summaries stay separate: prompts opt into an opaque approved
+artifact through `{{reviewed.artifact}}` or the latest rejected artifact
+through `{{gate.artifact}}`.
 `{{resume.input}}` contains guidance supplied to the current attempt through
 `/workflow-resume [guidance]`. If a prompt omits that variable, the harness
 adds the guidance in a clearly delimited standard section, so every workflow
@@ -322,17 +328,19 @@ workspace:
 On a binding outcome, the result must include
 `workspace: { cwd: "/absolute/directory" }`. The harness resolves its real path,
 requires an existing directory under one configured root relative to the
-run-start directory, persists it once, and passes that exact directory to every
-reachable downstream child, revisit, recovery attempt, and resume. Other
-outcomes must omit `workspace`; later results cannot replace the binding. All
+run-start directory, persists that canonical identity, and passes it to every
+reachable downstream child, revisit, recovery attempt, and resume. If the sole
+binding step is revisited, it may re-affirm the same canonical directory; a
+different directory is rejected. Other outcomes must omit `workspace`. All
 reachable nonterminal steps after a binding must be delegated because the main
 Pi process cannot change its working directory.
 
 The workflow prompt owns how the directory is prepared and what it represents.
 The harness does not know Git, worktrees, languages, frameworks, or command
-syntax, and it never derives a directory from summaries or gate artifacts. A
-legacy checkpoint without a captured directory fails closed before delegation;
-abort it and start a new run.
+syntax, and it never derives a directory from summaries or gate artifacts. The
+starter kit's guarded rebase policy is therefore prompt-owned domain behavior,
+not extension behavior. A legacy checkpoint without a captured directory fails
+closed before delegation; abort it and start a new run.
 
 Use a profile name directly when only the child profile changes:
 
@@ -532,7 +540,7 @@ gate:
   rejectedOutcome: changes-requested
 transitions:
   approved: implement
-  changes-requested: $pause
+  changes-requested: plan
   blocked: $pause
 ```
 
@@ -540,9 +548,13 @@ When the step completes with outcome `submit`, it must include the full content
 in `artifact`. Pi shows Approve, Request changes, and Pause workflow. Requested
 changes are returned through `{{gate.feedback}}`; approval persists the
 artifact as `{{reviewed.artifact}}` while the step's `summary` remains the
-compact handoff. A requested change pauses at the same step with feedback, so
-revision starts only after explicit `/workflow-resume`. Dismissing the panel
-keeps the pending artifact, so `/workflow-resume` reopens the same review.
+compact handoff. Here, `changes-requested: plan` immediately runs a fresh
+attempt of that exact gated step with the rejected draft in
+`{{gate.artifact}}`, the original incoming step handoff, and the new feedback,
+then opens another review. Use
+`changes-requested: $pause` instead when revision should require an explicit
+`/workflow-resume`. Dismissing the panel keeps the pending artifact, so
+`/workflow-resume` reopens the same review.
 
 Dialog-capable UI is available in Pi TUI and RPC modes. In print or JSON mode,
 the gate pauses safely until resumed in TUI or RPC.
@@ -583,7 +595,7 @@ gate:
   timeoutMs: 30000
 transitions:
   approved: implement
-  changes-requested: $pause
+  changes-requested: plan
   blocked: $pause
 ```
 
@@ -596,6 +608,17 @@ places the review content in `artifact`. The harness correlates the Plannotator
 review identifier and accepts only the matching decision. On approval, the
 artifact is preserved as an opaque template value; the separate `summary`
 remains the next step's compact handoff.
+
+The `approved` boolean from Plannotator is authoritative; feedback text and
+annotation labels stay opaque. A rejection follows only the YAML transition
+shown above. A same-step rejection is an explicitly human-controlled revision
+loop, so that human-mediated transition bypasses the visit-limit check and may
+continue until approval. The visit is still recorded, and later automatic
+entries remain guarded. A same-step agent retry during revision preserves the
+incoming handoff, rejected artifact, and feedback, but it does not bypass the
+visit-limit check. Gate feedback is capped at 50,000 characters; history and
+user notifications use a compact rejection summary while `{{gate.feedback}}`
+receives the bounded full value.
 
 The artifact is never substituted for a missing summary. If an older pending
 gate has no separately stored summary, its transition uses an empty compact
@@ -739,8 +762,10 @@ a failed or aborted run, and `◆` a paused step or pending review.
 Use `↑`/`↓` or `j`/`k` to select a step, then `Enter`, `→`, or `l` to inspect
 the bounded task supplied to each attempt, its result and gate decision, and a
 chronological execution log when available. In the detail view,
-`↑`/`↓` or `j`/`k` scrolls; `←`, `h`, or `Esc` returns to the board; `q` or the
-configured shortcut closes it. PgUp/PgDn and Home/End retain page navigation.
+`↑`/`↓` or `j`/`k` scrolls one line, while `Ctrl+D` and `Ctrl+U` scroll down and
+up by half a page. `gg` jumps to the top and `G` jumps to the bottom. `←`, `h`,
+or `Esc` returns to the board; `q` or the configured shortcut closes it.
+PgUp/PgDn and Home/End retain page navigation.
 Trace references and bounded task/result evidence live in the checkpoint, so
 completed, paused, resumed, and restored runs remain inspectable. Child logs
 are path-confined, size-bounded, control-sanitized, and redact common
@@ -771,7 +796,10 @@ Unreachable steps and cycles are reported as warnings; a cycle with an exit may
 run, but `maxStepVisits` pauses the uninterrupted run before a step can execute
 more than its configured limit. An explicit resume can continue from that
 checkpoint, so the guard bounds automatic graph advancement rather than
-guaranteeing completion or wall-clock duration.
+guaranteeing completion or wall-clock duration. An explicit human gate
+rejection back to that same gated step bypasses the check for that transition;
+the visit remains recorded and every iteration must stop for another human
+decision.
 
 Configured aliases also accept multiline input. For example, if `work` is a
 loaded workflow command, Pi Workflows normalizes:

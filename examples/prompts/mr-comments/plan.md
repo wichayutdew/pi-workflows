@@ -1,7 +1,14 @@
 Create a concrete, decision-ready implementation plan from the inspected
-feedback. Account for previous Plannotator feedback:
+feedback. The previously rejected artifact is:
+
+{{gate.artifact}}
+
+Account for previous Plannotator feedback:
 
 {{gate.feedback}}
+
+When feedback is non-empty, revise the rejected artifact and submit the complete
+proposal for another review. Each rejection returns to this same planning step.
 
 Write the artifact for a human reviewer first. Use this order:
 

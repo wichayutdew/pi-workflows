@@ -1,4 +1,5 @@
 export const RUN_STATE_VERSION = 1 as const;
+export const MAX_GATE_FEEDBACK_CHARS = 50_000;
 export const MAX_RESUME_INPUT_CHARS = 16_000;
 export const MAX_STEP_TRACE_TASK_CHARS = 64_000;
 export const MAX_STEP_TRACE_ATTEMPTS = 16;
@@ -158,6 +159,8 @@ export type WorkflowRun = {
    */
   readonly stepHandoff?: string | undefined;
   readonly lastSummary: string;
+  /** Opaque artifact returned by the latest rejected or failed gate. */
+  readonly gateArtifact?: string | undefined;
   readonly gateFeedback: string;
   /** User-authored guidance supplied for the current resume attempt. */
   readonly resumeInput?: string | undefined;
