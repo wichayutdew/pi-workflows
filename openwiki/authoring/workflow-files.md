@@ -17,7 +17,7 @@ flowchart TD
   Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
   Step --> Gate[optional prompt or Plannotator gate]
-  Step --> Workspace[optional one-time workspace binding]
+  Step --> Workspace[optional immutable workspace binding]
 ```
 
 ## Minimal Two-Step Graph
@@ -230,12 +230,17 @@ On a listed outcome, the structured result must include
 `workspace: { cwd: "/absolute/directory" }`; every other outcome must omit it.
 The harness canonicalizes the existing directory, requires it to remain under
 one allowed root relative to the run-start directory, and accepts only one
-binding. All reachable nonterminal descendants must be delegated. Their first
-visits, cycles, recovery attempts, and resumes receive the same bound cwd.
+canonical binding. A revisit to the sole binding step may re-affirm that same
+directory, but cannot replace it. All reachable nonterminal descendants must
+be delegated. Their first visits, cycles, recovery attempts, and resumes
+receive the same bound cwd.
 
 The prompt owns directory preparation and domain meaning. Pi Workflows neither
 creates worktrees nor knows Git, package managers, languages, frameworks, or
-command syntax. Summaries and gate artifacts cannot select a workspace.
+command syntax. Summaries and gate artifacts cannot select a workspace. A
+workflow may define a separate bounded transition back to its binding step for
+domain-specific refresh work, such as the starter kit's guarded clean-branch
+rebase; that policy remains user-authored prompt data.
 
 ```mermaid
 flowchart TD

@@ -108,7 +108,7 @@ export type WorkflowStep = {
   readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;
   readonly gate?: WorkflowGate;
-  /** Optional one-time workspace binding produced by this delegated step. */
+  /** Optional immutable workspace binding produced by this delegated step. */
   readonly workspace?: StepWorkspaceBinding;
 };
 

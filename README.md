@@ -146,7 +146,11 @@ workspace:
 preparation prompt. `/mr-comment` intentionally has no workspace-binding step:
 every child stays on the branch and worktree from which the run started.
 Requested changes return only to the gated plan or review step with the user's
-feedback; they never restart workspace preparation or the whole workflow.
+feedback; they never restart workspace preparation or the whole workflow. The
+starter `/work` and `/ticket` planners use a separate `workspace-refresh`
+outcome only for source-ancestry drift. It revisits preparation in the same
+canonical worktree; the prompt may safely rebase its clean run-owned branch but
+can never bind a replacement directory.
 Remote publication prompts first check whether an approved effect already
 exists because the harness cannot guarantee exactly-once external side effects.
 
@@ -324,17 +328,19 @@ workspace:
 On a binding outcome, the result must include
 `workspace: { cwd: "/absolute/directory" }`. The harness resolves its real path,
 requires an existing directory under one configured root relative to the
-run-start directory, persists it once, and passes that exact directory to every
-reachable downstream child, revisit, recovery attempt, and resume. Other
-outcomes must omit `workspace`; later results cannot replace the binding. All
+run-start directory, persists that canonical identity, and passes it to every
+reachable downstream child, revisit, recovery attempt, and resume. If the sole
+binding step is revisited, it may re-affirm the same canonical directory; a
+different directory is rejected. Other outcomes must omit `workspace`. All
 reachable nonterminal steps after a binding must be delegated because the main
 Pi process cannot change its working directory.
 
 The workflow prompt owns how the directory is prepared and what it represents.
 The harness does not know Git, worktrees, languages, frameworks, or command
-syntax, and it never derives a directory from summaries or gate artifacts. A
-legacy checkpoint without a captured directory fails closed before delegation;
-abort it and start a new run.
+syntax, and it never derives a directory from summaries or gate artifacts. The
+starter kit's guarded rebase policy is therefore prompt-owned domain behavior,
+not extension behavior. A legacy checkpoint without a captured directory fails
+closed before delegation; abort it and start a new run.
 
 Use a profile name directly when only the child profile changes:
 
@@ -757,8 +763,9 @@ Use `↑`/`↓` or `j`/`k` to select a step, then `Enter`, `→`, or `l` to insp
 the bounded task supplied to each attempt, its result and gate decision, and a
 chronological execution log when available. In the detail view,
 `↑`/`↓` or `j`/`k` scrolls one line, while `Ctrl+D` and `Ctrl+U` scroll down and
-up by half a page. `←`, `h`, or `Esc` returns to the board; `q` or the
-configured shortcut closes it. PgUp/PgDn and Home/End retain page navigation.
+up by half a page. `gg` jumps to the top and `G` jumps to the bottom. `←`, `h`,
+or `Esc` returns to the board; `q` or the configured shortcut closes it.
+PgUp/PgDn and Home/End retain page navigation.
 Trace references and bounded task/result evidence live in the checkpoint, so
 completed, paused, resumed, and restored runs remain inspectable. Child logs
 are path-confined, size-bounded, control-sanitized, and redact common

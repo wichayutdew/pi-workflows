@@ -658,7 +658,9 @@ describe('when exploring workflow step evidence', () => {
     const detail = detailPage.join('\n');
     expect(detail).toContain('Step Explorer · inspect');
     expect(detail).toContain('exact inspect task');
-    expect(detailPage.at(-1)).toMatch(/Ctrl\+D\/U half-page.*rows 1-18\//);
+    expect(detailPage.at(-1)).toMatch(
+      /Ctrl\+D\/U half-page.*gg\/G top\/bottom.*rows 1-18\//,
+    );
 
     view.handleInput('\u0004');
     expect(closed).toBe(0);
@@ -668,11 +670,25 @@ describe('when exploring workflow step evidence', () => {
     const halfPageUp = view.render(100);
     expect(halfPageUp.at(-1)).toMatch(/rows 1-18\//);
 
-    view.handleInput('j');
-    const scrolledDetail = view.render(100).join('\n');
-    expect(scrolledDetail).toContain('I inspected the exact requirement');
+    view.handleInput('G');
+    const bottomHint = view.render(100).at(-1) ?? '';
+    const bottomRows = bottomHint.match(/rows (\d+)-(\d+)\/(\d+)/);
+    expect(bottomRows?.[2]).toBe(bottomRows?.[3]);
 
-    expect(view.render(100).at(-1)).toMatch(/rows 2-/);
+    view.handleInput('g');
+    expect(view.render(100).at(-1)).toBe(bottomHint);
+    view.handleInput('g');
+    expect(view.render(100).at(-1)).toMatch(/rows 1-18\//);
+
+    view.handleInput('g');
+    view.handleInput('j');
+    const scrolledDetailPage = view.render(100);
+    const scrolledDetail = scrolledDetailPage.join('\n');
+    expect(scrolledDetail).toContain('I inspected the exact requirement');
+    expect(scrolledDetailPage.at(-1)).toMatch(/rows 2-/);
+    view.handleInput('gg');
+    expect(view.render(100).at(-1)).toMatch(/rows 1-18\//);
+
     view.handleInput('h');
     expect(view.render(100).join('\n')).toContain('Execution Path');
     view.handleInput('l');

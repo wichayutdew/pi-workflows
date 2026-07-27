@@ -43,7 +43,18 @@ steps:
         allow:
           - executable: git
             argsPrefixes:
-              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
+              [
+                [status],
+                [diff],
+                [log],
+                [show],
+                [grep],
+                [ls-files],
+                [rev-parse],
+                [merge-base],
+                [rev-list],
+                [worktree, list],
+              ]
           - executable: rg
           - executable: grep
     requires:
@@ -57,6 +68,7 @@ steps:
     transitions:
       approved: implement
       changes-requested: plan
+      workspace-refresh: prepare-workspace
       blocked: $pause
 
   implement:

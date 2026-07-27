@@ -213,13 +213,46 @@ describe('when testing example', () => {
         expect(workflow.prompts['prepare-workspace']).toMatch(
           /regardless of whether the source\s+checkout is primary or linked/i,
         );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /source HEAD is already an ancestor[\s\S]*rebasing would be a no-op/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /selected worktree is dirty[\s\S]*without stashing or rebasing/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /selected worktree is clean[\s\S]*rebase only the exact run-owned branch/i,
+        );
+        expect(workflow.prompts['prepare-workspace']).toMatch(
+          /Abort only the rebase started by this attempt[\s\S]*pre-attempt selected HEAD and status were restored/i,
+        );
         expect(workflow.definition.steps.plan?.transitions).toMatchObject({
           approved: 'implement',
           'changes-requested': 'plan',
+          'workspace-refresh': 'prepare-workspace',
           blocked: '$pause',
         });
         expect(workflow.prompts.plan).toContain('{{gate.artifact}}');
         expect(workflow.prompts.plan).toContain('{{gate.feedback}}');
+        expect(workflow.prompts.plan).toMatch(
+          /captured source HEAD and initially selected HEAD\s+as\s+historical provenance/i,
+        );
+        expect(workflow.prompts.plan).toMatch(
+          /Plan from the observed selected HEAD[\s\S]*cleanliness is not required/i,
+        );
+        expect(workflow.prompts.plan).toMatch(
+          /Use outcome `workspace-refresh` only when[\s\S]*selected checkout is clean/i,
+        );
+        const planGitRules =
+          workflow.definition.steps.plan?.permissions.bash.allow?.filter(
+            (rule) => rule.executable === 'git',
+          ) ?? [];
+        expect(planGitRules).toEqual(
+          expect.arrayContaining([
+            { executable: 'git', argsPrefix: ['merge-base'] },
+            { executable: 'git', argsPrefix: ['rev-list'] },
+            { executable: 'git', argsPrefix: ['worktree', 'list'] },
+          ]),
+        );
       }
 
       const review = catalog.workflows.get('mr-review')!;
