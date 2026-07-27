@@ -253,6 +253,10 @@ const isOptionalResumeInput = (value: unknown): value is string | undefined =>
   value === undefined ||
   (typeof value === 'string' && value.length <= MAX_RESUME_INPUT_CHARS);
 
+const isOptionalIteration = (value: unknown): value is number | undefined =>
+  value === undefined ||
+  (Number.isSafeInteger(value) && (value as number) >= 1);
+
 const isWorkflowRunStatus = (value: unknown): value is WorkflowRunStatus =>
   value === 'running' ||
   value === 'paused' ||
@@ -341,12 +345,15 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
   if (!hasValidRequiredFields) return false;
 
   const hasValidOptionalFields =
+    isOptionalIteration(value.iteration) &&
     isOptionalString(value.reviewedArtifact) &&
     isOptionalString(value.reviewedFeedback) &&
     (typeof value.reviewedFeedback !== 'string' ||
       value.reviewedFeedback.length <= MAX_GATE_FEEDBACK_CHARS) &&
     isOptionalString(value.stepHandoff) &&
     isOptionalString(value.gateArtifact) &&
+    (value.restartWorkspaceCwd === undefined ||
+      isAbsoluteCwd(value.restartWorkspaceCwd)) &&
     isOptionalResumeInput(value.resumeInput) &&
     isOptionalString(value.pauseReason) &&
     isOptionalString(value.failedStepId) &&
@@ -357,6 +364,15 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
 
   const pendingGate = value.pendingGate;
   if (pendingGate !== undefined && !isPendingGate(pendingGate)) return false;
+
+  if (
+    value.restartWorkspaceCwd !== undefined &&
+    (value.history as ReadonlyArray<StepHistoryEntry>).some(
+      (entry) => entry.workspaceCwd !== undefined,
+    )
+  ) {
+    return false;
+  }
 
   return (
     workflowTraceChars(value as WorkflowRun) <= MAX_WORKFLOW_TRACE_CHARS &&

@@ -77,6 +77,12 @@ export type HarnessActionContext = {
     startContext: WorkflowStartContext,
     sessionEpoch: number,
   ) => Promise<void>;
+  restart: (input: string, context: ExtensionCommandContext) => Promise<void>;
+  restartNow: (
+    input: string,
+    startContext: WorkflowStartContext,
+    sessionEpoch: number,
+  ) => Promise<void>;
   pause: (reason: string, context: ExtensionCommandContext) => Promise<void>;
   pauseNow: (reason: string, context: ExtensionCommandContext) => Promise<void>;
   resume: (input: string, context: ExtensionCommandContext) => Promise<void>;

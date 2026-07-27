@@ -160,6 +160,20 @@ describe('when testing prompt', () => {
       expect(workspaceTask).toContain(
         'For every other outcome, omit `workspace`.',
       );
+      const restartedWorkspaceTask = buildDelegatedStepTask(
+        workspaceWorkflow,
+        {
+          ...createRun(workspaceWorkflow, '', [], 'run-restarted', 1),
+          restartWorkspaceCwd: '/repository/worktrees/existing',
+        },
+        'policy envelope',
+      );
+      expect(restartedWorkspaceTask).toContain(
+        '## Restart workspace constraint',
+      );
+      expect(restartedWorkspaceTask).toContain(
+        'must reuse and rebind exactly this existing workspace: /repository/worktrees/existing',
+      );
 
       const reviewedRaw = baseWorkflow();
       const reviewedSteps = reviewedRaw.steps as Record<

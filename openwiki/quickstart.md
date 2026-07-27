@@ -1,12 +1,15 @@
 # Pi Workflows OpenWiki
 
-Pi Workflows is a declarative, pauseable workflow harness for Pi. Read the system from the diagrams first; use the linked pages for exact fields and edge cases.
+This is the technical reference for Pi Workflows: its architecture, coding
+boundaries, workflow contracts, security model, integrations, and verification
+strategy. Use the linked pages for exact implementation decisions and edge
+cases.
 
 ## Navigation
 
 ```mermaid
 flowchart TD
-  Q[quickstart.md] --> A[architecture/overview.md]
+  Q[OpenWiki index] --> A[architecture/overview.md]
   Q --> L[architecture/runtime-lifecycle.md]
   Q --> W[authoring/workflow-files.md]
   Q --> S[authoring/settings-and-project-workflows.md]
@@ -77,79 +80,4 @@ flowchart TD
   Agents --> StepAgent[step.md<br/>default profile and child guidance]
   Examples --> Starter[starter-kit<br/>work, ticket, mr-review, mr-comment]
   Tests --> TestSuite[Bun test suite]
-```
-
-## Install And Run
-
-```mermaid
-flowchart TD
-  Bun[bun install] --> Check[bun run check]
-  Check --> InstallLocal[pi install /absolute/path/to/pi-workflows]
-  InstallLocal -. optional .-> InstallSubagents[pi install npm:pi-subagents]
-  InstallLocal -. optional .-> InstallPlan[pi install npm:@plannotator/pi-extension]
-  InstallLocal --> Reload["/reload"]
-  Reload --> WorkflowReload["/workflow-reload"]
-  WorkflowReload --> Start["/workflow-start mr-comment input"]
-```
-
-Core commands:
-
-| Command                        | Purpose                             |
-| ------------------------------ | ----------------------------------- |
-| `/workflow-list`               | List loaded workflows.              |
-| `/workflow-doctor [id]`        | Diagnose graph completion hazards.  |
-| `/workflow-start <id> [input]` | Start by workflow id.               |
-| `/<workflow command> [input]`  | Start through configured alias.     |
-| `/workflow-pause [reason]`     | Halt execution and checkpoint.      |
-| `/workflow-resume [guidance]`  | Reload and continue with a hint.    |
-| `/workflow-abort [reason]`     | Abort active run.                   |
-| `/workflow-reload`             | Reload files when no run is active. |
-
-The main surface has no task-viewer pane. Its footer shows only a compact
-`◐`/`◓`/`◑`/`◒` indicator plus the workflow id and current step title/id while
-work is running, then clears it. The full verification/history overlay stays
-closed until you toggle it with `Ctrl+Alt+W` by default; hide it with `q` or
-`Esc`. Configure another Pi key identifier with
-`statusShortcut` in `settings.yaml`, then run Pi's `/reload` to register the
-change. `/workflow-reload` reloads workflow files but cannot rebind extension
-shortcuts. The overlay contains every step and diagnostic detail, using `✓` for
-completed, `✕` for failed or aborted, and `◆` for paused or awaiting review. It
-clamps long reasons to its available width while the checkpoint keeps the
-complete message. Select steps with `↑`/`↓` or `j`/`k`; inspect one with
-`Enter`, `→`, or `l`. Detail scroll uses `↑`/`↓` or `j`/`k`, and `←`, `h`, or
-`Esc` returns to the board. `Ctrl+D`/`Ctrl+U` moves down/up by half a page.
-`gg` jumps to the top and `G` jumps to the bottom. `q` or the configured
-shortcut closes it; PgUp/PgDn and Home/End page through long content. New
-checkpoints retain
-bounded attempt tasks/results, gate decisions, confined child transcript
-references, and redacted finalized main-agent assistant/tool events across
-pause, resume, and restart. Main-agent events remain part of the parent
-session, but capture arms only for the exact workflow task and closes after its
-completion turn. Older checkpoints without those events still show their
-bounded task and result.
-
-Each settled step posts its validated summary in the chat, and the final step
-also marks the workflow complete. Pauses are visible too. Failure messages stay
-concise and redacted; use the step explorer for the full retained diagnostic.
-
-Delegated steps require pi-subagents 0.36.0 or newer. Each `subagent.agent`
-value selects the actual Pi Subagents profile, and each profile starts with a
-fresh context containing only the explicit workflow input and compact handoff.
-
-Configured workflow aliases accept multiline input. For example,
-`/work\n"""request"""` is normalized to `/work """request"""` and dispatched as
-the workflow command rather than as a normal parent-agent turn.
-
-## Default Workflow Location
-
-```mermaid
-flowchart TD
-  Env{PI_WORKFLOWS_DIR set?}
-  Env -- yes --> Explicit[Use PI_WORKFLOWS_DIR]
-  Env -- no --> AgentDir{PI_CODING_AGENT_DIR set?}
-  AgentDir -- yes --> AgentWorkflows[Use PI_CODING_AGENT_DIR/workflows]
-  AgentDir -- no --> Home[Use ~/.pi/agent/workflows]
-  Explicit --> Files[workflow YAML plus optional settings.yaml]
-  AgentWorkflows --> Files
-  Home --> Files
 ```

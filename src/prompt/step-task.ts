@@ -4,6 +4,7 @@ import { createStepContract } from './step-contract.ts';
 import {
   buildDelegatedCompletionInstructions,
   buildDelegatedHandoffSection,
+  buildRestartWorkspaceSection,
   buildResourceSection,
 } from './step-sections.ts';
 import {
@@ -119,6 +120,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     '',
     `Workflow: ${workflow.definition.id}`,
     `Run: ${run.runId}`,
+    `Iteration: ${run.iteration ?? 1}`,
     `Step: ${run.currentStepId} (${step.title})`,
     ...(isDelegated
       ? [
@@ -132,6 +134,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     prompt,
     '',
     ...(isDelegated ? buildDelegatedHandoffSection(handoff) : []),
+    ...buildRestartWorkspaceSection(run.restartWorkspaceCwd),
     ...buildResumeInputSection(
       run,
       RESUME_INPUT_PLACEHOLDER.test(promptTemplate),

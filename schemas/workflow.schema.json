@@ -52,6 +52,7 @@
               "workflow-list",
               "workflow-pause",
               "workflow-reload",
+              "workflow-restart",
               "workflow-resume",
               "workflow-start",
               "workflow-status"

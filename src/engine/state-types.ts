@@ -125,6 +125,8 @@ export type PendingGate = {
 
 export type WorkflowRun = {
   readonly stateVersion: typeof RUN_STATE_VERSION;
+  /** One-based attempt number within a restartable workflow/worktree lineage. */
+  readonly iteration?: number | undefined;
   readonly runId: string;
   readonly workflowId: string;
   readonly workflowDigest: string;
@@ -153,6 +155,11 @@ export type WorkflowRun = {
   readonly startCwd?: string | undefined;
   /** Current canonical execution directory for delegated workflow steps. */
   readonly cwd?: string | undefined;
+  /**
+   * Exact workspace that a restarted iteration must bind before it can finish.
+   * This prevents a missing prior worktree from being silently replaced.
+   */
+  readonly restartWorkspaceCwd?: string | undefined;
   /**
    * Input inherited from the previous completed step. Unlike `lastSummary`,
    * this survives a paused attempt of the current step.

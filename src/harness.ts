@@ -123,6 +123,11 @@ export class WorkflowHarness implements WorkflowCommandController {
     startContext: WorkflowStartContext,
     sessionEpoch: number,
   ) => Promise<void> = START_ACTIONS.startNow;
+  private readonly restartNow: (
+    input: string,
+    startContext: WorkflowStartContext,
+    sessionEpoch: number,
+  ) => Promise<void> = START_ACTIONS.restartNow;
   private readonly reloadNow: (
     context: ExtensionCommandContext,
   ) => Promise<void> = START_ACTIONS.reloadNow;
@@ -334,6 +339,21 @@ export class WorkflowHarness implements WorkflowCommandController {
     return this.enqueueMutation(context, (sessionEpoch) =>
       this.startNow(
         workflowId,
+        input,
+        {
+          context,
+          skills: () => context.getSystemPromptOptions().skills,
+          waitForIdle: () => context.waitForIdle(),
+        },
+        sessionEpoch,
+      ),
+    );
+  }
+
+  /** Starts another completed iteration in its existing workflow worktree. */
+  restart(input: string, context: ExtensionCommandContext): Promise<void> {
+    return this.enqueueMutation(context, (sessionEpoch) =>
+      this.restartNow(
         input,
         {
           context,

@@ -72,6 +72,7 @@ export function createTemplateValues({
   return {
     'workflow.input': run.input,
     'workflow.id': workflow.definition.id,
+    'workflow.iteration': String(run.iteration ?? 1),
     'run.id': run.runId,
     'step.id': run.currentStepId,
     'step.title': step.title,
@@ -81,5 +82,6 @@ export function createTemplateValues({
     'gate.artifact': run.gateArtifact ?? '',
     'gate.feedback': run.gateFeedback,
     'resume.input': run.resumeInput ?? '',
+    'restart.workspace': run.restartWorkspaceCwd ?? '',
   };
 }

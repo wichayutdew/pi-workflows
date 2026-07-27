@@ -1,5 +1,7 @@
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { createRun } from '../engine/state.ts';
+import { restartRun } from '../engine/transitions.ts';
+import type { LoadedWorkflow } from '../config/types.ts';
 import { analyzeWorkflow, formatWorkflowDoctor } from '../workflow-doctor.ts';
 import { formatWorkflowList } from '../workflow-list.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
@@ -36,6 +38,32 @@ function isCurrentSession(
   return session.isSessionActive && session.sessionEpoch === sessionEpoch;
 }
 
+type RestartWorkspaceBinding = {
+  readonly cwd: string;
+  readonly allowedRoots: ReadonlyArray<string>;
+};
+
+function completedWorkspaceBinding(
+  run: NonNullable<HarnessActionContext['run']>,
+  workflow: LoadedWorkflow,
+): RestartWorkspaceBinding | undefined {
+  for (let index = run.history.length - 1; index >= 0; index -= 1) {
+    const entry = run.history[index];
+    if (!entry?.workspaceCwd) continue;
+    const step = workflow.definition.steps[entry.stepId];
+    if (!step?.workspace || !step.workspace.bindOn.includes(entry.outcome)) {
+      throw new Error(
+        `workspace-binding step "${entry.stepId}" no longer matches the completed iteration`,
+      );
+    }
+    return {
+      cwd: entry.workspaceCwd,
+      allowedRoots: step.workspace.allowedRoots,
+    };
+  }
+  return undefined;
+}
+
 export type StartActions = {
   listWorkflows: (
     this: HarnessActionContext,
@@ -49,6 +77,12 @@ export type StartActions = {
   startNow: (
     this: HarnessActionContext,
     workflowId: string,
+    input: string,
+    startContext: WorkflowStartContext,
+    sessionEpoch: number,
+  ) => Promise<void>;
+  restartNow: (
+    this: HarnessActionContext,
     input: string,
     startContext: WorkflowStartContext,
     sessionEpoch: number,
@@ -231,6 +265,159 @@ async function startNow(
   this.launchCurrentStep(workflow);
 }
 
+async function restartNow(
+  this: HarnessActionContext,
+  input: string,
+  startContext: WorkflowStartContext,
+  sessionEpoch: number,
+): Promise<void> {
+  const { context } = startContext;
+  const completedRun = this.run;
+  if (!completedRun || completedRun.status !== 'completed') {
+    context.ui.notify('Only a completed workflow can be restarted', 'warning');
+    return;
+  }
+  if (this.activeDelegation) {
+    context.ui.notify(
+      `Cannot restart while subagent "${this.activeDelegation.agent}" is still cancelling`,
+      'warning',
+    );
+    return;
+  }
+  if (!completedRun.startCwd) {
+    context.ui.notify(
+      'Cannot restart this workflow on the same worktree because its original start directory was not captured; start a new workflow instead',
+      'error',
+    );
+    return;
+  }
+  if (!context.isIdle()) {
+    context.abort();
+    await startContext.waitForIdle();
+  }
+  if (!isCurrentSession(this, sessionEpoch) || this.run !== completedRun) {
+    context.ui.notify(
+      'Workflow restart was superseded by a session or workflow change',
+      'warning',
+    );
+    return;
+  }
+
+  this.captureSkills(startContext.skills());
+  if (!(await this.reloadCatalog(context, false))) {
+    context.ui.notify(
+      'Workflow restart was superseded by a newer configuration load',
+      'warning',
+    );
+    return;
+  }
+  if (!isCurrentSession(this, sessionEpoch) || this.run !== completedRun) {
+    context.ui.notify(
+      'Workflow restart was superseded by a session or workflow change',
+      'warning',
+    );
+    return;
+  }
+
+  const workflow = this.catalog.workflows.get(completedRun.workflowId);
+  if (!workflow) {
+    context.ui.notify(
+      `Workflow "${completedRun.workflowId}" is no longer loaded`,
+      'error',
+    );
+    return;
+  }
+  const livenessErrors = analyzeWorkflow(workflow.definition).issues.filter(
+    (issue) => issue.level === 'error',
+  );
+  if (livenessErrors.length > 0) {
+    context.ui.notify(
+      `Cannot restart workflow; run /workflow-doctor ${workflow.definition.id}:\n${livenessErrors.map((issue) => issue.message).join('\n')}`,
+      'error',
+    );
+    return;
+  }
+  const preflightErrors = this.preflight(workflow, workflow.definition.start);
+  if (preflightErrors.length > 0) {
+    context.ui.notify(
+      `Cannot restart workflow:\n${preflightErrors.join('\n')}`,
+      'error',
+    );
+    return;
+  }
+
+  let canonicalStartCwd: string;
+  let canonicalSessionCwd: string;
+  try {
+    canonicalStartCwd = this.dependencies.resolveWorkspaceDirectory({
+      candidateCwd: completedRun.startCwd,
+      startCwd: completedRun.startCwd,
+      allowedRoots: ['.'],
+    });
+    canonicalSessionCwd = this.dependencies.resolveWorkspaceDirectory({
+      candidateCwd: context.cwd,
+      startCwd: context.cwd,
+      allowedRoots: ['.'],
+    });
+  } catch (error) {
+    context.ui.notify(
+      `Cannot restart workflow on its captured worktree: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      'error',
+    );
+    return;
+  }
+  if (
+    canonicalStartCwd !== completedRun.startCwd ||
+    canonicalSessionCwd !== canonicalStartCwd
+  ) {
+    context.ui.notify(
+      'Current session cwd does not match the captured workflow start directory',
+      'error',
+    );
+    return;
+  }
+
+  try {
+    const binding = completedWorkspaceBinding(completedRun, workflow);
+    if (binding) {
+      const canonicalWorkspaceCwd = this.dependencies.resolveWorkspaceDirectory(
+        {
+          candidateCwd: binding.cwd,
+          startCwd: canonicalStartCwd,
+          allowedRoots: binding.allowedRoots,
+        },
+      );
+      if (canonicalWorkspaceCwd !== binding.cwd) {
+        throw new Error(
+          'previous workspace no longer resolves to its captured canonical directory',
+        );
+      }
+    }
+    this.run = restartRun(
+      workflow,
+      completedRun,
+      input.trim() || completedRun.input,
+      this.pi.getActiveTools(),
+      this.dependencies.now(),
+    );
+  } catch (error) {
+    context.ui.notify(
+      `Cannot restart workflow on the same worktree: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      'error',
+    );
+    return;
+  }
+
+  this.persist();
+  this.isolateMainSessionTools();
+  this.updateStatus();
+  this.launchCurrentStep(workflow);
+}
+
 async function reloadNow(
   this: HarnessActionContext,
   context: ExtensionCommandContext,
@@ -253,5 +440,5 @@ async function reloadNow(
  * Returns workflow listing, start, and reload actions for harness composition.
  */
 export function createStartActions(): StartActions {
-  return { listWorkflows, doctorWorkflows, startNow, reloadNow };
+  return { listWorkflows, doctorWorkflows, startNow, restartNow, reloadNow };
 }

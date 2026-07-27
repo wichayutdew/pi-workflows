@@ -40,6 +40,7 @@ function createCoreFixture() {
   const notices: Array<Notice> = [];
   const calls = {
     launched: 0,
+    persistenceEvents: [] as Array<string>,
     persisted: 0,
     registered: [] as Array<string>,
     restoredTools: 0,
@@ -57,6 +58,10 @@ function createCoreFixture() {
     catalog: createEmptyCatalog(),
     catalogLoadSequence: 0,
     dependencies: {
+      flushUnwrittenSession: () => {
+        calls.persistenceEvents.push('flush');
+        return true;
+      },
       loadCatalog: async () => createEmptyCatalog(),
       now: () => 10,
     },
@@ -69,7 +74,9 @@ function createCoreFixture() {
       run: async (operation: () => Promise<void>) => operation(),
     },
     pi: {
-      appendEntry: () => {},
+      appendEntry: () => {
+        calls.persistenceEvents.push('append');
+      },
       getActiveTools: () => ['read'],
       getAllTools: () => [{ name: 'read' }],
       getCommands: () => [] as Array<{ name: string }>,
@@ -125,6 +132,16 @@ function createCommandContext(notices: Array<Notice>): ExtensionCommandContext {
 
 describe('when testing core actions', () => {
   const actions = createCoreActions();
+
+  test('materializes a fresh Pi session immediately after appending a checkpoint', () => {
+    const workflow = loadedWorkflow();
+    const { calls, fixture } = createCoreFixture();
+    fixture.run = createRun(workflow, '', ['read'], 'run-1', 1);
+
+    actions.persist.call(fixture as unknown as HarnessActionContext);
+
+    expect(calls.persistenceEvents).toEqual(['append', 'flush']);
+  });
 
   test('fails a running transition whose next step fails preflight', () => {
     const workflow = loadedWorkflow();

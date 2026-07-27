@@ -16,6 +16,7 @@ stateDiagram-v2
   paused --> running: resume runnable step
   paused --> awaiting_gate: resume pending review
   paused --> completed: resume stored approved gate to $done
+  completed --> running: /workflow-restart
   running --> aborted: abort
   paused --> aborted: abort
   awaiting_gate --> aborted: abort
@@ -26,7 +27,7 @@ stateDiagram-v2
 The state machine is implemented by the pure engine modules under
 `src/engine/`. `create-run.ts` creates the initial immutable run,
 `run-advance.ts` handles ordinary step outcomes, `gate-transitions.ts` handles
-review submission and resolution, `run-lifecycle.ts` owns pause/resume/abort
+review submission and resolution, `run-lifecycle.ts` owns pause/resume/abort/restart
 helpers, and `run-reconciliation.ts` plus `reconciliation-history.ts` reconcile
 persisted checkpoints after workflow files change. `transitions.ts` and
 `state.ts` are compatibility facades over those modules.
@@ -281,6 +282,14 @@ flowchart TD
   Restore --> Tools[restore baseline tools unless delegated child unconfirmed]
   Persist --> Tools
 ```
+
+Each workflow checkpoint is appended to Pi and immediately materializes a new
+session file when the parent has not yet emitted a regular assistant message.
+The harness then re-adopts that file so Pi appends later custom and assistant
+entries normally. This happens before the first step launches, so reopening the
+session after a forced process stop follows the restore flow above. As with
+Pi's own session writes, a stop that interrupts the synchronous filesystem write
+itself cannot guarantee a complete checkpoint.
 
 ## Reconciliation On Resume
 

@@ -37,6 +37,7 @@ describe('when testing commands', () => {
         list: async () => void calls.push(['list']),
         doctor: async (id) => void calls.push(['doctor', id]),
         start: async (id, input) => void calls.push(['start', id, input]),
+        restart: async (input) => void calls.push(['restart', input]),
         pause: async (reason) => void calls.push(['pause', reason]),
         resume: async (input) => void calls.push(['resume', input]),
         abort: async (reason) => void calls.push(['abort', reason]),
@@ -86,6 +87,9 @@ describe('when testing commands', () => {
       await commands
         .get('workflow-resume')!
         .handler('  use the existing cache  ', context);
+      await commands
+        .get('workflow-restart')!
+        .handler('  add an enhancement  ', context);
       await commands.get('workflow-abort')!.handler('  stop  ', context);
       await commands.get('workflow-reload')!.handler('', context);
 
@@ -96,6 +100,7 @@ describe('when testing commands', () => {
         ['doctor', 'demo'],
         ['pause', 'later'],
         ['resume', 'use the existing cache'],
+        ['restart', 'add an enhancement'],
         ['abort', 'stop'],
         ['reload'],
       ]);

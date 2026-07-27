@@ -1,6 +1,7 @@
 const PROMPT_VARIABLES = new Set([
   'workflow.input',
   'workflow.id',
+  'workflow.iteration',
   'run.id',
   'step.id',
   'step.title',
@@ -10,6 +11,7 @@ const PROMPT_VARIABLES = new Set([
   'gate.artifact',
   'gate.feedback',
   'resume.input',
+  'restart.workspace',
 ]);
 
 /** Validate template variables embedded in resolved prompt text. */

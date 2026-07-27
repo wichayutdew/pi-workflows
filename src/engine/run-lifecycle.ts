@@ -1,6 +1,15 @@
 import type { LoadedWorkflow } from '../config/types.ts';
+import { createRun } from './create-run.ts';
 import type { WorkflowRun } from './state-types.ts';
 import { currentStep, withRunUpdate } from './transition-helpers.ts';
+
+const completedWorkspaceCwd = (run: WorkflowRun): string | undefined => {
+  for (let index = run.history.length - 1; index >= 0; index -= 1) {
+    const workspaceCwd = run.history[index]?.workspaceCwd;
+    if (workspaceCwd) return workspaceCwd;
+  }
+  return undefined;
+};
 
 /**
  * Lists outcomes the active step may submit directly.
@@ -133,3 +142,63 @@ export const abortRun = (
     },
     now,
   );
+
+/**
+ * Starts another iteration of a completed workflow while retaining its stable
+ * run/worktree identity. The next workspace-binding result must reaffirm the
+ * previously selected workspace before the iteration can complete.
+ *
+ * @param workflow - Current loaded workflow definition.
+ * @param run - Completed iteration to restart.
+ * @param input - New request, or the prior request when no replacement was supplied.
+ * @param baselineTools - Tools available before the new iteration is isolated.
+ * @param now - Restart timestamp.
+ * @returns A fresh running state for the next iteration.
+ */
+export const restartRun = (
+  workflow: LoadedWorkflow,
+  run: WorkflowRun,
+  input: string,
+  baselineTools: ReadonlyArray<string>,
+  now: number,
+): WorkflowRun => {
+  if (run.status !== 'completed') {
+    throw new Error('only a completed workflow can be restarted');
+  }
+  if (!run.startCwd) {
+    throw new Error(
+      'the completed workflow has no captured start directory; start a new workflow instead',
+    );
+  }
+
+  const previousIteration = run.iteration ?? 1;
+  if (!Number.isSafeInteger(previousIteration) || previousIteration < 1) {
+    throw new Error('the completed workflow has an invalid iteration number');
+  }
+  if (previousIteration >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('the workflow iteration limit has been reached');
+  }
+
+  const workspaceCwd = completedWorkspaceCwd(run);
+  if (workspaceCwd && run.cwd !== workspaceCwd) {
+    throw new Error(
+      'the completed workflow workspace does not match its recorded binding',
+    );
+  }
+
+  const restarted = createRun(
+    workflow,
+    input,
+    baselineTools,
+    run.runId,
+    now,
+    run.startCwd,
+    previousIteration + 1,
+  );
+  return {
+    ...restarted,
+    stepHandoff: run.lastSummary,
+    lastSummary: run.lastSummary,
+    ...(workspaceCwd ? { restartWorkspaceCwd: workspaceCwd } : {}),
+  };
+};

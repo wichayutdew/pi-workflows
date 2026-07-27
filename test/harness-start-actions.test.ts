@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { createRun } from '../src/engine/state.ts';
+import { advanceRun } from '../src/engine/transitions.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
 import { createStartActions } from '../src/harness/start-actions.ts';
 import type { WorkflowStartContext } from '../src/harness/types.ts';
@@ -464,6 +465,46 @@ describe('when testing start actions', () => {
     });
     expect(calls).toMatchObject({
       capturedSkills: ['workflow-skill'],
+      launched: 1,
+      persisted: 1,
+      reloaded: 1,
+      statusUpdates: 1,
+      toolIsolations: 1,
+    });
+  });
+
+  test('restarts a completed iteration with its stable run identity', async () => {
+    const { calls, fixture, workflow } = createStartFixture();
+    const command = createCommandContext();
+    let completed = createRun(
+      workflow,
+      'first iteration request',
+      ['read'],
+      'stable-run',
+      1,
+      '/workspace/run',
+    );
+    completed = advanceRun(workflow, completed, 'ready', 'Inspected', 2);
+    completed = advanceRun(workflow, completed, 'done', 'Completed', 3);
+    fixture.run = completed as never;
+
+    await actions.restartNow.call(
+      fixture as unknown as HarnessActionContext,
+      '',
+      startContext(command.context),
+      3,
+    );
+
+    expect(fixture.run).toMatchObject({
+      runId: 'stable-run',
+      iteration: 2,
+      input: 'first iteration request',
+      status: 'running',
+      currentStepId: 'inspect',
+      history: [],
+      lastSummary: 'Completed',
+    });
+    expect(calls).toMatchObject({
       launched: 1,
       persisted: 1,
       reloaded: 1,

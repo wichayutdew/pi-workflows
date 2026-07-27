@@ -82,6 +82,9 @@ export function renderSummaryLines(
         ]
       : []),
     ...keyValueLines(theme, 'run', run.runId, width),
+    ...(run.iteration && run.iteration > 1
+      ? [...keyValueLines(theme, 'iteration', String(run.iteration), width)]
+      : []),
     ...keyValueLines(
       theme,
       'status',

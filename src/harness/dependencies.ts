@@ -33,6 +33,7 @@ import {
   resolveWorkspaceDirectory,
   type ResolveWorkspaceDirectoryOptions,
 } from './workspace-directory.ts';
+import { flushUnwrittenSession } from './session-persistence.ts';
 
 const MAX_DELEGATED_RESULT_BYTES = 1024 * 1024;
 
@@ -71,6 +72,8 @@ export type WorkflowHarnessDependencies = {
     pi: ExtensionAPI,
   ) => MainStepRuntimeController;
   readonly createMutationQueue: () => SerialTaskQueueController;
+  /** Makes a new Pi session durable before its first assistant message. */
+  readonly flushUnwrittenSession: typeof flushUnwrittenSession;
   readonly scheduleInterval: (
     operation: () => void,
     intervalMs: number,
@@ -154,6 +157,7 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   createSubagentClient: (pi) => createSubagentDelegationClient(pi.events),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),
   createMutationQueue: createSerialTaskQueue,
+  flushUnwrittenSession,
   scheduleInterval: (operation, intervalMs) =>
     setInterval(operation, intervalMs),
   cancelInterval: (timer) => {
