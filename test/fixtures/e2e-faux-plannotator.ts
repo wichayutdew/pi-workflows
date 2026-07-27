@@ -16,6 +16,14 @@ function tracePath(): string {
 
 export default function e2eFauxPlannotator(pi: ExtensionAPI): void {
   let iteration = 0;
+  // The workflow preflight detects extensions through their registered
+  // resources. Register a harmless command so this fixture is self-contained
+  // and does not accidentally depend on a Plannotator extension installed in
+  // the developer's local Pi configuration.
+  pi.registerCommand('e2e-faux-plannotator', {
+    description: 'E2E Plannotator fixture marker',
+    handler: async () => {},
+  });
   pi.events.on(PLANNOTATOR_REQUEST_CHANNEL, (value) => {
     const request = value as {
       readonly action?: string;
