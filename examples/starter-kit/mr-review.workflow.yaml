@@ -76,7 +76,7 @@ steps:
       timeoutMs: 30000
     transitions:
       approved: publish
-      changes-requested: $pause
+      changes-requested: review
       blocked: $pause
 
   publish:

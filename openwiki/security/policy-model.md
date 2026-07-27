@@ -136,8 +136,11 @@ and the extension does not create or interpret worktrees.
 
 Gate artifacts are persisted separately from compact step summaries and remain
 opaque to the engine. A workflow prompt may define any artifact format and use
-it through `{{reviewed.artifact}}`; neither its contents nor an outcome label
-grant additional permissions.
+approved or rejected artifacts through `{{reviewed.artifact}}` or
+`{{gate.artifact}}`; neither their contents nor an outcome label grant
+additional permissions. Gate feedback is bounded to 50,000 characters before
+it enters checkpoint or prompt state, and rejection history stores only a
+compact summary.
 
 ## Immutable Input Defense
 

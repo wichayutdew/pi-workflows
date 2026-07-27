@@ -6,8 +6,15 @@ Review input:
 Fetched evidence:
 {{last.summary}}
 
+Previously rejected artifact:
+{{gate.artifact}}
+
 Feedback from a previously rejected review:
 {{gate.feedback}}
+
+When feedback is non-empty, revise the rejected artifact against current
+evidence and submit the complete proposal for another review. Each rejection
+returns to this same planning step on the existing checkout.
 
 Re-verify the same review and the current Git root, registered worktree,
 branch, HEAD, and status. Work on top of this checkout exactly as it exists.
@@ -58,5 +65,5 @@ Call `structured_output` alone with outcome `submit` only when the complete
 plan can be implemented and published without another planning decision. Put
 the Markdown plan in `artifact` and a self-contained handoff, including the
 unchanged JSON contract, in `summary`. Use `blocked` when identity, scope,
-authority, anchors, or evidence cannot be made safe. Rejection pauses through
-the YAML transition; never automatically replan or create a new workspace.
+authority, anchors, or evidence cannot be made safe. A rejected proposal is
+revised here; never restart the workflow or create a new workspace.

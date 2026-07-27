@@ -7,6 +7,7 @@ const PROMPT_VARIABLES = new Set([
   'last.summary',
   'reviewed.artifact',
   'reviewed.feedback',
+  'gate.artifact',
   'gate.feedback',
   'resume.input',
 ]);

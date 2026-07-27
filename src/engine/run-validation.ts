@@ -1,5 +1,6 @@
 import { isAbsolute, resolve } from 'node:path';
 import {
+  MAX_GATE_FEEDBACK_CHARS,
   MAX_RESUME_INPUT_CHARS,
   MAX_STEP_TRACE_ARTIFACT_CHARS,
   MAX_STEP_TRACE_ATTEMPTS,
@@ -40,6 +41,7 @@ const isGateApproval = (value: unknown): value is GateApproval =>
   typeof value.artifact === 'string' &&
   value.artifact.trim().length > 0 &&
   typeof value.feedback === 'string' &&
+  value.feedback.length <= MAX_GATE_FEEDBACK_CHARS &&
   typeof value.stepStructuralDigest === 'string' &&
   value.stepStructuralDigest.length > 0;
 
@@ -221,6 +223,7 @@ const isGateResolution = (value: unknown): value is GateResolution =>
   isRecord(value) &&
   typeof value.approved === 'boolean' &&
   typeof value.feedback === 'string' &&
+  value.feedback.length <= MAX_GATE_FEEDBACK_CHARS &&
   typeof value.resolvedAt === 'number';
 
 const isPendingGate = (value: unknown): value is PendingGate =>
@@ -333,13 +336,17 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
     typeof value.startedAt === 'number' &&
     typeof value.updatedAt === 'number' &&
     typeof value.lastSummary === 'string' &&
-    typeof value.gateFeedback === 'string';
+    typeof value.gateFeedback === 'string' &&
+    value.gateFeedback.length <= MAX_GATE_FEEDBACK_CHARS;
   if (!hasValidRequiredFields) return false;
 
   const hasValidOptionalFields =
     isOptionalString(value.reviewedArtifact) &&
     isOptionalString(value.reviewedFeedback) &&
+    (typeof value.reviewedFeedback !== 'string' ||
+      value.reviewedFeedback.length <= MAX_GATE_FEEDBACK_CHARS) &&
     isOptionalString(value.stepHandoff) &&
+    isOptionalString(value.gateArtifact) &&
     isOptionalResumeInput(value.resumeInput) &&
     isOptionalString(value.pauseReason) &&
     isOptionalString(value.failedStepId) &&

@@ -1,8 +1,33 @@
 import type { LoadedWorkflow } from '../config/types.ts';
 import { advanceRun } from './run-advance.ts';
 import { recordCurrentGateDecision } from './step-trace.ts';
-import type { GateResolution, WorkflowRun } from './state-types.ts';
+import {
+  MAX_GATE_FEEDBACK_CHARS,
+  type GateResolution,
+  type WorkflowRun,
+} from './state-types.ts';
 import { currentStep, withRunUpdate } from './transition-helpers.ts';
+
+const GATE_FEEDBACK_TRUNCATION_SUFFIX =
+  '\n… [gate feedback truncated by Pi Workflows]';
+const MAX_GATE_REJECTION_SUMMARY_CHARS = 500;
+
+const boundedGateFeedback = (feedback: string): string =>
+  feedback.length <= MAX_GATE_FEEDBACK_CHARS
+    ? feedback
+    : `${feedback.slice(
+        0,
+        MAX_GATE_FEEDBACK_CHARS - GATE_FEEDBACK_TRUNCATION_SUFFIX.length,
+      )}${GATE_FEEDBACK_TRUNCATION_SUFFIX}`;
+
+const gateRejectionSummary = (feedback: string): string => {
+  const compact = feedback.trim().replace(/\s+/g, ' ');
+  if (!compact) return 'Gate rejected';
+  const summary = `Gate rejected: ${compact}`;
+  return summary.length <= MAX_GATE_REJECTION_SUMMARY_CHARS
+    ? summary
+    : `${summary.slice(0, MAX_GATE_REJECTION_SUMMARY_CHARS - 1)}…`;
+};
 
 /**
  * Begins human review for a gated workflow step.
@@ -101,21 +126,22 @@ export const failGate = (
   run: WorkflowRun,
   reason: string,
   now: number,
-): WorkflowRun =>
-  run.pendingGate
-    ? withRunUpdate(
-        run,
-        {
-          status: 'running',
-          pendingGate: undefined,
-          gateFeedback: reason,
-          pausedFrom: undefined,
-          pauseReason: undefined,
-          failedStepId: undefined,
-        },
-        now,
-      )
-    : run;
+): WorkflowRun => {
+  if (!run.pendingGate) return run;
+  return withRunUpdate(
+    run,
+    {
+      status: 'running',
+      pendingGate: undefined,
+      gateArtifact: run.pendingGate.artifact,
+      gateFeedback: boundedGateFeedback(reason),
+      pausedFrom: undefined,
+      pauseReason: undefined,
+      failedStepId: undefined,
+    },
+    now,
+  );
+};
 
 /**
  * Stores a gate resolution without advancing the workflow.
@@ -129,14 +155,22 @@ export const storeGateResolution = (
   run: WorkflowRun,
   resolution: GateResolution,
   now: number,
-): WorkflowRun =>
-  run.pendingGate
-    ? withRunUpdate(
-        run,
-        { pendingGate: { ...run.pendingGate, resolution } },
-        now,
-      )
-    : run;
+): WorkflowRun => {
+  if (!run.pendingGate) return run;
+  return withRunUpdate(
+    run,
+    {
+      pendingGate: {
+        ...run.pendingGate,
+        resolution: {
+          ...resolution,
+          feedback: boundedGateFeedback(resolution.feedback),
+        },
+      },
+    },
+    now,
+  );
+};
 
 /**
  * Applies a human gate decision and follows its configured transition.
@@ -168,6 +202,7 @@ export const resolveGate = (
   const outcome = resolution.approved
     ? step.gate.approvedOutcome
     : step.gate.rejectedOutcome;
+  const feedback = boundedGateFeedback(resolution.feedback);
   const stepStructuralDigest =
     workflow.stepStructuralDigests[pendingGate.stepId] ?? '';
   if (resolution.approved && !stepStructuralDigest) {
@@ -177,16 +212,14 @@ export const resolveGate = (
   }
   const summary = resolution.approved
     ? (pendingGate.summary ?? '')
-    : resolution.feedback
-      ? `Gate rejected: ${resolution.feedback}`
-      : 'Gate rejected';
+    : gateRejectionSummary(feedback);
   const decidedRun = recordCurrentGateDecision(
     run,
     {
       provider: pendingGate.provider,
       requestId: pendingGate.requestId,
       approved: resolution.approved,
-      feedback: resolution.feedback,
+      feedback,
       resolvedAt: resolution.resolvedAt,
       ...(pendingGate.reviewId ? { reviewId: pendingGate.reviewId } : {}),
     },
@@ -199,11 +232,24 @@ export const resolveGate = (
       pendingGate: undefined,
       pausedFrom: undefined,
       pauseReason: undefined,
-      gateFeedback: resolution.feedback,
+      gateArtifact: resolution.approved ? '' : pendingGate.artifact,
+      gateFeedback: resolution.approved ? '' : feedback,
     },
     now,
   );
-  const advanced = advanceRun(workflow, runnableRun, outcome, summary, now);
+  const isSameStepHumanRevision =
+    !resolution.approved && step.transitions[outcome] === pendingGate.stepId;
+  const advanced = advanceRun(
+    workflow,
+    runnableRun,
+    outcome,
+    summary,
+    now,
+    {},
+    {
+      sameStepHumanGateRevision: isSameStepHumanRevision,
+    },
+  );
   const completedApprovedGate =
     resolution.approved && advanced.history.length > runnableRun.history.length;
   const history = completedApprovedGate
@@ -215,7 +261,7 @@ export const resolveGate = (
               approval: {
                 requestId: pendingGate.requestId,
                 artifact: pendingGate.artifact,
-                feedback: resolution.feedback,
+                feedback,
                 stepStructuralDigest,
               },
             }
@@ -228,9 +274,10 @@ export const resolveGate = (
     ...(completedApprovedGate
       ? {
           reviewedArtifact: pendingGate.artifact,
-          reviewedFeedback: resolution.feedback,
+          reviewedFeedback: feedback,
         }
       : {}),
-    gateFeedback: resolution.feedback,
+    gateArtifact: resolution.approved ? '' : pendingGate.artifact,
+    gateFeedback: resolution.approved ? '' : feedback,
   };
 };

@@ -6,8 +6,16 @@ Request:
 Workspace handoff:
 {{last.summary}}
 
+Previously rejected artifact:
+{{gate.artifact}}
+
 Feedback from a previously rejected review:
 {{gate.feedback}}
+
+When feedback is non-empty, treat the artifact and feedback as the user's
+requested revision, update the complete plan against current evidence, and
+submit it for another review. Each rejection returns to this same planning
+step; it never returns to workspace preparation.
 
 Confirm that the current child directory is the exact worktree selected by the
 preparation handoff. Never create, switch, reset, clean, or replace a branch or

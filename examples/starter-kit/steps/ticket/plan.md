@@ -6,8 +6,16 @@ Ticket input:
 Workspace handoff:
 {{last.summary}}
 
+Previously rejected artifact:
+{{gate.artifact}}
+
 Feedback from a previously rejected review:
 {{gate.feedback}}
+
+When feedback is non-empty, treat the artifact and feedback as the user's
+requested revision, update the complete plan against current evidence, and
+submit it for another review. Each rejection returns to this same planning
+step; it never returns to workspace preparation.
 
 Resolve exactly one ticket from the input. Fetch it through the configured
 Atlassian MCP server, including acceptance criteria, current state, links, and

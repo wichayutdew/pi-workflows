@@ -180,11 +180,15 @@ export class WorkflowStatusView implements Component {
 
   /** Handle close and scrolling key input. */
   handleInput(data: string): void {
+    const isDetailHalfPageDown =
+      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('d'));
+    const isDetailHalfPageUp =
+      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('u'));
     if (
       data === 'q' ||
       data === 'Q' ||
       matchesKey(data, 'ctrl+c') ||
-      matchesKey(data, 'ctrl+d') ||
+      (this.state.mode !== 'detail' && matchesKey(data, 'ctrl+d')) ||
       matchesKey(data, this.statusShortcut)
     ) {
       this.close();
@@ -199,6 +203,8 @@ export class WorkflowStatusView implements Component {
       return;
     }
     const pageSize = Math.max(1, this.state.viewportRows - 2);
+    const contentHeight = Math.max(1, this.state.viewportRows - 1);
+    const halfPageSize = Math.max(1, Math.floor(contentHeight / 2));
     if (this.state.mode === 'detail') {
       if (matchesKey(data, Key.left) || data === 'h') {
         this.showBoard();
@@ -206,6 +212,10 @@ export class WorkflowStatusView implements Component {
         this.setScrollOffset(this.state.scrollOffset + 1);
       } else if (matchesKey(data, Key.up) || data === 'k') {
         this.setScrollOffset(this.state.scrollOffset - 1);
+      } else if (isDetailHalfPageDown) {
+        this.setScrollOffset(this.state.scrollOffset + halfPageSize);
+      } else if (isDetailHalfPageUp) {
+        this.setScrollOffset(this.state.scrollOffset - halfPageSize);
       } else if (matchesKey(data, Key.pageDown)) {
         this.setScrollOffset(this.state.scrollOffset + pageSize);
       } else if (matchesKey(data, Key.pageUp)) {
@@ -287,7 +297,7 @@ export class WorkflowStatusView implements Component {
       this.statusShortcutLabel,
       this.theme,
       this.state.mode === 'detail'
-        ? '↑/↓ or j/k scroll · PgUp/PgDn · ←/h/Esc back'
+        ? '↑/↓ or j/k scroll · Ctrl+D/U half-page · PgUp/PgDn · ←/h/Esc back'
         : '↑/↓ or j/k select · Enter/→/l inspect · PgUp/PgDn',
     );
     this.state = page.state;

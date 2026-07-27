@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRun,
   isWorkflowRun,
+  MAX_GATE_FEEDBACK_CHARS,
   MAX_RESUME_INPUT_CHARS,
 } from '../src/engine/state.ts';
 import {
@@ -112,7 +113,7 @@ describe('when testing engine', () => {
         /Incoming previous-step handoff:\nApproved implementation contract/,
       );
       expect(task).toMatch(
-        /Latest paused attempt:\nTooling failed after partial work/,
+        /Latest current-step summary:\nTooling failed after partial work/,
       );
     });
 
@@ -168,7 +169,11 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt: 'Plan {{gate.feedback}}',
+          prompt:
+            'Rejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
+          subagent: {
+            agent: 'planner',
+          },
           permissions: {
             extensions: ['plannotator'],
           },
@@ -200,16 +205,160 @@ describe('when testing engine', () => {
         'Unreviewed child summary',
       );
       // when
+      const feedback = `# Plan Feedback\n\n${'x'.repeat(
+        MAX_GATE_FEEDBACK_CHARS + 100,
+      )}`;
       run = resolveGate(
         workflow,
         run,
-        { approved: false, feedback: 'Add rollback', resolvedAt: 3 },
+        { approved: false, feedback, resolvedAt: 3 },
         3,
       );
       // then
       expect(run.status).toBe('running');
       expect(run.currentStepId).toBe('plan');
-      expect(run.gateFeedback).toBe('Add rollback');
+      expect(run.gateArtifact).toBe('# Plan');
+      expect(run.gateFeedback).toHaveLength(MAX_GATE_FEEDBACK_CHARS);
+      expect(run.gateFeedback).toEndWith(
+        '… [gate feedback truncated by Pi Workflows]',
+      );
+      expect(run.lastSummary.length).toBeLessThanOrEqual(500);
+      expect(run.lastSummary).toStartWith('Gate rejected: # Plan Feedback');
+      expect(isWorkflowRun(run)).toBe(true);
+    });
+
+    test('same-step gate feedback can iterate until the user approves', () => {
+      // given
+      const raw = baseWorkflow();
+      raw.maxStepVisits = 1;
+      raw.steps = {
+        prepare: {
+          prompt: 'Prepare',
+          transitions: {
+            ready: 'plan',
+          },
+        },
+        plan: {
+          prompt:
+            'Handoff:\n{{last.summary}}\nRejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
+          subagent: {
+            agent: 'planner',
+          },
+          permissions: {
+            extensions: ['plannotator'],
+          },
+          requires: {
+            extensions: ['plannotator'],
+          },
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'changes-requested',
+          },
+          transitions: {
+            approved: '$done',
+            'changes-requested': 'plan',
+            retry: 'plan',
+          },
+        },
+      };
+      raw.start = 'prepare';
+      const workflow = loadedWorkflow(raw);
+      let run = createRun(workflow, '', [], 'iterative-gate', 1);
+      let now = 2;
+      run = advanceRun(
+        workflow,
+        run,
+        'ready',
+        'Bound worktree: /tmp/run-worktree',
+        now,
+      );
+
+      // when
+      for (const [round, feedback] of [
+        [1, 'Clarify rollback'],
+        [2, 'Add the exact validation command'],
+      ] as const) {
+        run = beginGate(
+          workflow,
+          run,
+          'submit',
+          `# Plan v${round}`,
+          `request-${round}`,
+          ++now,
+          `Plan v${round} ready`,
+        );
+        run = resolveGate(
+          workflow,
+          run,
+          { approved: false, feedback, resolvedAt: ++now },
+          now,
+        );
+
+        expect(run.status).toBe('running');
+        expect(run.currentStepId).toBe('plan');
+        expect(run.stepHandoff).toBe('Bound worktree: /tmp/run-worktree');
+        expect(run.gateArtifact).toBe(`# Plan v${round}`);
+        expect(run.gateFeedback).toBe(feedback);
+        const revisionTask = buildDelegatedStepTask(workflow, run, 'policy');
+        expect(revisionTask).toMatch(
+          /Incoming previous-step handoff:\nBound worktree: \/tmp\/run-worktree/,
+        );
+        expect(revisionTask).toContain(
+          `Latest current-step summary:\nGate rejected: ${feedback}`,
+        );
+        expect(revisionTask).toContain(`Rejected artifact:\n# Plan v${round}`);
+        expect(revisionTask).toContain(`Feedback:\n${feedback}`);
+
+        if (round === 1) {
+          run = advanceRun(
+            workflow,
+            run,
+            'retry',
+            'Transient planning dependency failed',
+            ++now,
+          );
+          expect(run.status).toBe('paused');
+          expect(run.pauseReason).toMatch(/exceeded maxStepVisits/);
+          expect(run.stepHandoff).toBe('Bound worktree: /tmp/run-worktree');
+          expect(run.gateArtifact).toBe('# Plan v1');
+          expect(run.gateFeedback).toBe(feedback);
+          run = resumeRun(run, ++now);
+          const retryTask = buildDelegatedStepTask(workflow, run, 'policy');
+          expect(retryTask).toContain(
+            'Incoming previous-step handoff:\nBound worktree: /tmp/run-worktree',
+          );
+          expect(retryTask).toContain('Rejected artifact:\n# Plan v1');
+          expect(retryTask).toContain(`Feedback:\n${feedback}`);
+        }
+      }
+      run = beginGate(
+        workflow,
+        run,
+        'submit',
+        '# Plan v3',
+        'request-3',
+        ++now,
+        'Plan v3 ready',
+      );
+      run = resolveGate(
+        workflow,
+        run,
+        { approved: true, feedback: 'Approved', resolvedAt: ++now },
+        now,
+      );
+
+      // then
+      expect(run.status).toBe('completed');
+      expect(run.visits.plan).toBe(4);
+      expect(run.history.slice(-3).map((entry) => entry.outcome)).toEqual([
+        'retry',
+        'changes-requested',
+        'approved',
+      ]);
+      expect(run.reviewedArtifact).toBe('# Plan v3');
+      expect(run.gateArtifact).toBe('');
     });
 
     test('gate approval preserves summary and opaque artifact separately', () => {
@@ -252,7 +401,7 @@ describe('when testing engine', () => {
       run = resolveGate(
         workflow,
         run,
-        { approved: true, feedback: '', resolvedAt: 3 },
+        { approved: true, feedback: 'Ship it', resolvedAt: 3 },
         3,
       );
       // then
@@ -260,7 +409,8 @@ describe('when testing engine', () => {
       expect(run.lastSummary).toBe('Plan is ready for implementation');
       expect(run.stepHandoff).toBe('Plan is ready for implementation');
       expect(run.reviewedArtifact).toBe('# Plan');
-      expect(run.reviewedFeedback).toBe('');
+      expect(run.reviewedFeedback).toBe('Ship it');
+      expect(run.gateFeedback).toBe('');
       expect(run.history.at(-1)?.summary).toBe(
         'Plan is ready for implementation',
       );
@@ -268,7 +418,7 @@ describe('when testing engine', () => {
       expect(run.history.at(-1)?.approval).toEqual({
         requestId: 'request-handoff',
         artifact: '# Plan',
-        feedback: '',
+        feedback: 'Ship it',
         stepStructuralDigest: workflow.stepStructuralDigests.plan!,
       });
       expect(isWorkflowRun(run)).toBe(true);
@@ -1346,7 +1496,10 @@ describe('when testing engine', () => {
         ).pendingGate?.resolution?.approved,
       ).toBe(true);
       expect(failGate(run, 'ignored', 3)).toBe(run);
-      expect(failGate(pending, 'offline', 3).gateFeedback).toBe('offline');
+      expect(failGate(pending, 'offline', 3)).toMatchObject({
+        gateArtifact: '# Plan',
+        gateFeedback: 'offline',
+      });
       const failedPausedGate = failGate(
         pauseRun(pending, 'temporarily paused', 3),
         'offline',
@@ -1375,9 +1528,23 @@ describe('when testing engine', () => {
       const legacyRun = { ...run };
       delete legacyRun.stepHandoff;
       delete legacyRun.reviewedArtifact;
+      delete legacyRun.gateArtifact;
       expect(isWorkflowRun(legacyRun)).toBe(true);
       expect(isWorkflowRun({ ...run, stepHandoff: 42 })).toBe(false);
       expect(isWorkflowRun({ ...run, reviewedArtifact: 42 })).toBe(false);
+      expect(isWorkflowRun({ ...run, gateArtifact: 42 })).toBe(false);
+      expect(
+        isWorkflowRun({
+          ...run,
+          gateFeedback: 'x'.repeat(MAX_GATE_FEEDBACK_CHARS + 1),
+        }),
+      ).toBe(false);
+      expect(
+        isWorkflowRun({
+          ...run,
+          reviewedFeedback: 'x'.repeat(MAX_GATE_FEEDBACK_CHARS + 1),
+        }),
+      ).toBe(false);
       expect(isWorkflowRun({ ...run, resumeInput: 'try again' })).toBe(true);
       expect(
         isWorkflowRun({

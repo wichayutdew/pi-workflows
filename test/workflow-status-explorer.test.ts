@@ -624,7 +624,13 @@ describe('when exploring workflow step evidence', () => {
     run = appendMainStepLog(
       run,
       'inspect-1',
-      ['assistant\nI inspected the exact requirement'],
+      [
+        'assistant\nI inspected the exact requirement',
+        ...Array.from(
+          { length: 40 },
+          (_, index) => `assistant\nDetail log line ${index + 1}`,
+        ),
+      ],
       2,
     );
     run = recordCurrentStepResult(run, result('ready', 'inspected'), 3);
@@ -648,9 +654,20 @@ describe('when exploring workflow step evidence', () => {
     expect(view.render(100).join('\n')).toContain('implement');
     view.handleInput('\u001b[A');
     view.handleInput('\u001b[C');
-    const detail = view.render(100).join('\n');
+    const detailPage = view.render(100);
+    const detail = detailPage.join('\n');
     expect(detail).toContain('Step Explorer · inspect');
     expect(detail).toContain('exact inspect task');
+    expect(detailPage.at(-1)).toMatch(/Ctrl\+D\/U half-page.*rows 1-18\//);
+
+    view.handleInput('\u0004');
+    expect(closed).toBe(0);
+    const halfPageDown = view.render(100);
+    expect(halfPageDown.at(-1)).toMatch(/rows 10-27\//);
+    view.handleInput('\u0015');
+    const halfPageUp = view.render(100);
+    expect(halfPageUp.at(-1)).toMatch(/rows 1-18\//);
+
     view.handleInput('j');
     const scrolledDetail = view.render(100).join('\n');
     expect(scrolledDetail).toContain('I inspected the exact requirement');

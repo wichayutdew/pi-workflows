@@ -117,8 +117,9 @@ completed, `✕` for failed or aborted, and `◆` for paused or awaiting review.
 clamps long reasons to its available width while the checkpoint keeps the
 complete message. Select steps with `↑`/`↓` or `j`/`k`; inspect one with
 `Enter`, `→`, or `l`. Detail scroll uses `↑`/`↓` or `j`/`k`, and `←`, `h`, or
-`Esc` returns to the board. `q` or the configured shortcut closes it;
-PgUp/PgDn and Home/End page through long content. New checkpoints retain
+`Esc` returns to the board. `Ctrl+D`/`Ctrl+U` moves down/up by half a page.
+`q` or the configured shortcut closes it; PgUp/PgDn and Home/End page through
+long content. New checkpoints retain
 bounded attempt tasks/results, gate decisions, confined child transcript
 references, and redacted finalized main-agent assistant/tool events across
 pause, resume, and restart. Main-agent events remain part of the parent

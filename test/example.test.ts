@@ -35,7 +35,7 @@ describe('when testing example', () => {
       );
       expect(example?.steps.plan?.transitions).toMatchObject({
         approved: 'implement',
-        'changes-requested': '$pause',
+        'changes-requested': 'plan',
         blocked: '$pause',
       });
       expect(example?.steps.implement?.transitions).toMatchObject({
@@ -61,6 +61,7 @@ describe('when testing example', () => {
         /format is defined by this\s+workflow prompt/i,
       );
       expect(planPrompt).toMatch(/treats the artifact as opaque/i);
+      expect(planPrompt).toContain('{{gate.artifact}}');
       expect(catalog.workflows.get('mr-comments')?.prompts.implement).toContain(
         '{{reviewed.artifact}}',
       );
@@ -214,9 +215,11 @@ describe('when testing example', () => {
         );
         expect(workflow.definition.steps.plan?.transitions).toMatchObject({
           approved: 'implement',
-          'changes-requested': '$pause',
+          'changes-requested': 'plan',
           blocked: '$pause',
         });
+        expect(workflow.prompts.plan).toContain('{{gate.artifact}}');
+        expect(workflow.prompts.plan).toContain('{{gate.feedback}}');
       }
 
       const review = catalog.workflows.get('mr-review')!;
@@ -229,8 +232,10 @@ describe('when testing example', () => {
       );
       expect(review.definition.steps.review?.transitions).toMatchObject({
         approved: 'publish',
-        'changes-requested': '$pause',
+        'changes-requested': 'review',
       });
+      expect(review.prompts.review).toContain('{{gate.artifact}}');
+      expect(review.prompts.review).toContain('{{gate.feedback}}');
       for (const step of Object.values(review.definition.steps)) {
         expect(step.requires.tools).not.toContain('mcp');
       }
@@ -248,8 +253,10 @@ describe('when testing example', () => {
       }
       expect(comment.definition.steps.plan?.transitions).toMatchObject({
         approved: 'implement',
-        'changes-requested': '$pause',
+        'changes-requested': 'plan',
       });
+      expect(comment.prompts.plan).toContain('{{gate.artifact}}');
+      expect(comment.prompts.plan).toContain('{{gate.feedback}}');
       expect(comment.definition.steps.verify?.transitions.failed).toBe(
         'implement',
       );

@@ -1,6 +1,7 @@
 export { createRun } from './create-run.ts';
 export { isWorkflowRun } from './run-validation.ts';
 export {
+  MAX_GATE_FEEDBACK_CHARS,
   MAX_RESUME_INPUT_CHARS,
   MAX_STEP_TRACE_ATTEMPTS,
   MAX_STEP_TRACE_LOG_CHARS,

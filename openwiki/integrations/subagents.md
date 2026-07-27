@@ -87,11 +87,11 @@ exposing the main-agent-only `workflow_complete_step` tool.
 The workflow request deliberately owns fresh context, timeout, skills,
 artifacts, and its optional model override. The profile supplies its specialty,
 the step prompt supplies its exact instructions, and the previous step's
-self-contained compact summary supplies the cross-step handoff. An approved
-gate artifact is persisted separately and is available only through the
-explicit `{{reviewed.artifact}}` template value. Parent and sibling transcripts
-are never inherited. The request's skill selection replaces the selected
-profile's normal skills for that step.
+self-contained compact summary supplies the cross-step handoff. Approved and
+rejected gate artifacts are persisted separately and are available only through
+the explicit `{{reviewed.artifact}}` and `{{gate.artifact}}` template values.
+Parent and sibling transcripts are never inherited. The request's skill
+selection replaces the selected profile's normal skills for that step.
 
 Automatic recovery candidates include `failed` and
 `structured_output_failed` responses with an error or nonzero exit, plus

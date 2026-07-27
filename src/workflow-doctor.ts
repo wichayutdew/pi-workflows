@@ -235,7 +235,7 @@ export function formatWorkflowDoctor(
       '',
       `Result: ${errors.length > 0 ? 'ERROR' : warnings.length > 0 ? 'WARNING' : 'PASS'}`,
       '',
-      `Runtime loop guard: each step executes at most ${report.maxStepVisits} time${report.maxStepVisits === 1 ? '' : 's'} before the next attempted entry pauses an uninterrupted run. This bounds graph cycling; it does not guarantee $done or bound time spent inside a step or gate.`,
+      `Runtime loop guard: automatic graph advancement enters each step at most ${report.maxStepVisits} time${report.maxStepVisits === 1 ? '' : 's'} before the next attempted entry pauses the run. An explicit human rejection back to the same gated step bypasses that check for its transition because every revision awaits another decision; the visit is still recorded. This bounds unattended cycling; it does not guarantee $done or bound time spent inside a step or gate.`,
       '',
     );
     if (report.issues.length === 0) {

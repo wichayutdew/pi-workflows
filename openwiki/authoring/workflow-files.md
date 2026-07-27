@@ -84,7 +84,13 @@ produce a warning.
 At runtime, `maxStepVisits` bounds uninterrupted graph advancement. After a step
 has executed that many times, the next attempted entry pauses at a checkpoint.
 This prevents automatic infinite cycling; an explicit resume may continue and
-time spent inside a step or gate is outside this graph bound.
+time spent inside a step or gate is outside this graph bound. An explicit human
+gate rejection back to the same gated step bypasses the visit-limit check for
+that transition: every revision retains the step's original incoming handoff,
+then must return to a gate and wait for another decision. The visit is still
+recorded. A same-step agent retry retains that handoff and gate context but
+remains subject to the limit, so all transitions produced solely by agents are
+bounded.
 
 ## Prompt Rendering
 
@@ -108,7 +114,8 @@ Supported variables:
 | `{{run.id}}`            | Runtime run.                                                                                                               |
 | `{{step.id}}`           | Current step.                                                                                                              |
 | `{{step.title}}`        | Current step.                                                                                                              |
-| `{{last.summary}}`      | Previous completed handoff; after `$pause`, preserved incoming handoff plus latest paused attempt.                         |
+| `{{last.summary}}`      | Previous completed handoff; during a pause or same-step revision, combines it with the current-step summary.               |
+| `{{gate.artifact}}`     | Opaque artifact returned by the latest rejected or failed gate.                                                            |
 | `{{gate.feedback}}`     | Latest rejected gate.                                                                                                      |
 | `{{reviewed.artifact}}` | Immutable artifact from the approved gate.                                                                                 |
 | `{{reviewed.feedback}}` | Feedback paired with that approval.                                                                                        |
@@ -164,9 +171,11 @@ rewrites commands nor extracts executable authority from prompts, summaries,
 or gate artifacts. The workflow author declares executable scope in YAML, and
 the agent determines command syntax from its own context.
 
-Gate artifacts are opaque data available through `{{reviewed.artifact}}`.
-Their format and downstream meaning belong to the workflow prompt. Outcome
-names are also opaque labels whose only engine-level behavior is the transition
+Gate artifacts are opaque data. An approved artifact is available through
+`{{reviewed.artifact}}`; the latest rejected artifact is available to its
+configured transition target through `{{gate.artifact}}`. Their format and
+downstream meaning belong to the workflow prompt. Outcome names are also opaque
+labels whose only engine-level behavior is the transition
 target declared beside them.
 
 ## Compact Bash Rules
@@ -202,9 +211,9 @@ active-tool list. The selected profile still determines which extension
 providers are loaded, so an unavailable provider cannot be activated.
 
 Each child receives the original workflow input plus the previous step's
-self-contained compact `summary`. An approved artifact appears only when the
-prompt explicitly uses `{{reviewed.artifact}}`. It never inherits the parent or
-sibling transcript.
+self-contained compact `summary`. Approved and rejected gate artifacts appear
+only when the prompt explicitly uses `{{reviewed.artifact}}` or
+`{{gate.artifact}}`. It never inherits the parent or sibling transcript.
 
 ## Workspace Binding
 
