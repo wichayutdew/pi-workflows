@@ -92,6 +92,32 @@ recorded. A same-step agent retry retains that handoff and gate context but
 remains subject to the limit, so all transitions produced solely by agents are
 bounded.
 
+## Verification Repair Loops
+
+Make a verifier return an actionable outcome to the mutation step, rather than
+using `$pause` for a definite repairable finding:
+
+```yaml
+implement:
+  transitions:
+    ready: verify
+    blocked: $pause
+
+verify:
+  transitions:
+    passed: $done
+    failed: implement
+    retry: verify
+    blocked: $pause
+```
+
+The verifier's `failed` summary becomes the next implementor's
+`{{last.summary}}` handoff. It should name the exact evidence and smallest
+safe fix; the implementor should return to `verify` only after applying that
+fix. Keep `blocked` for stale, ambiguous, or unsafe situations. This loop is
+still bounded by `maxStepVisits`; resume the durable checkpoint or raise that
+workflow-specific limit when more repair rounds are appropriate.
+
 ## Prompt Rendering
 
 ```mermaid

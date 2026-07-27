@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { createRun, isWorkflowRun } from '../src/engine/state.ts';
 import { advanceRun, reconcileRun } from '../src/engine/transitions.ts';
+import { buildDelegatedStepTask } from '../src/prompt.ts';
 import { baseWorkflow, loadedWorkflow } from './helpers.ts';
 import { createDelegationPlan } from '../src/harness/delegation-plan.ts';
 
@@ -53,7 +54,7 @@ const sessionContext = (cwd: string): ExtensionContext =>
   }) as unknown as ExtensionContext;
 
 describe('when persisting a workflow workspace binding', () => {
-  test('binds once and carries the selected cwd through downstream cycles', () => {
+  test('binds once and carries the selected cwd through a verifier repair loop', () => {
     const { workflow } = workspaceWorkflow();
     const startCwd = '/repository/source';
     const workspaceCwd = '/repository/worktrees/task';
@@ -149,6 +150,26 @@ describe('when persisting a workflow workspace binding', () => {
     run = advanceRun(workflow, run, 'failed', 'Fix finding', 4);
     expect(run.currentStepId).toBe('implement');
     expect(run.cwd).toBe(workspaceCwd);
+    expect(run.stepHandoff).toBe('Fix finding');
+    expect(run.lastSummary).toBe('Fix finding');
+    expect(buildDelegatedStepTask(workflow, run, 'policy')).toContain(
+      'Fix finding',
+    );
+
+    run = advanceRun(workflow, run, 'ready', 'Fixed finding', 5);
+    expect(run.currentStepId).toBe('verify');
+    expect(run.stepHandoff).toBe('Fixed finding');
+    expect(run.cwd).toBe(workspaceCwd);
+
+    run = advanceRun(workflow, run, 'passed', 'Verified finding', 6);
+    expect(run.status).toBe('completed');
+    expect(run.history.map((entry) => entry.outcome)).toEqual([
+      'ready',
+      'ready',
+      'failed',
+      'ready',
+      'passed',
+    ]);
     expect(isWorkflowRun(run)).toBe(true);
   });
 

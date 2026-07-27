@@ -267,8 +267,21 @@ describe('when testing example', () => {
         approved: 'publish',
         'changes-requested': 'review',
       });
+      expect(review.definition.steps.verify?.transitions).toMatchObject({
+        verified: '$done',
+        failed: 'publish',
+        retry: 'verify',
+        blocked: '$pause',
+      });
       expect(review.prompts.review).toContain('{{gate.artifact}}');
       expect(review.prompts.review).toContain('{{gate.feedback}}');
+      expect(review.prompts.publish).toContain('{{last.summary}}');
+      expect(review.prompts.publish).toMatch(
+        /actionable\s+verification\s+finding[\s\S]*corrective\s+publication\s+handoff/i,
+      );
+      expect(review.prompts.verify).toMatch(
+        /`failed`[\s\S]*next\s+publication\s+worker/i,
+      );
       for (const step of Object.values(review.definition.steps)) {
         expect(step.requires.tools).not.toContain('mcp');
       }

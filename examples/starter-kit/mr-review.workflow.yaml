@@ -105,7 +105,7 @@ steps:
       blocked: $pause
 
   verify:
-    title: Verify the review is observable remotely
+    title: Verify or return the review for publication repair
     prompt:
       file: steps/mr-review/verify.md
     subagent:
@@ -127,4 +127,6 @@ steps:
       tools: [bash]
     transitions:
       verified: $done
+      failed: publish
+      retry: verify
       blocked: $pause
