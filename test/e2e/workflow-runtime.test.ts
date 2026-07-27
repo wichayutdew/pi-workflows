@@ -39,6 +39,7 @@ import {
 const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const TEST_TIMEOUT_MS = 60_000;
 const POLL_TIMEOUT_MS = 45_000;
+const START_TIMEOUT_MS = 5_000;
 
 interface WorkflowHistoryEntry {
   stepId: string;
@@ -152,6 +153,31 @@ async function waitForTerminalCheckpoint(
     `Timed out waiting for workflow completion. Last checkpoint: ${JSON.stringify(
       observed,
     )}\nPi stderr:\n${client.getStderr()}`,
+  );
+}
+
+async function startWorkflow(client: RpcClient, prompt: string): Promise<void> {
+  const waitForCheckpoint = async (): Promise<boolean> => {
+    const deadline = Date.now() + START_TIMEOUT_MS;
+    do {
+      if (latestCheckpoint((await client.getEntries()).entries)) return true;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    } while (Date.now() < deadline);
+    return false;
+  };
+
+  await client.prompt(prompt);
+  if (await waitForCheckpoint()) return;
+
+  // Pi registers extension commands before its async session_start hooks
+  // finish. A slow runner can therefore accept the first prompt while this
+  // extension is still initializing. Retrying is safe: the workflow mutation
+  // queue rejects the duplicate once the first request has started a run.
+  await client.prompt(prompt);
+  if (await waitForCheckpoint()) return;
+
+  throw new Error(
+    `Workflow did not create an initial checkpoint after retry. Pi stderr:\n${client.getStderr()}`,
   );
 }
 
@@ -320,7 +346,8 @@ describe('when running a workflow through real Pi subprocesses', () => {
         await client.start();
         await waitForCommand(client, 'workflow-doctor');
         await waitForCommand(client, 'work');
-        await client.prompt(
+        await startWorkflow(
+          client,
           `/work\n${E2E_INPUT_MARKER}: implement the deterministic subprocess smoke request.`,
         );
 
@@ -636,7 +663,7 @@ describe('when running a workflow through real Pi subprocesses', () => {
         });
         await client.start();
         await waitForCommand(client, 'gate-e2e');
-        await client.prompt(`/gate-e2e ${E2E_GATE_INPUT}`);
+        await startWorkflow(client, `/gate-e2e ${E2E_GATE_INPUT}`);
 
         const checkpoint = await waitForTerminalCheckpoint(client);
         if (checkpoint.status !== 'completed') {
