@@ -131,6 +131,13 @@ describe('when testing prompt', () => {
       expect(delegatedTask).toContain(
         'This step cannot bind a workspace; omit `workspace`.',
       );
+      expect(delegatedTask).toContain('## Human-readable non-success results');
+      expect(delegatedTask).toContain(
+        '# <Failed | Blocked | Retry>: <one-sentence plain-language decision>',
+      );
+      expect(delegatedTask).toContain(
+        'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes',
+      );
 
       const workspaceRaw = baseWorkflow();
       const workspaceSteps = workspaceRaw.steps as Record<
