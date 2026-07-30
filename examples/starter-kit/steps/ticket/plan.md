@@ -56,10 +56,22 @@ This user-owned prompt defines the Plannotator artifact. Produce:
 5. `## Acceptance criteria`
 6. `## Validation commands`
 7. `## Risks and unresolved decisions`
+8. `## Publication contract`
 
 Include exact target files and observable results. Derive every repository
 command from current scripts or authoritative tool help. Do not assume a
 language, framework, package manager, flag order, or cwd syntax.
+
+The Publication contract is part of the reviewed artifact and authorizes the
+post-verification publication. State the exact bound branch, remote, target
+branch, merge-request title and description, and the GitLab project or hosted
+remote evidence. It authorizes only a non-force push of the verified HEAD to
+that same branch and creation of one merge request for this ticket. Do not
+include credentials, arbitrary shell commands, history rewrites, branch
+deletion, Jira mutation, merging, or any other remote mutation. If the remote,
+target branch, or merge-request metadata cannot be established safely from
+current evidence, use `blocked` rather than leaving a publish decision for the
+verification step.
 
 Call `structured_output` alone with outcome `submit`, the complete Markdown in
 `artifact`, and a self-contained execution handoff in `summary`. Use `blocked`

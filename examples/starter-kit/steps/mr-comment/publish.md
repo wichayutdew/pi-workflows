@@ -20,7 +20,8 @@ an exact already-present non-force push SHA or an exact reply by the current
 user with the approved marker. Execute each remaining action once, in approved
 order, through its exact configured MCP tool/input or standalone `git`, `glab`,
 `gh`, or authenticated cURL command. Push before replies that describe the
-code fix.
+code fix. Automatically perform every required approved push and reply; never
+ask the user to perform one.
 
 Require a successful same-host, target-correlated response. Never change reply
 meaning, target another comment, expose credentials, force-push, approve,

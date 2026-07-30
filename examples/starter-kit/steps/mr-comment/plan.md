@@ -25,8 +25,9 @@ to close evidence gaps.
 Classify every unresolved comment as valid, partly valid, invalid, or already
 addressed, with causal evidence. Define scoped code changes, exact
 repository-native checks, an optional commit, and the public reply for each
-comment. Include a non-force push only when verified local code must reach the
-host. Never include approval, merge, resolution, closure, deletion,
+comment. Include the matching non-force push whenever a committed code fix must
+reach the host, and one same-host reply action for every comment that requires
+a response. Never include approval, merge, resolution, closure, deletion,
 force-push, cross-host mutation, or unrelated work.
 
 This user-owned prompt defines the Plannotator artifact:

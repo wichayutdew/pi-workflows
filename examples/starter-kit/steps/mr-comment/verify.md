@@ -22,6 +22,13 @@ comment/anchor. Verify every remote action is same-host, non-force,
 idempotently observable, and limited to the approved push and replies. Do not
 execute remote actions here.
 
+Any regression, lint failure, formatting failure, or other actionable local
+finding is `failed`; the workflow sends that outcome directly back to
+implementation. Do not use `blocked` for a fixable local finding. When a code
+fix was committed, require the matching approved non-force push action before
+the replies. A valid unresolved review comment requires its approved public
+reply action.
+
 Call `structured_output` alone with:
 
 - `ready` when all criteria pass and approved remote actions remain;
@@ -32,4 +39,5 @@ Call `structured_output` alone with:
   that cannot proceed safely.
 
 For `ready` and `failed`, include complete fresh evidence and the unchanged
-Execution contract in `summary`.
+Execution contract in `summary`. A `ready` handoff automatically proceeds to
+the publisher; do not ask the user to push or post a reply.

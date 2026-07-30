@@ -18,6 +18,10 @@ derive any necessary invocation-only correction from current scripts or tool
 help without weakening the check. A skipped, stale, unavailable, or failing
 required check is not passing.
 
+Any regression, lint failure, formatting failure, or other actionable local
+verification finding is `failed`; the workflow sends that outcome directly back
+to implementation. Do not use `blocked` for a fixable local finding.
+
 Call `structured_output` alone with:
 
 - `passed` only when every criterion and required check passes;

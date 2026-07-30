@@ -255,6 +255,11 @@ describe('when testing example', () => {
         );
       }
 
+      const ticket = catalog.workflows.get('ticket')!;
+      expect(ticket.prompts.plan).toContain('## Publication contract');
+      expect(ticket.prompts.verify).toContain('non-force `git push`');
+      expect(ticket.prompts.verify).toContain('GitLab merge request');
+
       const review = catalog.workflows.get('mr-review')!;
       expect(review.definition.start).toBe('fetch');
       expect(review.prompts.fetch).toMatch(
@@ -331,6 +336,15 @@ describe('when testing example', () => {
       );
       expect(comment.prompts.plan).toMatch(
         /prefer `glab api`[\s\S]*do not assume[\s\S]*`glab mr view` supports `--json`/i,
+      );
+      expect(comment.prompts.verify).toContain(
+        'regression, lint failure, formatting failure',
+      );
+      expect(comment.prompts.verify).toContain(
+        'automatically proceeds to\nthe publisher',
+      );
+      expect(comment.prompts.publish).toContain(
+        'Automatically perform every required approved push and reply',
       );
     });
   });

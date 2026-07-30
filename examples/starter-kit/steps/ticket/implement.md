@@ -26,7 +26,8 @@ errors and state before trying a safe equivalent. Never weaken validation,
 broaden scope, or mutate Jira.
 
 Run the approved checks, and stage or commit only when the approved plan calls
-for it. Do not push or publish in this step.
+for it. Do not push or publish in this step; independent verification publishes
+only the reviewed Publication contract after it has passed.
 
 Call `structured_output` alone with outcome `ready` when the result is ready for
 independent review. Summarize ticket identity, changed files, commands/results,
