@@ -29,7 +29,10 @@ against the bound workspace and current remote evidence. The commit being
 published must be the current verified `HEAD`; record its full SHA. Query the
 remote branch and existing GitLab merge requests first. If the exact SHA is
 already published, do not push again. Otherwise push only that current HEAD to
-the contract branch with a non-force `git push`; never use `--force`, `--set-upstream`,
+the contract branch with a non-force `git push`. Publish only committed code:
+never stage, commit, stash, discard, or otherwise consider pending staged or
+unstaged working-tree changes part of the publication. Those changes must not
+change the exact `HEAD` SHA being pushed. Never use `--force`, `--set-upstream`,
 refspec wildcards, another remote, or another branch. If the push is rejected,
 ambiguous, or proves that the remote branch contains different history, use
 `blocked` and do not attempt a workaround.
