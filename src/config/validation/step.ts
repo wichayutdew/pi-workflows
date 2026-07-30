@@ -159,12 +159,12 @@ function parseWorkspaceRoots(
 ): Array<string> {
   if (value === undefined) return ['.'];
   if (!Array.isArray(value)) {
-    errors.push(`${path}: expected an array of relative paths`);
+    errors.push(`${path}: expected an array of workspace paths`);
     return [];
   }
   if (value.length > MAX_WORKSPACE_ALLOWED_ROOTS) {
     errors.push(
-      `${path}: at most ${MAX_WORKSPACE_ALLOWED_ROOTS} relative paths are allowed`,
+      `${path}: at most ${MAX_WORKSPACE_ALLOWED_ROOTS} workspace paths are allowed`,
     );
   }
 
@@ -173,7 +173,7 @@ function parseWorkspaceRoots(
     .reduce<Array<string>>((result, item, index) => {
       const itemPath = `${path}[${index}]`;
       if (typeof item !== 'string' || !item || item.trim() !== item) {
-        errors.push(`${itemPath}: expected a non-empty relative path`);
+        errors.push(`${itemPath}: expected a non-empty workspace path`);
         return result;
       }
       const root = item;
@@ -185,10 +185,11 @@ function parseWorkspaceRoots(
       }
       if (
         root.includes('\0') ||
-        isAbsolute(root) ||
-        win32.parse(root).root !== ''
+        (win32.parse(root).root !== '' && !isAbsolute(root))
       ) {
-        errors.push(`${itemPath}: expected a relative path`);
+        errors.push(
+          `${itemPath}: expected a relative, absolute, or home-relative path`,
+        );
         return result;
       }
       if (result.includes(root)) {
@@ -198,7 +199,7 @@ function parseWorkspaceRoots(
       return [...result, root];
     }, []);
   if (roots.length === 0) {
-    errors.push(`${path}: at least one relative path is required`);
+    errors.push(`${path}: at least one workspace path is required`);
   }
   return roots;
 }

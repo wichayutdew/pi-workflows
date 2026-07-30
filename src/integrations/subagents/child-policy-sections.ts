@@ -149,8 +149,7 @@ const parseWorkspace = (
         root !== root.trim() ||
         root.length > MAX_WORKSPACE_PATH_CHARS ||
         root.includes('\0') ||
-        isAbsolute(root) ||
-        win32.parse(root).root !== '',
+        (win32.parse(root).root !== '' && !isAbsolute(root)),
     )
   ) {
     throw new Error('child policy workspace allowed roots are invalid');

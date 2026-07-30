@@ -68,6 +68,18 @@ describe('when testing subagent protocol', () => {
         );
         expect(extracted?.policy).toEqual(policy);
         expect(extracted?.task).toBe('Inspect the merge request.');
+        const absoluteRootsPolicy = {
+          ...policy,
+          workspace: {
+            bindOn: ['bound'],
+            allowedRoots: ['/tmp/worktrees', '~/repositories/worktrees'],
+          },
+        };
+        expect(
+          extractChildPolicy(
+            `${encodeChildPolicy(absoluteRootsPolicy)}\n\nInspect the workspace.`,
+          )?.policy,
+        ).toEqual(absoluteRootsPolicy);
         const upstreamWrapped = extractChildPolicy(
           `Task: ${envelope}\n\nInspect the merge request.`,
         );
@@ -263,16 +275,6 @@ describe('when testing subagent protocol', () => {
               },
             },
             /workspace bindOn outcomes are invalid/,
-          ],
-          [
-            {
-              ...policy,
-              workspace: {
-                bindOn: ['bound'],
-                allowedRoots: ['/tmp/worktrees'],
-              },
-            },
-            /workspace allowed roots are invalid/,
           ],
           [
             {

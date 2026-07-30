@@ -124,6 +124,19 @@
         }
       ]
     },
+    "workspaceRoot": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^\\S(?:.*\\S)?$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "\\u0000"
+          }
+        }
+      ]
+    },
     "resourceName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_@./:+-]+$"
@@ -575,7 +588,7 @@
           "uniqueItems": true,
           "default": ["."],
           "items": {
-            "$ref": "#/$defs/relativePath"
+            "$ref": "#/$defs/workspaceRoot"
           }
         }
       }

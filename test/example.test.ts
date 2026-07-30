@@ -287,6 +287,12 @@ describe('when testing example', () => {
       expect(review.prompts.publish).toMatch(
         /actionable\s+verification\s+finding[\s\S]*corrective\s+publication\s+handoff/i,
       );
+      expect(review.prompts.publish).toMatch(
+        /GitLab inline discussion[\s\S]*nested object[\s\S]*`--form`/i,
+      );
+      expect(review.prompts.publish).toMatch(
+        /Do not use `--field` or `--raw-field`[\s\S]*`position\[\.\.\.\]`/i,
+      );
       expect(review.prompts.verify).toMatch(
         /`failed`[\s\S]*next\s+publication\s+worker/i,
       );

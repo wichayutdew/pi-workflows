@@ -257,7 +257,8 @@ workspace:
 On a listed outcome, the structured result must include
 `workspace: { cwd: "/absolute/directory" }`; every other outcome must omit it.
 The harness canonicalizes the existing directory, requires it to remain under
-one allowed root relative to the run-start directory, and accepts only one
+one allowed root (relative to the run-start directory, absolute, or
+home-relative such as `~/repositories/worktrees`), and accepts only one
 canonical binding. A revisit to the sole binding step may re-affirm that same
 directory, but cannot replace it. All reachable nonterminal descendants must
 be delegated. Their first visits, cycles, recovery attempts, and resumes

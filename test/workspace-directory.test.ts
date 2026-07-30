@@ -6,7 +6,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolveWorkspaceDirectory } from '../src/harness/workspace-directory.ts';
@@ -42,6 +42,27 @@ describe('when resolving a workflow workspace directory', () => {
         allowedRoots: ['..'],
       }),
     ).toBe(realpathSync(candidateCwd));
+  });
+
+  test('accepts absolute and home-relative allowed roots', () => {
+    const root = temporaryRoot();
+    const startCwd = join(root, 'source');
+    mkdirSync(startCwd);
+
+    expect(
+      resolveWorkspaceDirectory({
+        candidateCwd: homedir(),
+        startCwd,
+        allowedRoots: [homedir()],
+      }),
+    ).toBe(realpathSync(homedir()));
+    expect(
+      resolveWorkspaceDirectory({
+        candidateCwd: homedir(),
+        startCwd,
+        allowedRoots: ['~/'],
+      }),
+    ).toBe(realpathSync(homedir()));
   });
 
   test('rejects malformed, missing, non-directory, and out-of-root targets', () => {
@@ -85,17 +106,9 @@ describe('when resolving a workflow workspace directory', () => {
         {
           candidateCwd: allowedRoot,
           startCwd,
-          allowedRoots: [allowedRoot],
-        },
-        /relative paths/,
-      ],
-      [
-        {
-          candidateCwd: allowedRoot,
-          startCwd,
           allowedRoots: ['C:..\\outside'],
         },
-        /relative paths/,
+        /relative, absolute, or home-relative paths/,
       ],
       [
         {
