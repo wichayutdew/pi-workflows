@@ -36,6 +36,6 @@ export function buildMainWorkflowNotice(
     '',
     `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in a separate pi-subagents child process.`,
     'Do not perform the workflow step in this main session.',
-    `Use \`${statusShortcutLabel}\` to show or hide the workflow status overlay, or \`/workflow-pause\` to cancel the child and repair the workflow before resuming.`,
+    `Use \`${statusShortcutLabel}\` or \`/workflow-status\` to open the workflow status overlay, or \`/workflow-pause\` to cancel the child and repair the workflow before resuming.`,
   ].join('\n');
 }

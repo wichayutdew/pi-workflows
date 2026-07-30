@@ -43,6 +43,8 @@ export type WorkflowCommandController = {
     reason: string,
     context: ExtensionCommandContext,
   ) => Promise<void>;
+  /** Opens the active workflow status overlay. */
+  readonly status: (context: ExtensionCommandContext) => Promise<void>;
   /** Reloads workflow configuration. */
   readonly reload: (context: ExtensionCommandContext) => Promise<void>;
 };
@@ -163,6 +165,13 @@ export function createHarnessCommands(
         description: 'Abort the active workflow',
         handler: async (reason, context) =>
           controller.abort(reason.trim(), context),
+      },
+    },
+    {
+      name: 'workflow-status',
+      options: {
+        description: 'Toggle workflow status',
+        handler: async (_args, context) => controller.status(context),
       },
     },
     {

@@ -41,6 +41,7 @@ describe('when testing commands', () => {
         pause: async (reason) => void calls.push(['pause', reason]),
         resume: async (input) => void calls.push(['resume', input]),
         abort: async (reason) => void calls.push(['abort', reason]),
+        status: async () => void calls.push(['status']),
         reload: async () => void calls.push(['reload']),
       };
       const pi = {
@@ -91,6 +92,7 @@ describe('when testing commands', () => {
         .get('workflow-restart')!
         .handler('  add an enhancement  ', context);
       await commands.get('workflow-abort')!.handler('  stop  ', context);
+      await commands.get('workflow-status')!.handler('', context);
       await commands.get('workflow-reload')!.handler('', context);
 
       expect(calls).toEqual([
@@ -102,9 +104,10 @@ describe('when testing commands', () => {
         ['resume', 'use the existing cache'],
         ['restart', 'add an enhancement'],
         ['abort', 'stop'],
+        ['status'],
         ['reload'],
       ]);
-      expect(commands.has('workflow-status')).toBe(false);
+      expect(commands.has('workflow-status')).toBe(true);
     });
   });
 });
