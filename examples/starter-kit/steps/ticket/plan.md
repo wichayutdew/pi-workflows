@@ -65,13 +65,41 @@ language, framework, package manager, flag order, or cwd syntax.
 The Publication contract is part of the reviewed artifact and authorizes the
 post-verification publication. State the exact bound branch, remote, target
 branch, merge-request title and description, and the GitLab project or hosted
-remote evidence. It authorizes only a non-force push of the verified HEAD to
-that same branch and creation of one merge request for this ticket. Do not
-include credentials, arbitrary shell commands, history rewrites, branch
-deletion, Jira mutation, merging, or any other remote mutation. If the remote,
-target branch, or merge-request metadata cannot be established safely from
-current evidence, use `blocked` rather than leaving a publish decision for the
-verification step.
+remote evidence. The title must use this Conventional Commit format exactly:
+`fix: [<JiraId>] <brief summary of the changes>`. The description must use this
+format exactly, replacing placeholders with current evidence and omitting the
+Experiment ID line when none exists:
+
+```md
+- Jira ID : {JiraId}
+- Experiment ID : {ExperimentId, if any}
+
+## Proposed changes
+- {changes}
+
+## Test added in this MR
+  - **Unit test**
+     - {test cases}
+  - **Functional test (If need)**
+     - {test cases}
+  - **Integration test (If need)**
+     - {test cases}
+
+ ## Tested scenarios with screenshots
+  | Scenario   | Production            | This branch  |
+  | ---        | ---                   | ---          |
+  | Scenario 1 | paste screenshot here | paste screenshot here |
+  | Scenario 2 | paste screenshot here | paste screenshot here |
+
+/assign me
+```
+
+It authorizes only a non-force push of the verified HEAD to that same branch
+and creation of one merge request for this ticket. Do not include credentials,
+arbitrary shell commands, history rewrites, branch deletion, Jira mutation,
+merging, or any other remote mutation. If the remote, target branch, or
+merge-request metadata cannot be established safely from current evidence, use
+`blocked` rather than leaving a publish decision for the verification step.
 
 Call `structured_output` alone with outcome `submit`, the complete Markdown in
 `artifact`, and a self-contained execution handoff in `summary`. Use `blocked`

@@ -34,6 +34,22 @@ refspec wildcards, another remote, or another branch. If the push is rejected,
 ambiguous, or proves that the remote branch contains different history, use
 `blocked` and do not attempt a workaround.
 
+Use MCP only for an enabled, exact server/tool selector. Every MCP call must
+name both `server` and `tool`; never use MCP discovery or proxy modes such as
+`action`, `connect`, `describe`, `search`, `regex`, or a server-only call. Use
+the configured Atlassian tool for Jira evidence. This ticket workflow does not
+authorize GitLab MCP tools, so inspect and create GitLab merge requests with
+the authenticated host CLI instead of attempting an MCP call.
+
+Before the first remote query or push, run the contract's `git ls-remote`
+branch check as one standalone Bash call, never as part of a command chain.
+This is the SSH-authentication preflight and may display a 1Password approval.
+If SSH authentication is unavailable (for example, the agent socket cannot be
+reached, the agent refuses the signature, or approval is cancelled), do not try
+alternate credentials or a workaround. Return `blocked` with the redacted
+diagnostic and the precise recovery: unlock/approve the configured 1Password
+SSH key for the remote host in an interactive session, then resume this step.
+
 After the branch is confirmed remote, reuse an existing open merge request only
 when its source branch, target branch, and ticket correlation match the contract.
 Otherwise create exactly one GitLab merge request using the contract title and

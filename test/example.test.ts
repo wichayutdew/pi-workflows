@@ -259,6 +259,9 @@ describe('when testing example', () => {
       expect(ticket.prompts.plan).toContain('## Publication contract');
       expect(ticket.prompts.verify).toContain('non-force `git push`');
       expect(ticket.prompts.verify).toContain('GitLab merge request');
+      expect(ticket.prompts.verify).toContain('name both `server` and `tool`');
+      expect(ticket.prompts.verify).toContain('SSH-authentication preflight');
+      expect(ticket.prompts.verify).toContain('1Password approval');
 
       const review = catalog.workflows.get('mr-review')!;
       expect(review.definition.start).toBe('fetch');
