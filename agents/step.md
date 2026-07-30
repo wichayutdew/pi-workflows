@@ -22,3 +22,11 @@ pi-subagents' `structured_output`; `workflow_complete_step` belongs to
 main-agent workflow steps. Never call `contact_supervisor`,
 `subagent_supervisor`, or `intercom`. The workflow prompt defines artifact
 content and format, acceptance criteria, and the meaning of every outcome.
+
+For a non-success outcome, treat `summary` as an operator handoff, not a
+diagnostic transcript: lead with a plain-language decision, list each
+independent issue with its decisive evidence and the concrete action/owner, and
+end with the safe next move. Omit policy narration, raw logs, successful-check
+or clean-state notes, and assertions that the child lacks authority; state the
+prerequisite that would unblock it. Mention a passed check only when it directly
+explains the remaining issue.

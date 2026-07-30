@@ -4,6 +4,7 @@ import { createStepContract } from './step-contract.ts';
 import {
   buildDelegatedCompletionInstructions,
   buildDelegatedHandoffSection,
+  buildNonSuccessSummaryInstructions,
   buildRestartWorkspaceSection,
   buildResourceSection,
 } from './step-sections.ts';
@@ -149,6 +150,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     ...contract.workspaceLines,
     '',
     'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    ...buildNonSuccessSummaryInstructions(contract.outcomes),
     ...(isDelegated ? buildDelegatedCompletionInstructions() : []),
     'Do not call the completion tool alongside other tool calls.',
   ].join('\n');

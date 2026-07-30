@@ -85,3 +85,33 @@ export function buildDelegatedCompletionInstructions(): ReadonlyArray<string> {
     'Stay within the configured permissions and do not broaden mutation targets or external side effects.',
   ];
 }
+
+/**
+ * Builds the shared operator-facing format for non-successful step results.
+ *
+ * The summary is posted verbatim to chat and is the only context available to
+ * a fresh child, so it must remain actionable without becoming a transcript.
+ */
+export function buildNonSuccessSummaryInstructions(
+  outcomes: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const nonSuccessOutcomes = outcomes.filter((outcome) =>
+    ['blocked', 'failed', 'retry'].includes(outcome),
+  );
+  if (nonSuccessOutcomes.length === 0) return [];
+
+  return [
+    '## Human-readable non-success results',
+    '',
+    `For ${nonSuccessOutcomes.map((outcome) => `\`${outcome}\``).join(', ')}, write a decision-first summary. It is shown verbatim to the operator and handed to a fresh child. Use this format:`,
+    '',
+    '# <Failed | Blocked | Retry>: <one-sentence plain-language decision>',
+    '1. **<short issue>** — <only the decisive evidence, including an exact command/error, path, or identifier when it enables action>.',
+    '   **Action:** <the specific owner or role> must <the concrete evidence, decision, or change needed>.',
+    '2. Repeat only for other independent issues (at most three total).',
+    '**Next:** <the exact safe next move, such as provide the listed evidence and run `/workflow-resume`>.',
+    '',
+    'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes, or statements that merely say the child lacks authority. Mention a passed check only when it directly explains the remaining issue. Name the missing prerequisite and who can supply it. Keep only details needed to make the decision or complete the next action.',
+    '',
+  ];
+}
