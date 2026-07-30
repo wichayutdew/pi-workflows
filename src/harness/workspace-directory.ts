@@ -1,4 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 export type ResolveWorkspaceDirectoryOptions = {
@@ -16,6 +17,15 @@ const isWithin = (root: string, candidate: string): boolean => {
       !isAbsolute(pathFromRoot))
   );
 };
+
+const resolveAllowedRoot = (startCwd: string, allowedRoot: string): string =>
+  allowedRoot === '~'
+    ? homedir()
+    : allowedRoot.startsWith('~/')
+      ? resolve(homedir(), allowedRoot.slice(2))
+      : isAbsolute(allowedRoot)
+        ? allowedRoot
+        : resolve(startCwd, allowedRoot);
 
 /**
  * Canonicalizes and validates one YAML-authorized execution directory.
@@ -46,15 +56,14 @@ export function resolveWorkspaceDirectory({
   const canonicalRoots = allowedRoots.map((allowedRoot) => {
     if (
       !allowedRoot ||
-      isAbsolute(allowedRoot) ||
-      win32.parse(allowedRoot).root !== '' ||
+      (win32.parse(allowedRoot).root !== '' && !isAbsolute(allowedRoot)) ||
       allowedRoot.includes('\0')
     ) {
       throw new Error(
-        'workspace allowed roots must be non-empty relative paths',
+        'workspace allowed roots must be non-empty relative, absolute, or home-relative paths',
       );
     }
-    return realpathSync(resolve(canonicalStart, allowedRoot));
+    return realpathSync(resolveAllowedRoot(canonicalStart, allowedRoot));
   });
   const canonicalCwd = realpathSync(candidateCwd);
   if (!statSync(canonicalCwd).isDirectory()) {

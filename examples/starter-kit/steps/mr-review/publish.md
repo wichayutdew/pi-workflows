@@ -25,6 +25,17 @@ Never alter the approved body, target another head or anchor, expose
 credentials, approve, merge, resolve, close, delete, push, cross hosts, or add
 an unlisted action.
 
+For a GitLab inline discussion, the API requires `position` as a nested object.
+Prefer an exact configured GitLab MCP mutation whose schema accepts that object.
+When using `glab api`, submit every discussion field as multipart form data with
+`--form`, including `position[base_sha]`, `position[start_sha]`,
+`position[head_sha]`, `position[position_type]`, both paths, and the applicable
+line. Do not use `--field` or `--raw-field` for any `position[...]` key: those
+flags serialize JSON scalar keys and do not construct GitLab's nested position,
+which can create an unanchored general discussion. Before calling
+`structured_output`, fetch the returned discussion and require its note to have
+the approved position/path/line as well as the approved body and marker.
+
 After a mutation-capable call is attempted, ambiguity is `blocked`; do not
 blindly replay it. Call `structured_output` alone with outcome `published` only
 after every approved effect succeeded now or was proven already present.

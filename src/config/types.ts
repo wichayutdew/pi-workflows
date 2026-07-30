@@ -95,7 +95,7 @@ export type WorkflowGate = PromptGate | PlannotatorGate;
 export type StepWorkspaceBinding = {
   /** Outcomes whose result establishes the workspace for later steps. */
   readonly bindOn: ReadonlyArray<string>;
-  /** Paths relative to the run-start directory that may contain the workspace. */
+  /** Relative, absolute, or ~/ home-relative paths that may contain the workspace. */
   readonly allowedRoots: ReadonlyArray<string>;
 };
 

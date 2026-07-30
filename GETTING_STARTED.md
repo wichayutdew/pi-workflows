@@ -61,8 +61,9 @@ The copy provides these commands:
 Before using a workflow, make its authority explicit for your environment:
 
 1. Set `workspace.allowedRoots` in `work.workflow.yaml` and
-   `ticket.workflow.yaml` to safe relative directories where a worktree may be
-   created or reused.
+   `ticket.workflow.yaml` to safe directories where a worktree may be created
+   or reused. Roots may be relative to the run-start directory, absolute, or
+   home-relative (for example, `~/repositories/worktrees`).
 2. Configure or replace the `atlassian`, `gitlab`, and `github` MCP selectors.
    The MR workflows can use their configured GitHub/GitLab CLIs or cURL
    fallbacks; the ticket workflow requires Atlassian MCP by default.

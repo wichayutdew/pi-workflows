@@ -88,6 +88,11 @@ describe('when testing config', () => {
       expect(
         withSiblingRoot.value?.steps.inspect?.workspace?.allowedRoots,
       ).toEqual(['../worktrees', '.worktrees']);
+
+      const withAbsoluteRoots = validateWorkflow(
+        workspaceWorkflow(['/tmp/worktrees', '~/repositories/worktrees']),
+      );
+      expect(withAbsoluteRoots.errors).toEqual([]);
     });
 
     test('rejects malformed or unsafe workspace-binding graphs', () => {
@@ -105,7 +110,6 @@ describe('when testing config', () => {
         },
       };
 
-      const absoluteRoot = workspaceWorkflow(['/tmp/worktrees']);
       const malformedRootBounds = [
         workspaceWorkflow([' ../worktrees']),
         workspaceWorkflow(['C:..\\outside']),
@@ -171,7 +175,6 @@ describe('when testing config', () => {
 
       const messages = [
         validateWorkflow(malformed),
-        validateWorkflow(absoluteRoot),
         ...malformedRootBounds.map((raw) => validateWorkflow(raw)),
         validateWorkflow(mainBinder),
         validateWorkflow(terminalBinder),
@@ -185,11 +188,13 @@ describe('when testing config', () => {
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/duplicate value "missing"/);
       expect(messages).toMatch(/unknown transition outcome "missing"/);
-      expect(messages).toMatch(/at least one relative path is required/);
-      expect(messages).toMatch(/expected a relative path/);
-      expect(messages).toMatch(/expected a non-empty relative path/);
+      expect(messages).toMatch(/at least one workspace path is required/);
+      expect(messages).toMatch(
+        /expected a relative, absolute, or home-relative path/,
+      );
+      expect(messages).toMatch(/expected a non-empty workspace path/);
       expect(messages).toMatch(/path exceeds 4096 characters/);
-      expect(messages).toMatch(/at most 32 relative paths are allowed/);
+      expect(messages).toMatch(/at most 32 workspace paths are allowed/);
       expect(messages).toMatch(/workspace binding requires a subagent/);
       expect(messages).toMatch(
         /workspace-binding outcome must target an ordinary step/,
