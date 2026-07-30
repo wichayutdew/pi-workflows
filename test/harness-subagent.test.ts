@@ -1173,16 +1173,20 @@ describe('when testing harness subagent', () => {
         const fixture = createHarnessFixture(directory);
         await initialize(fixture, 'ctrl+shift+y');
         const start = fixture.commands.get('main-workflow');
+        const status = fixture.commands.get('workflow-status');
         expectTruthy(start);
+        expectTruthy(status);
 
         await start('inspect the repository', fixture.context);
 
         expect(fixture.customRenders).toHaveLength(0);
+        await status('', fixture.context);
+        expect(fixture.customRenders).toHaveLength(1);
         const shortcut = fixture.shortcuts.get('ctrl+shift+y');
         expectTruthy(shortcut);
         expect(fixture.shortcuts.has('ctrl+alt+w')).toBe(false);
         await shortcut(fixture.context as unknown as ExtensionContext);
-        expect(fixture.customRenders).toHaveLength(1);
+        expect(fixture.customRenders).toHaveLength(2);
         const board = fixture.customRenders.at(-1)?.join('\n') ?? '';
         expect(board).toMatch(/✦ Workflow Status/);
         expect(board).toMatch(/\[RUNNING\]/);
@@ -1208,7 +1212,7 @@ describe('when testing harness subagent', () => {
             ),
           ),
         ).toBe(true);
-        expect(fixture.commands.has('workflow-status')).toBe(false);
+        expect(fixture.commands.has('workflow-status')).toBe(true);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
@@ -1229,7 +1233,7 @@ describe('when testing harness subagent', () => {
       try {
         const fixture = createHarnessFixture(directory);
         await initialize(fixture);
-        expect(fixture.commands.has('workflow-status')).toBe(false);
+        expect(fixture.commands.has('workflow-status')).toBe(true);
         expect(fixture.widgetUpdates.at(-1)).toEqual({
           key: 'pi-workflows-progress',
           lines: undefined,

@@ -26,6 +26,8 @@ version: 1
 statusShortcut: ctrl+shift+y
 ```
 
+Run `/workflow-status` to open the same overlay without using the shortcut.
+
 Run Pi's `/reload` after changing `statusShortcut` so the extension can
 re-register the key. `/workflow-reload` reloads workflow definitions and warns
 about a shortcut mismatch, but the active editor keeps the startup binding.

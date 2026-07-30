@@ -380,6 +380,17 @@ export class WorkflowHarness implements WorkflowCommandController {
     return this.enqueueMutation(context, () => this.abortNow(reason, context));
   }
 
+  /** Opens the workflow status overlay, matching the configured shortcut. */
+  async status(context: ExtensionCommandContext): Promise<void> {
+    this.latestContext = context;
+    if (this.isStatusOverlayOpen) return;
+    if (!this.run) {
+      context.ui.notify('No workflow checkpoint in this session', 'info');
+      return;
+    }
+    await this.showWorkflowStatus(context);
+  }
+
   /** Reloads workflow configuration while no workflow is executing. */
   reload(context: ExtensionCommandContext): Promise<void> {
     return this.enqueueMutation(context, () => this.reloadNow(context));
