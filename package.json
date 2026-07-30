@@ -1,6 +1,6 @@
 {
   "name": "@wichayutdew/pi-workflows",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "A declarative, pauseable workflow harness for Pi",
   "license": "MIT",
   "repository": {
