@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  auditCompletedDelegationTranscript,
   deriveSubagentSessionRoot,
   failedToolName,
   formatToolFailureDiagnostic,
@@ -164,6 +165,36 @@ function transcriptWithCompletion(): string {
       message: {
         role: 'assistant',
         content: [
+          {
+            type: 'toolCall',
+            id: 'complete-1',
+            name: 'structured_output',
+            arguments: { value: { outcome: 'done', summary: 'Recovered' } },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'complete-1',
+        toolName: 'structured_output',
+        isError: false,
+        content: [{ type: 'text', text: 'Structured output captured.' }],
+      },
+    }),
+  ].join('\n');
+}
+
+function transcriptWithProseCompletion(): string {
+  return [
+    JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: "Let's compile findings." },
           {
             type: 'toolCall',
             id: 'complete-1',
@@ -951,6 +982,26 @@ describe('when testing subagent failure diagnostics', () => {
           'bash failed (exit 1): unrelated terminal summary',
         ),
       ).toBe(undefined);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts a structured completion accompanied by assistant prose', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-session-'));
+    const trustedRoot = join(directory, 'parent');
+    const runDirectory = join(trustedRoot, 'child-run', 'run-0');
+    const sessionFile = join(runDirectory, 'session.jsonl');
+    try {
+      await mkdir(runDirectory, { recursive: true });
+      await writeFile(sessionFile, transcriptWithProseCompletion());
+
+      await expect(
+        auditCompletedDelegationTranscript(sessionFile, trustedRoot, {
+          runId: 'child-run',
+          childIndex: 0,
+        }),
+      ).resolves.toEqual({ verified: true });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
