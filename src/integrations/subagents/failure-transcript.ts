@@ -155,6 +155,7 @@ export const parseFailureTranscript = (
             (contentItem) =>
               isDiagnosticRecord(contentItem) &&
               (contentItem.type === 'thinking' ||
+                contentItem.type === 'text' ||
                 contentItem.type === 'toolCall'),
           );
         const completionValue =
