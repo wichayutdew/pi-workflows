@@ -1,64 +1,112 @@
 version: 1
 id: ticket
 command: ticket
-description: Prepare a dedicated workspace, approve a ticket plan, implement, and verify
+description: Prepare a dedicated workspace, plan, implement, and verify a Jira ticket
 start: prepare-workspace
-maxStepVisits: 4
+maxStepVisits: 20
 summaryMaxChars: 30000
 steps:
   prepare-workspace:
-    title: Prepare or reuse a dedicated worktree
+    title: Prepare dedicated branch and worktree
     prompt:
       file: steps/shared/prepare-workspace.md
     subagent:
       agent: worker
       context: fresh
       timeoutMs: 900000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 25
+        graceTurns: 3
+      toolBudget:
+        soft: 50
+        hard: 90
+        block: "*"
     workspace:
       bindOn: [ready]
-      allowedRoots: ['..']
+      allowedRoots: ["~/repositories/worktrees"]
     permissions:
       tools: [read, ls, bash]
+      skills: [caveman, coding-standards, using-git-worktrees]
       bash:
         mode: unrestricted
     requires:
       tools: [read, ls, bash]
+      skills: [caveman, coding-standards, using-git-worktrees]
     transitions:
       ready: plan
+      retry: prepare-workspace
       blocked: $pause
-
   plan:
-    title: Read the ticket and propose a plan
+    title: Read Jira evidence and plan
     prompt:
       file: steps/ticket/plan.md
     subagent:
       agent: planner
       context: fresh
       timeoutMs: 1200000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 35
+        graceTurns: 3
+      toolBudget:
+        soft: 80
+        hard: 140
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [atlassian]
+      mcp: &ticket-mcp
+        - atlassian/atlassian_getAccessibleAtlassianResources
+        - atlassian/atlassian_getJiraIssue
+        - atlassian/atlassian_getJiraIssueRemoteIssueLinks
+        - atlassian/atlassian_searchJiraIssuesUsingJql
+        - context7/resolve-library-id
+        - context7/query-docs
+        - sourcegraph/code_finder
+        - sourcegraph/commit_search
+        - sourcegraph/diff_search
+        - sourcegraph/keyword_search
+        - sourcegraph/list_files
+        - sourcegraph/list_repos
+        - sourcegraph/nls_search
+        - sourcegraph/read_file
+        - gh_grep/searchGitHub
+      extensions: [pi-web-tools]
+      skills:
+        &ticket-plan-skills [
+          caveman,
+          jira-ticket,
+          coding-standards,
+          brainstorming,
+        ]
       bash:
         mode: allow-list
-        allow:
+        allow: &ticket-inspection-bash
+          - executable: grep
+          - executable: head
+          - executable: ls
+          - executable: pwd
+          - executable: rg
+          - executable: stat
+          - executable: tail
+          - executable: wc
           - executable: git
             argsPrefixes:
               [
                 [status],
                 [diff],
-                [log],
-                [show],
                 [grep],
+                [log],
                 [ls-files],
                 [rev-parse],
+                [show],
                 [merge-base],
                 [rev-list],
                 [worktree, list],
               ]
-          - executable: rg
-          - executable: grep
     requires:
       tools: [read, ls, bash, mcp]
+      skills: *ticket-plan-skills
     gate:
       provider: plannotator
       submitOutcome: submit
@@ -69,10 +117,10 @@ steps:
       approved: implement
       changes-requested: plan
       workspace-refresh: prepare-workspace
+      retry: plan
       blocked: $pause
-
   implement:
-    title: Implement the approved ticket plan
+    title: Implement the approved Jira plan
     prompt:
       file: steps/ticket/implement.md
     subagent:
@@ -80,33 +128,69 @@ steps:
       context: fresh
       timeoutMs: 7200000
       artifacts: true
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 90
+        graceTurns: 5
+      toolBudget:
+        soft: 260
+        hard: 440
+        block: "*"
     permissions:
       tools: [read, ls, bash, edit, write]
-      mcp: [atlassian]
+      mcp: *ticket-mcp
+      skills:
+        &ticket-implement-skills [
+          caveman,
+          jira-ticket,
+          coding-standards,
+          systematic-debugging,
+          test-driven-development,
+          verification-before-completion,
+          receiving-code-review,
+        ]
       bash:
         mode: unrestricted
     requires:
       tools: [read, ls, bash, edit, write, mcp]
+      skills: *ticket-implement-skills
     transitions:
       ready: verify
+      retry: implement
       blocked: $pause
-
   verify:
-    title: Independently verify the ticket work
+    title: Independently verify Jira work
     prompt:
       file: steps/ticket/verify.md
     subagent:
       agent: reviewer
       context: fresh
       timeoutMs: 3600000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 40
+        graceTurns: 3
+      toolBudget:
+        soft: 120
+        hard: 200
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [atlassian]
+      mcp: *ticket-mcp
+      skills:
+        &ticket-verify-skills [
+          caveman,
+          jira-ticket,
+          coding-standards,
+          verification-before-completion,
+        ]
       bash:
         mode: unrestricted
     requires:
       tools: [read, ls, bash, mcp]
+      skills: *ticket-verify-skills
     transitions:
       passed: $done
       failed: implement
-      blocked: $pause
+      retry: verify
+      blocked: verify

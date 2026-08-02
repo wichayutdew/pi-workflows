@@ -1,73 +1,152 @@
 version: 1
 id: mr-comment
 command: mr-comment
-description: Fetch review comments, approve fixes, edit the current checkout, verify, push, and reply
+description: Fetch unresolved MR or PR comments, approve a fix plan, implement, verify, push, and reply
 start: fetch
-maxStepVisits: 4
-summaryMaxChars: 50000
+maxStepVisits: 10
+summaryMaxChars: 30000
 steps:
   fetch:
-    title: Fetch merge-request or pull-request comments
+    title: Fetch merge-request or pull-request evidence
     prompt:
       file: steps/mr-comment/fetch.md
     subagent:
       agent: scout
       context: fresh
-      timeoutMs: 1800000
+      timeoutMs: 1200000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 30
+        graceTurns: 3
+      toolBudget:
+        soft: 90
+        hard: 150
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [gitlab, github]
+      mcp: &comment-mcp
+        - gitlab/gitlab_get_merge_request
+        - gitlab/gitlab_get_merge_request_commits
+        - gitlab/gitlab_get_merge_request_diffs
+        - gitlab/gitlab_get_merge_request_pipelines
+        - gitlab/gitlab_get_pipeline_jobs
+        - gitlab/gitlab_get_merge_request_conflicts
+        - gitlab/gitlab_search
+        - context7/resolve-library-id
+        - context7/query-docs
+        - sourcegraph/code_finder
+        - sourcegraph/commit_search
+        - sourcegraph/diff_search
+        - sourcegraph/keyword_search
+        - sourcegraph/list_files
+        - sourcegraph/list_repos
+        - sourcegraph/nls_search
+        - sourcegraph/read_file
+        - gh_grep/searchGitHub
+      extensions: [pi-web-tools]
+      skills:
+        &comment-fetch-skills [caveman, receiving-code-review, coding-standards]
       bash:
         mode: allow-list
-        allow:
+        allow: &comment-inspection-bash
+          - executable: grep
+          - executable: head
+          - executable: ls
+          - executable: pwd
+          - executable: rg
+          - executable: stat
+          - executable: tail
+          - executable: wc
           - executable: git
             argsPrefixes:
               [
                 [status],
                 [diff],
-                [log],
-                [show],
                 [grep],
+                [log],
                 [ls-files],
                 [remote, -v],
                 [remote, get-url],
                 [rev-parse],
+                [show],
               ]
           - executable: glab
             argsPrefixes: [[mr, view], [mr, diff], [api]]
           - executable: gh
-            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
+            argsPrefixes: [[pr, view], [pr, diff], [api]]
           - executable: curl
     requires:
       tools: [read, ls, bash]
+      skills: *comment-fetch-skills
+    transitions:
+      ready: checkout-source
+      retry: fetch
+      blocked: $pause
+  checkout-source:
+    title: Check out the reviewed source branch
+    prompt:
+      file: steps/mr-comment/checkout-source.md
+    subagent:
+      agent: worker
+      context: fresh
+      timeoutMs: 900000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 25
+        graceTurns: 3
+      toolBudget:
+        soft: 60
+        hard: 100
+        block: "*"
+    workspace:
+      bindOn: [ready]
+      allowedRoots: ["~/repositories/worktrees", "."]
+    permissions:
+      tools: [read, ls, bash]
+      mcp: *comment-mcp
+      skills: [caveman, receiving-code-review, coding-standards]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+      skills: [caveman, receiving-code-review, coding-standards]
     transitions:
       ready: plan
+      retry: checkout-source
       blocked: $pause
-
   plan:
-    title: Propose a complete comment-fix plan
+    title: Propose a complete review-comment fix plan
     prompt:
       file: steps/mr-comment/plan.md
     subagent:
       agent: planner
       context: fresh
       timeoutMs: 1800000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 45
+        graceTurns: 3
+      toolBudget:
+        soft: 120
+        hard: 200
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [gitlab, github]
+      mcp: *comment-mcp
+      extensions: [pi-web-tools]
+      skills:
+        &comment-plan-skills [
+          caveman,
+          receiving-code-review,
+          coding-standards,
+          brainstorming,
+        ]
       bash:
         mode: allow-list
-        allow:
-          - executable: git
-            argsPrefixes:
-              [[status], [diff], [log], [show], [grep], [ls-files], [rev-parse]]
-          - executable: glab
-            argsPrefixes: [[mr, view], [mr, diff], [api]]
-          - executable: gh
-            argsPrefixes: [[pr, view], [pr, diff], [pr, checks], [api]]
-          - executable: curl
+        allow: *comment-inspection-bash
     requires:
       tools: [read, ls, bash]
+      skills: *comment-plan-skills
     gate:
       provider: plannotator
       submitOutcome: submit
@@ -77,10 +156,10 @@ steps:
     transitions:
       approved: implement
       changes-requested: plan
+      retry: plan
       blocked: $pause
-
   implement:
-    title: Implement the approved comment fixes
+    title: Implement approved review-comment fixes
     prompt:
       file: steps/mr-comment/implement.md
     subagent:
@@ -88,49 +167,94 @@ steps:
       context: fresh
       timeoutMs: 7200000
       artifacts: true
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 90
+        graceTurns: 5
+      toolBudget:
+        soft: 260
+        hard: 440
+        block: "*"
     permissions:
       tools: [read, ls, bash, edit, write]
-      mcp: [gitlab, github]
+      mcp: *comment-mcp
+      skills:
+        &comment-implement-skills [
+          caveman,
+          receiving-code-review,
+          coding-standards,
+          systematic-debugging,
+          test-driven-development,
+          verification-before-completion,
+        ]
       bash:
         mode: unrestricted
     requires:
       tools: [read, ls, bash, edit, write]
+      skills: *comment-implement-skills
     transitions:
       ready: verify
+      retry: implement
       blocked: $pause
-
   verify:
-    title: Independently verify comment handling
+    title: Independently verify review-comment handling
     prompt:
       file: steps/mr-comment/verify.md
     subagent:
       agent: reviewer
       context: fresh
       timeoutMs: 3600000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 60
+        graceTurns: 3
+      toolBudget:
+        soft: 140
+        hard: 240
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [gitlab, github]
+      mcp: *comment-mcp
+      skills:
+        &comment-verify-skills [
+          caveman,
+          receiving-code-review,
+          coding-standards,
+          caveman-review,
+          systematic-debugging,
+          verification-before-completion,
+        ]
       bash:
         mode: unrestricted
     requires:
       tools: [read, ls, bash]
+      skills: *comment-verify-skills
     transitions:
-      ready: publish
+      ready: deliver
       no-actions: $done
       failed: implement
-      blocked: $pause
-
-  publish:
-    title: Push verified work and reply to comments
+      retry: verify
+      blocked: verify
+  deliver:
+    title: Push the verified commit and reply to review comments
     prompt:
       file: steps/mr-comment/publish.md
     subagent:
       agent: worker
       context: fresh
       timeoutMs: 1800000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 25
+        graceTurns: 2
+      toolBudget:
+        soft: 50
+        hard: 80
+        block: "*"
     permissions:
       tools: [read, ls, bash]
-      mcp: [gitlab, github]
+      mcp: *comment-mcp
+      skills: [caveman, receiving-code-review]
       bash:
         mode: allow-list
         allow:
@@ -143,7 +267,10 @@ steps:
           - executable: curl
     requires:
       tools: [read, ls, bash]
+      skills: [caveman, receiving-code-review]
     transitions:
       published: $done
       no-actions: $done
+      retry: deliver
+      superseded: $pause
       blocked: $pause

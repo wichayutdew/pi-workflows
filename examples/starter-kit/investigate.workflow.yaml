@@ -1,0 +1,142 @@
+version: 1
+id: investigate
+command: investigate
+description: Derive, approve, investigate, and independently validate an evidence-backed finding
+start: retrieve
+maxStepVisits: 12
+summaryMaxChars: 30000
+steps:
+  retrieve:
+    title: Retrieve investigation scope and Jira evidence
+    prompt:
+      file: steps/investigate/retrieve.md
+    subagent:
+      agent: scout
+      context: fresh
+      timeoutMs: 1800000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 35
+        graceTurns: 3
+      toolBudget:
+        soft: 90
+        hard: 150
+        block: "*"
+    permissions:
+      tools: [read, ls, bash]
+      mcp: &jira-read-mcp
+        - atlassian/atlassian_getAccessibleAtlassianResources
+        - atlassian/atlassian_getJiraIssue
+        - atlassian/atlassian_getJiraIssueRemoteIssueLinks
+        - atlassian/atlassian_searchJiraIssuesUsingJql
+      extensions: [pi-web-tools]
+      skills: &retrieve-skills [caveman, coding-standards, brainstorming]
+      bash:
+        mode: allow-list
+        allow: &inspection-bash
+          - executable: grep
+          - executable: head
+          - executable: ls
+          - executable: pwd
+          - executable: rg
+          - executable: stat
+          - executable: tail
+          - executable: wc
+          - executable: git
+            argsPrefixes:
+              [
+                [status],
+                [diff],
+                [grep],
+                [log],
+                [ls-files],
+                [rev-parse],
+                [show],
+                [merge-base],
+                [rev-list],
+                [worktree, list],
+              ]
+    requires:
+      tools: [read, ls, bash]
+      skills: *retrieve-skills
+    gate:
+      provider: plannotator
+      submitOutcome: submit
+      approvedOutcome: approved
+      rejectedOutcome: changes-requested
+      timeoutMs: 30000
+    transitions:
+      approved: investigate
+      changes-requested: retrieve
+      retry: retrieve
+      blocked: $pause
+  investigate:
+    title: Investigate approved scope and write findings
+    prompt:
+      file: steps/investigate/investigate.md
+    subagent:
+      agent: worker
+      context: fresh
+      timeoutMs: 3600000
+      artifacts: true
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 70
+        graceTurns: 5
+      toolBudget:
+        soft: 180
+        hard: 300
+        block: "*"
+    permissions:
+      tools: [read, ls, bash, edit, write]
+      mcp: &investigation-mcp
+        - atlassian
+        - gitlab
+        - glean
+        - superset
+        - sourcegraph
+        - context7/resolve-library-id
+        - context7/query-docs
+        - gh_grep/searchGitHub
+      extensions: [pi-web-tools]
+      skills: &investigation-skills [caveman, coding-standards]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash, edit, write]
+      skills: *investigation-skills
+    transitions:
+      ready: validate
+      retry: investigate
+      blocked: $pause
+  validate:
+    title: Independently validate investigation findings
+    prompt:
+      file: steps/investigate/validate.md
+    subagent:
+      agent: reviewer
+      context: fresh
+      timeoutMs: 3600000
+      retryToolFailures: true
+      turnBudget:
+        maxTurns: 100
+        graceTurns: 5
+      toolBudget:
+        soft: 150
+        hard: 250
+        block: "*"
+    permissions:
+      tools: [read, ls, bash]
+      mcp: *investigation-mcp
+      extensions: [pi-web-tools]
+      skills: &validation-skills [caveman, coding-standards, systematic-debugging, verification-before-completion]
+      bash:
+        mode: unrestricted
+    requires:
+      tools: [read, ls, bash]
+      skills: *validation-skills
+    transitions:
+      approved: $done
+      gaps: investigate
+      retry: validate
+      blocked: validate
