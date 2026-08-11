@@ -14,7 +14,7 @@ function workspaceWorkflow() {
   raw.steps = {
     prepare: {
       prompt: 'Select a workspace',
-      subagent: { agent: 'worker' },
+      agent: 'worker',
       workspace: {
         bindOn: ['ready'],
         allowedRoots: ['..'],
@@ -27,7 +27,7 @@ function workspaceWorkflow() {
     },
     implement: {
       prompt: 'Implement',
-      subagent: { agent: 'worker' },
+      agent: 'worker',
       transitions: {
         ready: 'verify',
         retry: 'implement',
@@ -36,7 +36,7 @@ function workspaceWorkflow() {
     },
     verify: {
       prompt: 'Verify',
-      subagent: { agent: 'reviewer' },
+      agent: 'reviewer',
       transitions: {
         passed: '$done',
         failed: 'implement',
@@ -101,11 +101,17 @@ describe('when persisting a workflow workspace binding', () => {
         resolveWorkspaceDirectory: ({ candidateCwd }) => candidateCwd,
       },
     );
-    expect(plan.kind).toBe('ready');
-    if (plan.kind === 'ready') {
-      expect(plan.request.cwd).toBe(workspaceCwd);
-      expect(plan.active.policy.cwd).toBe(workspaceCwd);
-    }
+    expect(plan).toMatchObject({
+      kind: 'ready',
+      request: {
+        agent: 'worker',
+        cwd: workspaceCwd,
+      },
+      active: {
+        agent: 'worker',
+        directWorker: true,
+      },
+    });
     const movedPlan = createDelegationPlan(
       {
         workflow,
@@ -186,7 +192,7 @@ describe('when persisting a workflow workspace binding', () => {
     };
     steps.plan = {
       prompt: 'Inspect the prepared workspace',
-      subagent: { agent: 'planner' },
+      agent: 'planner',
       transitions: {
         ready: 'implement',
         'workspace-refresh': 'prepare',

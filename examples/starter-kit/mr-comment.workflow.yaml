@@ -10,18 +10,7 @@ steps:
     title: Fetch merge-request or pull-request evidence
     prompt:
       file: steps/mr-comment/fetch.md
-    subagent:
-      agent: scout
-      context: fresh
-      timeoutMs: 1200000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 30
-        graceTurns: 3
-      toolBudget:
-        soft: 90
-        hard: 150
-        block: "*"
+    agent: scout
     permissions:
       tools: [read, ls, bash]
       mcp: &comment-mcp
@@ -86,18 +75,7 @@ steps:
     title: Check out the reviewed source branch
     prompt:
       file: steps/mr-comment/checkout-source.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 900000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 25
-        graceTurns: 3
-      toolBudget:
-        soft: 60
-        hard: 100
-        block: "*"
+    agent: worker
     workspace:
       bindOn: [ready]
       allowedRoots: ["~/repositories/worktrees", "."]
@@ -118,18 +96,7 @@ steps:
     title: Propose a complete review-comment fix plan
     prompt:
       file: steps/mr-comment/plan.md
-    subagent:
-      agent: planner
-      context: fresh
-      timeoutMs: 1800000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 45
-        graceTurns: 3
-      toolBudget:
-        soft: 120
-        hard: 200
-        block: "*"
+    agent: planner
     permissions:
       tools: [read, ls, bash]
       mcp: *comment-mcp
@@ -162,19 +129,7 @@ steps:
     title: Implement approved review-comment fixes
     prompt:
       file: steps/mr-comment/implement.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 7200000
-      artifacts: true
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 90
-        graceTurns: 5
-      toolBudget:
-        soft: 260
-        hard: 440
-        block: "*"
+    agent: worker
     permissions:
       tools: [read, ls, bash, edit, write]
       mcp: *comment-mcp
@@ -200,18 +155,7 @@ steps:
     title: Independently verify review-comment handling
     prompt:
       file: steps/mr-comment/verify.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 3600000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 60
-        graceTurns: 3
-      toolBudget:
-        soft: 140
-        hard: 240
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [read, ls, bash]
       mcp: *comment-mcp
@@ -239,18 +183,7 @@ steps:
     title: Push the verified commit and reply to review comments
     prompt:
       file: steps/mr-comment/publish.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 1800000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 25
-        graceTurns: 2
-      toolBudget:
-        soft: 50
-        hard: 80
-        block: "*"
+    agent: worker
     permissions:
       tools: [read, ls, bash]
       mcp: *comment-mcp

@@ -3,6 +3,7 @@ import type {
   InputEvent,
   InputEventResult,
 } from '@earendil-works/pi-coding-agent';
+import { Type } from 'typebox';
 import { invalidCompletionCallIds } from '../../policy/completion-batch.ts';
 import { freezeToolInput } from '../../policy/immutable-input.ts';
 import { authorizeToolCall, resolveActiveTools } from '../../policy/tools.ts';
@@ -24,7 +25,6 @@ import type {
 } from './child-runtime-types.ts';
 import { extractChildPolicy } from './child-policy-envelope.ts';
 import type { ChildStepPolicy } from './child-policy-types.ts';
-import { isSubagentRuntimeName } from './child-policy-validation.ts';
 
 export { CHILD_COMPLETION_TOOL } from './child-runtime-completion.ts';
 export type {
@@ -85,6 +85,19 @@ export const registerSubagentChildRuntime = (
   const childAgent = resolveChildAgent(options, dependencies);
   let state = INITIAL_STATE;
 
+  pi.registerTool({
+    name: CHILD_COMPLETION_TOOL,
+    label: 'Complete Workflow Step',
+    description: 'Return the one structured result for this workflow step',
+    parameters: Type.Object({ value: Type.Any() }),
+    executionMode: 'sequential',
+    execute: async () => ({
+      content: [{ type: 'text' as const, text: 'Captured workflow step result.' }],
+      details: {},
+      terminate: true,
+    }),
+  });
+
   pi.on('input', (event) => {
     let extracted;
     try {
@@ -104,11 +117,7 @@ export const registerSubagentChildRuntime = (
     }
 
     try {
-      if (!isSubagentRuntimeName(childAgent)) {
-        throw new Error(
-          'child agent does not match the delegated workflow policy',
-        );
-      }
+      if (!childAgent) throw new Error('workflow worker agent is unavailable');
       verifyChildWorkingDirectory(extracted.policy, dependencies);
       verifyChildCapability({
         policy: extracted.policy,
@@ -118,7 +127,7 @@ export const registerSubagentChildRuntime = (
       const profileTools = new Set(pi.getActiveTools());
       if (!profileTools.has(CHILD_COMPLETION_TOOL)) {
         throw new Error(
-          'pi-subagents structured_output completion is unavailable',
+          'workflow worker completion tool is unavailable',
         );
       }
       const effectiveTools = new Set(

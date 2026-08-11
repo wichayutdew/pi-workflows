@@ -17,7 +17,7 @@ import {
   rejectUnknownKeys,
   type ValidationErrors,
 } from './shared.ts';
-import { parseStepSubagent } from './subagent.ts';
+import { AGENT_PROFILE_NAME_PATTERN, type StepAgent } from '../types.ts';
 
 function parsePrompt(
   value: unknown,
@@ -248,7 +248,7 @@ export function parseWorkflowStep(
     [
       'title',
       'prompt',
-      'subagent',
+      'agent',
       'permissions',
       'requires',
       'transitions',
@@ -264,11 +264,13 @@ export function parseWorkflowStep(
       ? stepId
       : readString(value.title, `${path}.title`, errors);
   const prompt = parsePrompt(value.prompt, `${path}.prompt`, errors);
-  const subagent = parseStepSubagent(
-    value.subagent,
-    `${path}.subagent`,
-    errors,
-  );
+  const agentName =
+    value.agent === undefined
+      ? undefined
+      : readString(value.agent, `${path}.agent`, errors, {
+          pattern: AGENT_PROFILE_NAME_PATTERN,
+        });
+  const agent: StepAgent | undefined = agentName ? { name: agentName } : undefined;
   const permissions = parsePermissions(
     value.permissions,
     `${path}.permissions`,
@@ -323,7 +325,7 @@ export function parseWorkflowStep(
   return {
     title,
     prompt,
-    ...(subagent ? { subagent } : {}),
+    ...(agent ? { agent } : {}),
     permissions,
     requires,
     transitions,

@@ -36,7 +36,7 @@ describe('when testing config', () => {
     const steps = raw.steps as Record<string, Record<string, unknown>>;
     steps.inspect = {
       ...steps.inspect,
-      subagent: { agent: 'workspace-preparer' },
+      agent: 'workspace-preparer',
       workspace: {
         bindOn: ['ready'],
         ...(allowedRoots ? { allowedRoots } : {}),
@@ -44,7 +44,7 @@ describe('when testing config', () => {
     };
     steps.implement = {
       ...steps.implement,
-      subagent: { agent: 'worker' },
+      agent: 'worker',
     };
     return raw;
   }
@@ -60,7 +60,7 @@ describe('when testing config', () => {
       expect(result.value?.steps.inspect?.permissions.bash.mode).toBe(
         'allow-list',
       );
-      expect(result.value?.steps.inspect?.subagent).toBe(undefined);
+      expect(result.value?.steps.inspect?.agent).toBe(undefined);
     });
 
     test('validates one-time workspace binding and permits delegated downstream cycles', () => {
@@ -123,7 +123,7 @@ describe('when testing config', () => {
         string,
         Record<string, unknown>
       >;
-      delete mainBinderSteps.inspect?.subagent;
+      delete mainBinderSteps.inspect?.agent;
 
       const terminalBinder = workspaceWorkflow();
       const terminalSteps = terminalBinder.steps as Record<
@@ -155,7 +155,7 @@ describe('when testing config', () => {
         string,
         Record<string, unknown>
       >;
-      delete downstreamSteps.implement?.subagent;
+      delete downstreamSteps.implement?.agent;
 
       const multipleBinders = workspaceWorkflow();
       const multipleSteps = multipleBinders.steps as Record<
@@ -169,7 +169,7 @@ describe('when testing config', () => {
       };
       multipleSteps.finish = {
         prompt: 'Finish',
-        subagent: { agent: 'finisher' },
+        agent: 'reviewer',
         transitions: { done: '$done' },
       };
 
@@ -195,140 +195,13 @@ describe('when testing config', () => {
       expect(messages).toMatch(/expected a non-empty workspace path/);
       expect(messages).toMatch(/path exceeds 4096 characters/);
       expect(messages).toMatch(/at most 32 workspace paths are allowed/);
-      expect(messages).toMatch(/workspace binding requires a subagent/);
       expect(messages).toMatch(
         /workspace-binding outcome must target an ordinary step/,
       );
       expect(messages).toMatch(
         /workspace binding is not allowed on a gated step/,
       );
-      expect(messages).toMatch(
-        /reachable after workspace binding must use a subagent/,
-      );
       expect(messages).toMatch(/only one workspace-binding step is allowed/);
-    });
-
-    test('validates per-step subagent model and execution budgets', () => {
-      // given
-      const raw = baseWorkflow();
-      const steps = raw.steps as Record<string, Record<string, unknown>>;
-      steps.inspect = {
-        ...steps.inspect,
-        subagent: {
-          agent: 'worker',
-          context: 'fresh',
-          model: 'anthropic/claude-sonnet-4',
-          timeoutMs: 120_000,
-          turnBudget: { maxTurns: 12, graceTurns: 2 },
-          toolBudget: { soft: 20, hard: 30, block: '*' },
-          artifacts: true,
-          retryToolFailures: true,
-        },
-      };
-      // when
-      const result = validateWorkflow(raw);
-      // then
-      expect(result.errors).toEqual([]);
-      expect(result.value?.steps.inspect?.subagent).toEqual({
-        agent: 'worker',
-        context: 'fresh',
-        model: 'anthropic/claude-sonnet-4',
-        timeoutMs: 120_000,
-        turnBudget: { maxTurns: 12, graceTurns: 2 },
-        toolBudget: { soft: 20, hard: 30, block: '*' },
-        artifacts: true,
-        retryToolFailures: true,
-      });
-
-      const invalid = baseWorkflow();
-      const invalidSteps = invalid.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      invalidSteps.inspect = {
-        ...invalidSteps.inspect,
-        subagent: {
-          agent: 'Reviewer!',
-          context: 'shared',
-          toolBudget: { soft: 10, hard: 5 },
-          retryToolFailures: 'yes',
-        },
-      };
-      const invalidResult = validateWorkflow(invalid);
-      expect(invalidResult.errors.join('\n')).toMatch(
-        /agent: invalid value "Reviewer!"/,
-      );
-      expect(invalidResult.errors.join('\n')).toMatch(/expected fresh/);
-      expect(invalidResult.errors.join('\n')).toMatch(
-        /soft: must not exceed hard/,
-      );
-      expect(invalidResult.errors.join('\n')).toMatch(
-        /retryToolFailures: expected a boolean/,
-      );
-
-      const mutationCapableRecovery = baseWorkflow();
-      const mutationCapableRecoverySteps =
-        mutationCapableRecovery.steps as Record<
-          string,
-          Record<string, unknown>
-        >;
-      mutationCapableRecoverySteps.inspect = {
-        ...mutationCapableRecoverySteps.inspect,
-        subagent: { retryToolFailures: true },
-        permissions: {
-          tools: ['read', 'bash', 'edit'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      };
-      expect(validateWorkflow(mutationCapableRecovery).errors).toEqual([]);
-
-      const defaults = baseWorkflow();
-      const defaultSteps = defaults.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      defaultSteps.inspect = { ...defaultSteps.inspect, subagent: {} };
-      const defaultResult = validateWorkflow(defaults);
-      expect(defaultResult.errors).toEqual([]);
-      expect(defaultResult.value?.steps.inspect?.subagent).toEqual({
-        agent: 'pi-workflows.step',
-        context: 'fresh',
-        timeoutMs: 900_000,
-        artifacts: false,
-        retryToolFailures: false,
-      });
-
-      const named = baseWorkflow();
-      const namedSteps = named.steps as Record<string, Record<string, unknown>>;
-      namedSteps.inspect = {
-        ...namedSteps.inspect,
-        subagent: 'reviewer',
-      };
-      const namedResult = validateWorkflow(named);
-      expect(namedResult.errors).toEqual([]);
-      expect(namedResult.value?.steps.inspect?.subagent).toEqual({
-        agent: 'reviewer',
-        context: 'fresh',
-        timeoutMs: 900_000,
-        artifacts: false,
-        retryToolFailures: false,
-      });
-
-      const invalidName = baseWorkflow();
-      const invalidNameSteps = invalidName.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      invalidNameSteps.inspect = {
-        ...invalidNameSteps.inspect,
-        subagent: 'Reviewer!',
-      };
-      expect(validateWorkflow(invalidName).errors.join('\n')).toMatch(
-        /subagent: invalid value "Reviewer!"/,
-      );
     });
 
     test('keeps Bash authority entirely declarative in the workflow', () => {
@@ -859,184 +732,6 @@ describe('when testing config', () => {
       );
     });
 
-    test('project ceiling requires subagent policy only for delegated steps', () => {
-      // given
-      // when
-      const mainWorkflow = validateWorkflow(baseWorkflow());
-      // then
-      expect(mainWorkflow.value).toBeTruthy();
-      const mainSettings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      });
-      expect(mainSettings.value?.permissionCeiling).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          mainWorkflow.value!,
-          mainSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).not.toMatch(/subagent/);
-
-      const delegated = baseWorkflow();
-      const delegatedSteps = delegated.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      delegatedSteps.inspect = { ...delegatedSteps.inspect, subagent: {} };
-      const delegatedWorkflow = validateWorkflow(delegated);
-      expect(delegatedWorkflow.value).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          delegatedWorkflow.value!,
-          mainSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).toMatch(/subagent execution exceeds/);
-    });
-
-    test('project ceiling rejects workspace binding as its own exact error', () => {
-      const raw = workspaceWorkflow(['..']);
-      const steps = raw.steps as Record<string, Record<string, unknown>>;
-      for (const stepId of ['inspect', 'implement']) {
-        const step = steps[stepId]!;
-        step.subagent = {
-          ...(step.subagent as Record<string, unknown>),
-          turnBudget: { maxTurns: 10, graceTurns: 1 },
-          toolBudget: { hard: 20, block: '*' },
-        };
-      }
-      const workflow = validateWorkflow(raw);
-      expect(workflow.errors).toEqual([]);
-
-      const settings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-          subagent: {
-            ...projectSubagentCeiling(),
-            agents: ['workspace-preparer', 'worker'],
-            maxTimeoutMs: 900_000,
-          },
-        },
-      });
-      expect(settings.errors).toEqual([]);
-
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          settings.value!.permissionCeiling!,
-        ),
-      ).toEqual([
-        'workflow.steps.inspect.workspace: workspace binding is unavailable to project workflows',
-      ]);
-    });
-
-    test('project permission ceiling rejects wider tools and MCP servers', () => {
-      // given
-      // when
-      const workflow = validateWorkflow({
-        ...baseWorkflow(),
-        steps: {
-          inspect: {
-            prompt: 'Inspect',
-            subagent: {
-              agent: 'pi-workflows.writer',
-              context: 'fresh',
-              model: 'anthropic/claude-sonnet-4',
-              timeoutMs: 120_000,
-              turnBudget: { maxTurns: 12, graceTurns: 2 },
-              toolBudget: { hard: 30 },
-              artifacts: true,
-            },
-            permissions: {
-              tools: ['read', 'write'],
-              mcp: ['gitlab/get_merge_request'],
-            },
-            transitions: { done: '$done' },
-          },
-        },
-        start: 'inspect',
-      });
-      // then
-      expect(workflow.value).toBeTruthy();
-      const settings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read'],
-          mcp: ['github'],
-          bash: { mode: 'deny' },
-          subagent: projectSubagentCeiling(),
-        },
-      });
-      expect(settings.value?.permissionCeiling).toBeTruthy();
-      const errors = checkWorkflowAgainstCeiling(
-        workflow.value!,
-        settings.value!.permissionCeiling!,
-      );
-      expect(errors.join('\n')).toMatch(/"write" exceeds/);
-      expect(errors.join('\n')).toMatch(/"gitlab\/get_merge_request" exceeds/);
-      expect(errors.join('\n')).toMatch(/subagent\.agent/);
-      expect(errors.join('\n')).toMatch(/subagent\.model/);
-      expect(errors.join('\n')).toMatch(/subagent\.timeoutMs/);
-      expect(errors.join('\n')).toMatch(/subagent\.turnBudget\.maxTurns/);
-      expect(errors.join('\n')).toMatch(/subagent\.toolBudget\.hard/);
-      expect(errors.join('\n')).toMatch(/subagent\.toolBudget\.block/);
-      expect(errors.join('\n')).toMatch(/subagent\.artifacts/);
-
-      const contextCeiling = structuredClone(
-        settings.value!.permissionCeiling!,
-      );
-      if (!contextCeiling.subagent) {
-        throw new Error('expected a subagent permission ceiling');
-      }
-      const contextCeilingWithoutContexts = {
-        ...contextCeiling,
-        subagent: { ...contextCeiling.subagent, contexts: [] },
-      };
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          contextCeilingWithoutContexts,
-        ).join('\n'),
-      ).toMatch(/subagent\.context/);
-
-      const inspectedStep = workflow.value!.steps.inspect;
-      if (!inspectedStep?.subagent) {
-        throw new Error('expected the inspect step to use a subagent');
-      }
-      const retryRequested = {
-        ...workflow.value!,
-        steps: {
-          ...workflow.value!.steps,
-          inspect: {
-            ...inspectedStep,
-            subagent: {
-              ...inspectedStep.subagent,
-              retryToolFailures: true,
-            },
-          },
-        },
-      };
-      expect(
-        checkWorkflowAgainstCeiling(
-          retryRequested,
-          settings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).toMatch(/subagent\.retryToolFailures/);
-    });
-
     test('project permission ceiling constrains declarative Bash rules', () => {
       // given
       const raw = baseWorkflow();
@@ -1096,95 +791,6 @@ describe('when testing config', () => {
       ).not.toMatch(/permissions\.bash: exceeds/);
     });
 
-    test('project ceiling reports extension, skill, and missing budget limits', () => {
-      // given
-      const raw = baseWorkflow();
-      raw.steps = {
-        run: {
-          prompt: 'Run',
-          subagent: {},
-          permissions: {
-            tools: ['bash'],
-            extensions: ['annotator'],
-            skills: ['planning'],
-            bash: {
-              mode: 'allow-list',
-              allow: [{ executable: 'npm', argsPrefix: ['test'] }],
-            },
-          },
-          transitions: { done: '$done' },
-        },
-      };
-      raw.start = 'run';
-      const workflow = validateWorkflow(raw).value!;
-      const settings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['bash'],
-          extensions: [],
-          skills: [],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'npm', argsPrefix: ['test'] }],
-          },
-          subagent: projectSubagentCeiling(),
-        },
-      }).value!;
-
-      // when
-      const errors = checkWorkflowAgainstCeiling(
-        workflow,
-        settings.permissionCeiling!,
-      );
-
-      // then
-      expect(errors.join('\n')).toMatch(/extensions: "annotator" exceeds/);
-      expect(errors.join('\n')).toMatch(/skills: "planning" exceeds/);
-      expect(errors.join('\n')).toMatch(/turnBudget: required/);
-      expect(errors.join('\n')).toMatch(/toolBudget: required/);
-      expect(errors.join('\n')).not.toMatch(/permissions\.bash: exceeds/);
-    });
-
-    test('loader rejects prompt paths that escape the workflow directory', async () => {
-      // given
-      const root = await mkdtemp(join(tmpdir(), 'pi-workflows-config-'));
-      const userDirectory = join(root, 'workflows');
-      await mkdir(userDirectory, { recursive: true });
-      await writeFile(join(root, 'outside.md'), 'outside', 'utf8');
-      const raw = {
-        ...baseWorkflow(),
-        steps: {
-          inspect: {
-            prompt: { file: '../outside.md' },
-            transitions: { done: '$done' },
-          },
-        },
-        start: 'inspect',
-      };
-      // when
-      await writeFile(
-        join(userDirectory, 'escape.workflow.yaml'),
-        JSON.stringify(raw),
-        'utf8',
-      );
-
-      // then
-      try {
-        const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
-          userDirectory,
-        });
-        expect(catalog.workflows.size).toBe(0);
-        expect(catalog.diagnostics[0]?.message ?? '').toMatch(
-          /escapes workflow directory/,
-        );
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    });
-
     test('loader accepts YAML workflow files and rejects duplicate YAML keys', async () => {
       // given
       const root = await mkdtemp(join(tmpdir(), 'pi-workflows-yaml-'));
@@ -1201,7 +807,7 @@ describe('when testing config', () => {
           'steps:',
           '  inspect:',
           '    prompt: Inspect safely',
-          '    subagent: reviewer',
+          '    agent: reviewer',
           '    permissions:',
           '      tools: [bash]',
           '      bash:',
@@ -1265,13 +871,9 @@ describe('when testing config', () => {
           { executable: 'git', argsPrefix: ['diff', '--stat'] },
         ]);
         expect(
-          catalog.workflows.get('compact')?.definition.steps.inspect?.subagent,
+          catalog.workflows.get('compact')?.definition.steps.inspect?.agent,
         ).toEqual({
-          agent: 'reviewer',
-          context: 'fresh',
-          timeoutMs: 900_000,
-          artifacts: false,
-          retryToolFailures: false,
+          name: 'reviewer',
         });
         expect(catalog.diagnostics.length).toBe(1);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(/unique/i);
@@ -1449,16 +1051,6 @@ describe('when testing config', () => {
           '    allow:',
           '      - executable: git',
           '        argsPrefix: [status]',
-          '  subagent:',
-          '    agents: [pi-workflows.step]',
-          '    contexts: [fresh]',
-          '    models: []',
-          '    maxTimeoutMs: 900000',
-          '    maxTurns: 40',
-          '    maxGraceTurns: 3',
-          '    maxToolCalls: 100',
-          '    artifacts: false',
-          '    retryToolFailures: false',
         ].join('\n'),
         'utf8',
       );
@@ -1468,19 +1060,6 @@ describe('when testing config', () => {
         'utf8',
       );
       const projectWorkflow = baseWorkflow();
-      const projectSteps = projectWorkflow.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      for (const [stepId, step] of Object.entries(projectSteps)) {
-        projectSteps[stepId] = {
-          ...step,
-          subagent: {
-            turnBudget: { maxTurns: 20, graceTurns: 2 },
-            toolBudget: { hard: 50, block: '*' },
-          },
-        };
-      }
       // when
       await writeFile(
         join(projectDirectory, 'override.workflow.yaml'),

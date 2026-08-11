@@ -16,6 +16,7 @@ export type ActiveDelegation = {
   policy: ChildStepPolicy;
   transcriptTask: string;
   agent: string;
+  directWorker?: boolean;
   trustedSessionRoot?: string;
   broadRecoveryAuthorized: boolean;
   recoveryAttemptCount: number;

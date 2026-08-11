@@ -21,7 +21,6 @@
   "files": [
     "dist",
     "src",
-    "agents",
     "examples",
     "schemas",
     "README.md",
@@ -30,12 +29,7 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ],
-    "subagents": {
-      "agents": [
-        "./agents"
-      ]
-    }
+    ]
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir=dist --target=node --format=esm --packages=external",
@@ -56,13 +50,7 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "pi-subagents": ">=0.36.0",
     "typebox": "*"
-  },
-  "peerDependenciesMeta": {
-    "pi-subagents": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.81.1",
@@ -72,7 +60,6 @@
     "@types/node": "^24.0.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
-    "pi-subagents": "0.36.0",
     "prettier": "^3.9.5",
     "typebox": "^1.1.38",
     "typescript": "^5.9.3",

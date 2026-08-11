@@ -10,18 +10,7 @@ steps:
     title: Prepare dedicated branch and worktree
     prompt:
       file: steps/shared/prepare-workspace.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 900000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 25
-        graceTurns: 3
-      toolBudget:
-        soft: 50
-        hard: 90
-        block: "*"
+    agent: worker
     workspace:
       bindOn: [ready]
       allowedRoots: ["~/repositories/worktrees"]
@@ -41,18 +30,7 @@ steps:
     title: Explore and plan local work
     prompt:
       file: steps/work/plan.md
-    subagent:
-      agent: planner
-      context: fresh
-      timeoutMs: 1200000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 30
-        graceTurns: 3
-      toolBudget:
-        soft: 60
-        hard: 100
-        block: "*"
+    agent: planner
     permissions:
       tools: [read, ls, bash]
       mcp: &work-mcp
@@ -113,19 +91,7 @@ steps:
     title: Implement the approved local plan
     prompt:
       file: steps/work/implement.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 7200000
-      artifacts: true
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 80
-        graceTurns: 5
-      toolBudget:
-        soft: 240
-        hard: 400
-        block: "*"
+    agent: worker
     permissions:
       tools: [read, ls, bash, edit, write]
       mcp: *work-mcp
@@ -151,18 +117,7 @@ steps:
     title: Independently verify local work
     prompt:
       file: steps/work/verify.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 3600000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 40
-        graceTurns: 3
-      toolBudget:
-        soft: 120
-        hard: 200
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [read, ls, bash]
       mcp: *work-mcp

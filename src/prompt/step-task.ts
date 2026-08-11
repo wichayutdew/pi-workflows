@@ -1,3 +1,4 @@
+import { loadAgentProfile } from '../agents/profile.ts';
 import type { LoadedWorkflow, WorkflowStep } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
 import { createStepContract } from './step-contract.ts';
@@ -15,6 +16,8 @@ import {
 } from './template.ts';
 
 type StepExecution = 'delegated' | 'main';
+
+const rolePrompt = (name: string): string => loadAgentProfile(name).prompt;
 
 type BuildStepTaskOptions =
   | {
@@ -123,15 +126,13 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     `Run: ${run.runId}`,
     `Iteration: ${run.iteration ?? 1}`,
     `Step: ${run.currentStepId} (${step.title})`,
-    ...(isDelegated
-      ? [
-          `Agent profile: ${step.subagent?.agent ?? 'generalist'}`,
-          'Context: fresh workflow-step context; no parent or sibling transcript is inherited.',
-        ]
-      : []),
+    ...(step.agent ? [`Agent profile: ${step.agent.name}`] : []),
     '',
     '## Step instructions',
     '',
+    ...(step.agent
+      ? ['## Role prompt', '', rolePrompt(step.agent.name), '']
+      : []),
     prompt,
     '',
     ...(isDelegated ? buildDelegatedHandoffSection(handoff) : []),
@@ -190,3 +191,5 @@ export function buildMainStepTask(
 ): string {
   return buildStepTask({ execution: 'main', workflow, run });
 }
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';

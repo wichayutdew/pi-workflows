@@ -1,14 +1,3 @@
-import type {
-  SubagentDelegationRequest as UpstreamDelegationRequest,
-  SubagentDelegationResponse as UpstreamDelegationResponse,
-  SubagentDelegationStatus as UpstreamDelegationStatus,
-  SubagentDelegationUpdate as UpstreamDelegationUpdate,
-} from 'pi-subagents/delegation';
-
-// These released v1 transport values are duplicated as literals because
-// pi-subagents 0.36.0 exports TypeScript source. Node's native type stripping
-// cannot execute TypeScript below node_modules; the public types above remain
-// the compile-time compatibility check.
 export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
 export const SUBAGENT_DELEGATION_REQUEST_EVENT =
   'prompt-template:subagent:request';
@@ -21,7 +10,46 @@ export const SUBAGENT_DELEGATION_RESPONSE_EVENT =
 export const SUBAGENT_DELEGATION_CANCEL_EVENT =
   'prompt-template:subagent:cancel';
 
-export type SubagentDelegationRequest = UpstreamDelegationRequest;
-export type SubagentDelegationUpdate = UpstreamDelegationUpdate;
-export type SubagentDelegationStatus = UpstreamDelegationStatus;
-export type SubagentDelegationResponse = UpstreamDelegationResponse;
+export type SubagentDelegationRequest = {
+  readonly version: 1;
+  readonly requestId: string;
+  readonly agent: string;
+  readonly task: string;
+  readonly cwd: string;
+  readonly timeoutMs?: number;
+  readonly model?: string;
+  readonly thinking?:
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  readonly [key: string]: unknown;
+};
+export type SubagentDelegationUpdate = {
+  readonly requestId: string;
+  readonly currentTool?: string;
+  readonly toolCount?: number;
+  readonly tokens?: number;
+};
+export type SubagentDelegationStatus =
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'timed_out'
+  | 'turn_budget_exhausted'
+  | 'tool_budget_exhausted'
+  | 'structured_output_failed';
+export type SubagentDelegationResponse = {
+  readonly version?: number;
+  readonly requestId: string;
+  readonly agent?: string;
+  readonly status: SubagentDelegationStatus;
+  readonly error?: string;
+  readonly exitCode?: number;
+  readonly warnings?: ReadonlyArray<string>;
+  readonly execution?: any;
+  readonly effects?: any;
+  readonly toolCount?: number;
+  readonly turns?: number;
+  readonly sessionFile?: string;
+  readonly runId?: string;
+  readonly childIndex?: number;
+};

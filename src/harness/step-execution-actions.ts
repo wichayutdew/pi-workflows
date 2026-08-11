@@ -106,11 +106,6 @@ function launchCurrentStep(
     );
     return;
   }
-  if (!step.subagent) {
-    this.launchMainStep(workflow, run, step);
-    return;
-  }
-
   const plan = createDelegationPlan(
     {
       workflow,
@@ -243,6 +238,9 @@ function launchMainStep(
     outcomes: allowedOutcomes(workflow, run),
     summaryMaxChars: workflow.definition.summaryMaxChars,
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
+    ...(step.workspace
+      ? { workspace: structuredClone(step.workspace) }
+      : {}),
     onTrace: (lines, context) =>
       this.queueMainStepLog(identity, lines, context),
     onSettled: (result, context) =>

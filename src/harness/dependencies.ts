@@ -154,7 +154,7 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   readToolFailureDiagnostic,
   auditCompletedDelegationTranscript,
   showWorkflowStatus,
-  createSubagentClient: (pi) => createSubagentDelegationClient(pi.events),
+  createSubagentClient: () => createSubagentDelegationClient(),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),
   createMutationQueue: createSerialTaskQueue,
   flushUnwrittenSession,

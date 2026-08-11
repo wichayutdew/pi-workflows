@@ -88,7 +88,7 @@ describe('when testing prompt', () => {
         /policy envelope/,
       );
       expect(buildMainWorkflowNotice(workflow, run)).toMatch(
-        /Active main-agent workflow/,
+        /Active workflow/,
       );
 
       const delegatedRaw = baseWorkflow();
@@ -98,7 +98,7 @@ describe('when testing prompt', () => {
       >;
       steps.inspect = {
         ...steps.inspect,
-        subagent: { agent: 'scout' },
+        agent: 'scout',
         prompt: 'Use this handoff: {{last.summary}}',
       };
       const delegatedWorkflow = loadedWorkflow(delegatedRaw);
@@ -115,7 +115,7 @@ describe('when testing prompt', () => {
         'policy envelope',
       );
       expect(delegatedTask).toMatch(/Agent profile: scout/);
-      expect(delegatedTask).toMatch(/Context: fresh workflow-step context/);
+      expect(delegatedTask).toMatch(/Agent profile: scout/);
       expect(delegatedTask).toContain(
         'Bash allow rules: [{"executable":"git","argsPrefix":["status"]}]',
       );
@@ -146,7 +146,7 @@ describe('when testing prompt', () => {
       >;
       workspaceSteps.inspect = {
         ...workspaceSteps.inspect,
-        subagent: { agent: 'workspace-preparer' },
+        agent: 'workspace-preparer',
         workspace: {
           bindOn: ['ready'],
           allowedRoots: ['../worktrees'],
@@ -154,7 +154,7 @@ describe('when testing prompt', () => {
       };
       workspaceSteps.implement = {
         ...workspaceSteps.implement,
-        subagent: { agent: 'worker' },
+        agent: 'worker',
       };
       const workspaceWorkflow = loadedWorkflow(workspaceRaw);
       const workspaceTask = buildDelegatedStepTask(
@@ -201,7 +201,7 @@ describe('when testing prompt', () => {
 
       reviewedSteps.inspect = {
         ...reviewedSteps.inspect,
-        subagent: { agent: 'worker' },
+        agent: 'worker',
         prompt:
           '{{reviewed.artifact}} / {{reviewed.feedback}} / {{last.summary}}',
       };
@@ -297,7 +297,7 @@ describe('when testing prompt', () => {
       >;
       recoverableSteps.inspect = {
         ...recoverableSteps.inspect,
-        subagent: { agent: 'scout' },
+        agent: 'scout',
         transitions: {
           retry: 'inspect',
           replan: 'inspect',
@@ -328,7 +328,7 @@ describe('when testing prompt', () => {
       >;
       gatedSteps.inspect = {
         ...gatedSteps.inspect,
-        subagent: { agent: 'planner' },
+        agent: 'planner',
         gate: {
           provider: 'plannotator',
           submitOutcome: 'submit',
@@ -354,7 +354,7 @@ describe('when testing prompt', () => {
         /decision-ready|machine-readable contract|review focus|caveman/i,
       );
 
-      delete gatedSteps.inspect.subagent;
+      delete gatedSteps.inspect.agent;
       const mainGatedWorkflow = loadedWorkflow(gatedRaw);
       const mainGatedTask = buildMainStepTask(
         mainGatedWorkflow,
@@ -372,7 +372,7 @@ describe('when testing prompt', () => {
       >;
       noPauseSteps.inspect = {
         ...noPauseSteps.inspect,
-        subagent: { agent: 'worker' },
+        agent: 'worker',
         transitions: { done: '$done' },
       };
       delete noPauseSteps.implement;
@@ -400,7 +400,7 @@ describe('when testing prompt', () => {
         delegatedRun,
         'Ctrl+Shift+Y',
       );
-      expect(delegatedNotice).toMatch(/Active subagent workflow/);
+      expect(delegatedNotice).toMatch(/Active workflow/);
       expect(delegatedNotice).toMatch(/Ctrl\+Shift\+Y/);
       expect(() =>
         buildMainWorkflowNotice(workflow, { ...run, currentStepId: 'missing' }),

@@ -69,19 +69,11 @@ export function preflightStep(
   const extensionResources = [...inventory.tools, ...inventory.commands];
   const hasExtension = (extension: string): boolean =>
     extensionResources.some((resource) => sourceMatches(resource, extension));
-  const hasSubagentTool = inventory.tools.some(
-    (tool) => tool.name === 'subagent' && sourceMatches(tool, 'pi-subagents'),
-  );
   const isPlannotatorRequired =
     step.gate?.provider === 'plannotator' &&
     !step.requires.extensions.includes('plannotator');
 
   return [
-    ...(step.subagent && !hasSubagentTool
-      ? [
-          'pi-subagents is required, but its "subagent" tool is not installed or detectable',
-        ]
-      : []),
     ...missingRequiredResources({
       requiredNames: step.requires.tools,
       hasResource: (toolName) => toolNames.has(toolName),

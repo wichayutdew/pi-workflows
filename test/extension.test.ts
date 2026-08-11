@@ -105,12 +105,12 @@ describe('when testing extension', () => {
       }
     });
 
-    test('the entry point installs an inert policy listener in pi-subagents children', async () => {
+    test('the entry point installs the direct worker policy runtime', async () => {
       // given
-      const previousChild = process.env.PI_SUBAGENT_CHILD;
-      const previousAgent = process.env.PI_SUBAGENT_CHILD_AGENT;
-      process.env.PI_SUBAGENT_CHILD = '1';
-      process.env.PI_SUBAGENT_CHILD_AGENT = 'reviewer';
+      const previousChild = process.env.PI_WORKFLOWS_CHILD;
+      const previousAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
+      process.env.PI_WORKFLOWS_CHILD = '1';
+      process.env.PI_WORKFLOWS_CHILD_AGENT = 'reviewer';
       const commands = new Set<string>();
       const tools = new Set<string>();
       const events = new Set<string>();
@@ -135,18 +135,18 @@ describe('when testing extension', () => {
       try {
         await piWorkflowsExtension(pi);
         expect([...commands]).toEqual([]);
-        expect([...tools]).toEqual([]);
+        expect([...tools]).toEqual(['structured_output']);
         expect(events.has('input')).toBe(true);
         expect(events.has('before_agent_start')).toBe(true);
         expect(events.has('tool_call')).toBe(true);
         expect(events.has('session_start')).toBe(false);
         expect(activeTools).toEqual([]);
       } finally {
-        if (previousChild === undefined) delete process.env.PI_SUBAGENT_CHILD;
-        else process.env.PI_SUBAGENT_CHILD = previousChild;
+        if (previousChild === undefined) delete process.env.PI_WORKFLOWS_CHILD;
+        else process.env.PI_WORKFLOWS_CHILD = previousChild;
         if (previousAgent === undefined)
-          delete process.env.PI_SUBAGENT_CHILD_AGENT;
-        else process.env.PI_SUBAGENT_CHILD_AGENT = previousAgent;
+          delete process.env.PI_WORKFLOWS_CHILD_AGENT;
+        else process.env.PI_WORKFLOWS_CHILD_AGENT = previousAgent;
       }
     });
   });

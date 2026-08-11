@@ -10,18 +10,7 @@ steps:
     title: Fetch complete hosted-review evidence
     prompt:
       file: steps/mr-review/fetch.md
-    subagent:
-      agent: scout
-      context: fresh
-      timeoutMs: 1800000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 40
-        graceTurns: 3
-      toolBudget:
-        soft: 100
-        hard: 180
-        block: "*"
+    agent: scout
     permissions:
       tools: [read, ls, bash]
       mcp: &review-mcp
@@ -89,18 +78,7 @@ steps:
     title: Produce and approve the complete hosted review
     prompt:
       file: steps/mr-review/review-for-approval.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 1800000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 90
-        graceTurns: 5
-      toolBudget:
-        soft: 100
-        hard: 180
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [read, ls, bash]
       mcp: *review-mcp
@@ -133,18 +111,7 @@ steps:
     title: Publish the approved hosted review
     prompt:
       file: steps/mr-review/publish-approved.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 900000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 20
-        graceTurns: 2
-      toolBudget:
-        soft: 40
-        hard: 70
-        block: "*"
+    agent: worker
     permissions:
       tools: [bash]
       skills:
@@ -165,18 +132,7 @@ steps:
     title: Verify or return the approved review for publication repair
     prompt:
       file: steps/mr-review/verify-published.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 900000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 20
-        graceTurns: 2
-      toolBudget:
-        soft: 40
-        hard: 70
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [bash]
       skills: *publish-skills

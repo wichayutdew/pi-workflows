@@ -20,22 +20,13 @@ export function buildMainWorkflowNotice(
     throw new Error(`unknown workflow step "${run.currentStepId}"`);
   }
 
-  if (!step.subagent) {
-    return [
-      '# Active main-agent workflow',
-      '',
-      `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in this session.`,
-      'Perform only the active workflow step with its allowed resources.',
-      'Call `workflow_complete_step` exactly once when finished.',
-      'Use `/workflow-pause` to halt and repair the workflow before resuming.',
-    ].join('\n');
-  }
-
   return [
-    '# Active subagent workflow',
+    '# Active workflow',
     '',
-    `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in a separate pi-subagents child process.`,
-    'Do not perform the workflow step in this main session.',
-    `Use \`${statusShortcutLabel}\` or \`/workflow-status\` to open the workflow status overlay, or \`/workflow-pause\` to cancel the child and repair the workflow before resuming.`,
+    `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in this session.`,
+    ...(step.agent ? [`Apply the "${step.agent.name}" workflow role prompt.`] : []),
+    'Perform only the active workflow step with its allowed resources.',
+    'Call `workflow_complete_step` exactly once when finished.',
+    `Use \`${statusShortcutLabel}\` or \`/workflow-status\` to inspect status, or \`/workflow-pause\` to halt and repair the workflow before resuming.`,
   ].join('\n');
 }

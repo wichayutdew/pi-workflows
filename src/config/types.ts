@@ -2,8 +2,10 @@ import type { KeyId } from '@earendil-works/pi-tui';
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
 export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
-export const SUBAGENT_RUNTIME_NAME_PATTERN =
+export const AGENT_PROFILE_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
+/** @internal Legacy checkpoint compatibility only. */
+export const SUBAGENT_RUNTIME_NAME_PATTERN = AGENT_PROFILE_NAME_PATTERN;
 export const MAX_WORKSPACE_PATH_CHARS = 4_096;
 export const MAX_WORKSPACE_ALLOWED_ROOTS = 32;
 
@@ -41,34 +43,26 @@ export type StepRequirements = {
   readonly skills: ReadonlyArray<string>;
 };
 
+export type StepAgent = {
+  /** Workflow-owned role prompt applied to this main-agent step. */
+  readonly name: string;
+};
+
+/** @internal Legacy runtime shape retained while historical checkpoints exist. */
 export type SubagentContext = 'fresh';
-
-export type SubagentTurnBudget = {
-  readonly maxTurns: number;
-  readonly graceTurns?: number;
-};
-
-export type SubagentToolBudget = {
-  readonly hard: number;
-  readonly soft?: number;
-  readonly block?: ReadonlyArray<string> | '*';
-};
-
+/** @internal */
+export type SubagentTurnBudget = { readonly maxTurns: number; readonly graceTurns?: number };
+/** @internal */
+export type SubagentToolBudget = { readonly hard: number; readonly soft?: number; readonly block?: ReadonlyArray<string> | '*' };
+/** @internal Legacy checkpoint compatibility only; the workflow schema rejects it. */
 export type StepSubagent = {
-  /** Pi Subagents agent profile launched for this isolated step. */
   readonly agent: string;
-  /** Workflow steps always use a fresh context. */
   readonly context: SubagentContext;
   readonly model?: string;
   readonly timeoutMs: number;
   readonly turnBudget?: SubagentTurnBudget;
   readonly toolBudget?: SubagentToolBudget;
   readonly artifacts: boolean;
-  /**
-   * Authorizes bounded automatic recovery when Bash can execute commands.
-   * Every failed attempt must still have a complete, mutation-safe replay
-   * audit.
-   */
   readonly retryToolFailures: boolean;
 };
 
@@ -102,7 +96,9 @@ export type StepWorkspaceBinding = {
 export type WorkflowStep = {
   readonly title: string;
   readonly prompt: PromptSpec;
-  /** Omit to execute this step in the main Pi agent. */
+  /** Optional workflow-owned role prompt for this main-agent step. */
+  readonly agent?: StepAgent;
+  /** @internal Legacy checkpoint compatibility only. */
   readonly subagent?: StepSubagent;
   readonly permissions: StepPermissions;
   readonly requires: StepRequirements;

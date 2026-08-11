@@ -1,51 +1,39 @@
-import {
-  createDelegation,
-  DEFAULT_CLIENT_DEPENDENCIES,
-} from './client-delegation.ts';
-import type {
-  ActiveDelegation,
-  DelegateOptions,
-  SubagentDelegationClientDependencies,
-  SubagentEventBus,
-} from './client-types.ts';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type {
   SubagentDelegationRequest,
   SubagentDelegationResponse,
 } from './protocol-events.ts';
 
-export type {
-  DelegateOptions,
-  SubagentDelegationClientDependencies,
-  SubagentEventBus,
-} from './client-types.ts';
+export type DelegateOptions = {
+  readonly signal?: AbortSignal;
+  readonly onUpdate?: (update: { readonly requestId: string }) => void;
+  readonly onLateTerminal?: (response: SubagentDelegationResponse) => void;
+};
 
-/**
- * Functional surface used by workflow orchestration.
- */
+/** A pi-workflows-owned foreground Pi process. */
 export type SubagentDelegationClientController = {
-  /** Request currently owned by this client, if any. */
   readonly activeRequestId: string | undefined;
-  /** Starts one correlated delegation. */
   readonly delegate: (
     request: SubagentDelegationRequest,
     options?: DelegateOptions,
   ) => Promise<SubagentDelegationResponse>;
-  /** Cancels the active delegation and waits for terminal confirmation. */
   readonly cancelActiveAndWait: (waitMs?: number) => Promise<boolean>;
 };
 
-/**
- * Creates an isolated subagent delegation controller.
- *
- * @param events - Event transport shared with the subagent runtime.
- * @param dependencies - Timer effects used for cancellation and timeouts.
- * @returns A controller that owns at most one active delegation.
- */
-export function createSubagentDelegationClient(
-  events: SubagentEventBus,
-  dependencies: SubagentDelegationClientDependencies = DEFAULT_CLIENT_DEPENDENCIES,
-): SubagentDelegationClientController {
-  let active: ActiveDelegation | undefined;
+export const directWorkerCommand = (
+  request: SubagentDelegationRequest,
+): ReadonlyArray<string> => [
+  '--no-session',
+  '--mode',
+  'json',
+  ...(request.model ? ['--model', request.model] : []),
+  ...(request.thinking ? ['--thinking', request.thinking] : []),
+  '--print',
+  request.task,
+];
+
+export function createSubagentDelegationClient(): SubagentDelegationClientController {
+  let active: { requestId: string; process: ChildProcess } | undefined;
 
   const delegate = (
     request: SubagentDelegationRequest,
@@ -53,45 +41,45 @@ export function createSubagentDelegationClient(
   ): Promise<SubagentDelegationResponse> => {
     if (active) {
       return Promise.reject(
-        new Error(`subagent request "${active.requestId}" is still active`),
+        new Error(`workflow worker "${active.requestId}" is still active`),
       );
     }
     if (options.signal?.aborted) {
-      return Promise.reject(new Error('subagent delegation was cancelled'));
+      return Promise.reject(new Error('workflow worker was cancelled'));
     }
-
-    const delegation = createDelegation({
-      events,
-      request,
-      options,
-      dependencies,
-      releaseActive: (requestId) => {
-        if (active?.requestId === requestId) active = undefined;
-      },
-    });
-    active = delegation.active;
-    delegation.start();
-    return delegation.promise;
-  };
-
-  const cancelActiveAndWait = (waitMs = 5_000): Promise<boolean> => {
-    const current = active;
-    if (!current) return Promise.resolve(true);
-
-    current.requestCancellation();
-    return new Promise<boolean>((resolve) => {
-      let isFinished = false;
-      const finish = (isConfirmed: boolean): void => {
-        if (isFinished) return;
-        isFinished = true;
-        dependencies.cancelTimeout(timer);
-        resolve(isConfirmed);
+    return new Promise((resolve, reject) => {
+      const child = spawn('pi', directWorkerCommand(request), {
+        cwd: request.cwd,
+        env: {
+          ...process.env,
+          PI_WORKFLOWS_CHILD: '1',
+          PI_WORKFLOWS_CHILD_AGENT: request.agent,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      active = { requestId: request.requestId, process: child };
+      let stderr = '';
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+      });
+      const abort = (): void => {
+        child.kill('SIGTERM');
       };
-      const timer = dependencies.scheduleTimeout(() => {
-        finish(false);
-      }, waitMs);
-      void current.terminal.then(() => {
-        finish(true);
+      options.signal?.addEventListener('abort', abort, { once: true });
+      child.once('error', (error) => {
+        if (active?.process === child) active = undefined;
+        reject(error);
+      });
+      child.once('close', (code, signal) => {
+        if (active?.process === child) active = undefined;
+        options.signal?.removeEventListener('abort', abort);
+        resolve({
+          requestId: request.requestId,
+          agent: request.agent,
+          status: code === 0 ? 'completed' : signal ? 'cancelled' : 'failed',
+          ...(code === null ? {} : { exitCode: code }),
+          ...(stderr.trim() ? { error: stderr.trim().slice(-4_000) } : {}),
+        });
       });
     });
   };
@@ -101,48 +89,29 @@ export function createSubagentDelegationClient(
       return active?.requestId;
     },
     delegate,
-    cancelActiveAndWait,
+    async cancelActiveAndWait(): Promise<boolean> {
+      const current = active;
+      if (!current) return true;
+      current.process.kill('SIGTERM');
+      return new Promise((resolve) =>
+        current.process.once('close', () => resolve(true)),
+      );
+    },
   };
 }
 
-/**
- * Coordinates one foreground pi-subagents request at a time.
- *
- * Event and timer boundaries are constructor-injected; production defaults
- * preserve the original runtime behavior.
- */
 export class SubagentDelegationClient implements SubagentDelegationClientController {
-  readonly #controller: SubagentDelegationClientController;
-
-  /**
-   * Creates a client over the supplied event and timer boundaries.
-   */
-  constructor(
-    events: SubagentEventBus,
-    dependencies: SubagentDelegationClientDependencies = DEFAULT_CLIENT_DEPENDENCIES,
-  ) {
-    this.#controller = createSubagentDelegationClient(events, dependencies);
-  }
-
-  /** Returns the request currently owned by this client, if any. */
+  readonly #client = createSubagentDelegationClient();
   get activeRequestId(): string | undefined {
-    return this.#controller.activeRequestId;
+    return this.#client.activeRequestId;
   }
-
-  /**
-   * Starts a correlated delegation and resolves on its terminal event.
-   */
   delegate(
     request: SubagentDelegationRequest,
-    options: DelegateOptions = {},
+    options?: DelegateOptions,
   ): Promise<SubagentDelegationResponse> {
-    return this.#controller.delegate(request, options);
+    return this.#client.delegate(request, options);
   }
-
-  /**
-   * Requests cancellation and waits briefly for terminal confirmation.
-   */
-  cancelActiveAndWait(waitMs = 5_000): Promise<boolean> {
-    return this.#controller.cancelActiveAndWait(waitMs);
+  cancelActiveAndWait(waitMs?: number): Promise<boolean> {
+    return this.#client.cancelActiveAndWait(waitMs);
   }
 }

@@ -10,18 +10,7 @@ steps:
     title: Prepare dedicated branch and worktree
     prompt:
       file: steps/shared/prepare-workspace.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 900000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 25
-        graceTurns: 3
-      toolBudget:
-        soft: 50
-        hard: 90
-        block: "*"
+    agent: worker
     workspace:
       bindOn: [ready]
       allowedRoots: ["~/repositories/worktrees"]
@@ -41,18 +30,7 @@ steps:
     title: Read Jira evidence and plan
     prompt:
       file: steps/ticket/plan.md
-    subagent:
-      agent: planner
-      context: fresh
-      timeoutMs: 1200000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 35
-        graceTurns: 3
-      toolBudget:
-        soft: 80
-        hard: 140
-        block: "*"
+    agent: planner
     permissions:
       tools: [read, ls, bash]
       mcp: &ticket-mcp
@@ -123,19 +101,7 @@ steps:
     title: Implement the approved Jira plan
     prompt:
       file: steps/ticket/implement.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 7200000
-      artifacts: true
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 90
-        graceTurns: 5
-      toolBudget:
-        soft: 260
-        hard: 440
-        block: "*"
+    agent: worker
     permissions:
       tools: [read, ls, bash, edit, write]
       mcp: *ticket-mcp
@@ -162,18 +128,7 @@ steps:
     title: Independently verify Jira work
     prompt:
       file: steps/ticket/verify.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 3600000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 40
-        graceTurns: 3
-      toolBudget:
-        soft: 120
-        hard: 200
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [read, ls, bash]
       mcp: *ticket-mcp

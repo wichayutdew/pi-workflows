@@ -41,7 +41,7 @@ export const DEFAULT_CHILD_RUNTIME_DEPENDENCIES = {
   createUniqueId: randomUUID,
   currentWorkingDirectory: () => process.cwd(),
   environmentChildAgent: () =>
-    process.env.PI_SUBAGENT_CHILD_AGENT?.trim() || undefined,
+    process.env.PI_WORKFLOWS_CHILD_AGENT?.trim() || undefined,
   temporaryDirectory: tmpdir,
   tokensAreEqual,
 } as const satisfies SubagentChildRuntimeDependencies;

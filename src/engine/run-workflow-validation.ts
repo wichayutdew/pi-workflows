@@ -183,9 +183,6 @@ export function validateRunWorkflowSemantics(
   if (sameWorkflowDigest && currentStepChanged) {
     return `current step "${run.currentStepId}" does not match the active workflow digest`;
   }
-  if (boundWorkspaceCwd && !currentStep.subagent) {
-    return `bound workflow current step "${run.currentStepId}" must use a subagent`;
-  }
   if (currentStepChanged) return undefined;
   return validatePendingGate(run, currentStep);
 }

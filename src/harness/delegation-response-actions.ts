@@ -174,7 +174,7 @@ async function finishDelegation(
     if (!workflow || !step) {
       throw new Error('Active workflow configuration is unavailable');
     }
-    if (response.status === 'completed') {
+    if (response.status === 'completed' && !active.directWorker) {
       const transcriptAudit =
         await this.delegationFailures.completedResponseAudit(active, response);
       if (!transcriptAudit.verified) {
