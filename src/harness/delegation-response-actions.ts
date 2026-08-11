@@ -70,11 +70,22 @@ function handleDelegationUpdate(
 ): void {
   if (this.activeDelegation !== active) return;
   const progress = [
+    update.activity,
     update.currentTool ? `tool ${update.currentTool}` : undefined,
     update.toolCount !== undefined ? `${update.toolCount} calls` : undefined,
     update.tokens !== undefined ? `${update.tokens} tokens` : undefined,
   ].filter((part): part is string => part !== undefined);
   active.progress = progress.join(', ') || 'running';
+  if (update.detail) {
+    const previous = active.activityLog ?? [];
+    const replacesPreviousResponse =
+      update.detail.startsWith('response: ') &&
+      previous.at(-1)?.startsWith('response: ');
+    active.activityLog = [
+      ...(replacesPreviousResponse ? previous.slice(0, -1) : previous),
+      update.detail,
+    ].slice(-8);
+  }
   this.updateStatus();
 }
 

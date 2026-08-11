@@ -69,6 +69,25 @@ describe('when testing workflow status', () => {
       expect(
         formatWorkflowProgressStatus(
           {
+            run,
+            workflow,
+            execution: {
+              kind: 'subagent',
+              agent: 'worker',
+              requestId: 'request',
+              progress: 'tool bash, 1 calls',
+            },
+            now: 1_000,
+          },
+          'Ctrl+Alt+W',
+        ),
+      ).toBe(
+        '◐ example · step Implement the approved change (implement) · working · tool bash, 1 calls · Ctrl+Alt+W',
+      );
+
+      expect(
+        formatWorkflowProgressStatus(
+          {
             run: { ...run, status: 'awaiting-gate' },
             workflow,
             now: 1_000,
@@ -115,6 +134,10 @@ describe('when testing workflow status', () => {
           agent: 'pi-workflows.step',
           requestId: 'request-status-1',
           progress: 'checking implementation details',
+          activityLog: [
+            'call read {"path":"src/index.ts"}',
+            'response: The worker is validating the entry point.',
+          ],
         },
         now: 63_000,
       });

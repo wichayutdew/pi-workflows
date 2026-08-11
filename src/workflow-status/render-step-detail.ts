@@ -262,6 +262,100 @@ function attemptDisplayOrdinal(
   return omittedAttempts + index + 1;
 }
 
+function renderLiveWorkerSession(
+  theme: WorkflowStatusTheme,
+  snapshot: WorkflowStatusSnapshot,
+  detail: SelectedStepDetail,
+  width: number,
+): Array<string> {
+  if (snapshot.execution?.kind !== 'subagent') return [];
+  const attempt = detail.attempts.at(-1);
+  const events = snapshot.execution.activityLog ?? [];
+  const eventLines = events.flatMap((event) => {
+    const isToolCall = event.startsWith('call ');
+    const isResponse = event.startsWith('response: ');
+    const label = isToolCall
+      ? '● Tool call'
+      : isResponse
+        ? '● Assistant'
+        : '● Worker';
+    const value = isResponse ? event.slice('response: '.length) : event;
+    return [
+      theme.bold(theme.fg(isToolCall ? 'warning' : 'accent', label)),
+      ...wrapPlain(value, width, theme),
+      '',
+    ];
+  });
+  return [
+    '',
+    theme.bold(theme.fg('accent', 'Live Worker Session')),
+    ...keyValueLines(
+      theme,
+      'worker',
+      snapshot.execution.agent,
+      width,
+      'accent',
+    ),
+    ...keyValueLines(
+      theme,
+      'state',
+      snapshot.execution.progress,
+      width,
+      'accent',
+    ),
+    '',
+    theme.bold(theme.fg('accent', '● Input prompt')),
+    ...wrapPlain(
+      attempt
+        ? `${attempt.task}${
+            attempt.taskTruncated
+              ? `\n… [${attempt.omittedTaskChars ?? 0} prompt characters omitted from the bounded checkpoint trace]`
+              : ''
+          }`
+        : 'The worker prompt is being prepared.',
+      width,
+      theme,
+    ),
+    '',
+    theme.bold(theme.fg('accent', '● Live message chain')),
+    ...(eventLines.length > 0
+      ? eventLines
+      : [theme.fg('muted', 'Waiting for the worker to emit activity…'), '']),
+  ];
+}
+
+/** Renders the active worker's prompt and live event chain as a step subpage. */
+export function renderLiveWorkerActivity(
+  theme: WorkflowStatusTheme,
+  snapshot: WorkflowStatusSnapshot,
+  selectedIndex: number,
+  width: number,
+): Array<string> {
+  const entry = buildPathEntries(snapshot)[selectedIndex];
+  const detail = selectedStepDetail(snapshot, selectedIndex);
+  if (!entry?.isCurrent || !detail || snapshot.execution?.kind !== 'subagent') {
+    return boxed(
+      theme,
+      'Live Worker Session',
+      width,
+      [
+        theme.fg(
+          'muted',
+          'Live activity is available only for the active worker step.',
+        ),
+      ],
+      'borderAccent',
+    );
+  }
+  return boxed(
+    theme,
+    `Live Worker Session · ${entry.title} · visit ${entry.visit}`,
+    width,
+    renderLiveWorkerSession(theme, snapshot, detail, width - 4),
+    'borderAccent',
+  );
+}
+
 /** Renders one selected execution-path row and its persisted evidence. */
 export function renderStepDetail(
   theme: WorkflowStatusTheme,

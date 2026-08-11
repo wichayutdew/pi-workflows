@@ -24,6 +24,9 @@ export type SubagentDelegationRequest = {
 };
 export type SubagentDelegationUpdate = {
   readonly requestId: string;
+  readonly activity?: string;
+  /** Operator-visible detail; never used as workflow instruction or input. */
+  readonly detail?: string;
   readonly currentTool?: string;
   readonly toolCount?: number;
   readonly tokens?: number;

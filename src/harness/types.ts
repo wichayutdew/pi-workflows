@@ -22,6 +22,7 @@ export type ActiveDelegation = {
   recoveryAttemptCount: number;
   recoveryFailures: ReadonlyArray<DelegationRecoveryFailure>;
   progress?: string;
+  activityLog?: Array<string>;
   cancelling?: boolean;
 };
 
