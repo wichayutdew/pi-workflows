@@ -270,7 +270,9 @@ export function parseWorkflowStep(
       : readString(value.agent, `${path}.agent`, errors, {
           pattern: AGENT_PROFILE_NAME_PATTERN,
         });
-  const agent: StepAgent | undefined = agentName ? { name: agentName } : undefined;
+  const agent: StepAgent | undefined = agentName
+    ? { name: agentName }
+    : undefined;
   const permissions = parsePermissions(
     value.permissions,
     `${path}.permissions`,

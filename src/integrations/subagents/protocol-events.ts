@@ -31,15 +31,8 @@ export type SubagentDelegationUpdate = {
   readonly toolCount?: number;
   readonly tokens?: number;
 };
-export type SubagentDelegationStatus =
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'interrupted'
-  | 'timed_out'
-  | 'turn_budget_exhausted'
-  | 'tool_budget_exhausted'
-  | 'structured_output_failed';
+export type SubagentDelegationStatus = 'completed' | 'failed' | 'cancelled';
+
 export type SubagentDelegationResponse = {
   readonly version?: number;
   readonly requestId: string;
@@ -48,11 +41,4 @@ export type SubagentDelegationResponse = {
   readonly error?: string;
   readonly exitCode?: number;
   readonly warnings?: ReadonlyArray<string>;
-  readonly execution?: any;
-  readonly effects?: any;
-  readonly toolCount?: number;
-  readonly turns?: number;
-  readonly sessionFile?: string;
-  readonly runId?: string;
-  readonly childIndex?: number;
 };

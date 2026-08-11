@@ -92,7 +92,9 @@ export const registerSubagentChildRuntime = (
     parameters: Type.Object({ value: Type.Any() }),
     executionMode: 'sequential',
     execute: async () => ({
-      content: [{ type: 'text' as const, text: 'Captured workflow step result.' }],
+      content: [
+        { type: 'text' as const, text: 'Captured workflow step result.' },
+      ],
       details: {},
       terminate: true,
     }),
@@ -126,9 +128,7 @@ export const registerSubagentChildRuntime = (
       });
       const profileTools = new Set(pi.getActiveTools());
       if (!profileTools.has(CHILD_COMPLETION_TOOL)) {
-        throw new Error(
-          'workflow worker completion tool is unavailable',
-        );
+        throw new Error('workflow worker completion tool is unavailable');
       }
       const effectiveTools = new Set(
         resolveActiveTools(

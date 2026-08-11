@@ -4,13 +4,10 @@ import {
   type SubagentDelegationUpdate,
 } from '../integrations/subagents/protocol.ts';
 import { advanceRun } from '../engine/transitions.ts';
-import {
-  attachSubagentTranscript,
-  recordCurrentStepResult,
-} from '../engine/step-trace.ts';
+import { recordCurrentStepResult } from '../engine/step-trace.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
-import type { ActiveDelegation, DelegationFailureDetails } from './types.ts';
+import type { ActiveDelegation } from './types.ts';
 import { resolveStepEffects } from './step-effects.ts';
 
 type HarnessActionContext = Pick<
@@ -18,7 +15,6 @@ type HarnessActionContext = Pick<
   | 'activeDelegation'
   | 'catalog'
   | 'cleanupDelegation'
-  | 'delegationFailures'
   | 'dependencies'
   | 'finishDelegation'
   | 'isSessionActive'
@@ -27,7 +23,6 @@ type HarnessActionContext = Pick<
   | 'pauseForDelegationFailure'
   | 'releaseMainAfterCancellation'
   | 'retainUnconfirmedDelegation'
-  | 'retryDelegationAfterFailure'
   | 'run'
   | 'sessionEpoch'
   | 'settleAfterTransition'
@@ -139,7 +134,6 @@ async function finishDelegation(
     return;
   }
   this.activeDelegation = undefined;
-  let terminalFailure: DelegationFailureDetails | undefined;
   let cleanupAttempted = false;
 
   try {
@@ -155,80 +149,15 @@ async function finishDelegation(
       return;
     }
     const terminalAt = this.dependencies.now();
-    if (
-      response.requestId === active.requestId &&
-      (response.agent === undefined || response.agent === active.agent) &&
-      response.sessionFile &&
-      active.trustedSessionRoot &&
-      typeof response.runId === 'string' &&
-      response.runId &&
-      response.childIndex === 0
-    ) {
-      try {
-        this.run = attachSubagentTranscript(
-          this.run,
-          active.requestId,
-          {
-            trustedRoot: active.trustedSessionRoot,
-            sessionFile: response.sessionFile,
-            runId: response.runId,
-            childIndex: response.childIndex,
-          },
-          terminalAt,
-        );
-      } catch {
-        // Status evidence is best-effort and cannot alter terminal handling.
-      }
-    }
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     const step = workflow?.definition.steps[this.run.currentStepId];
     if (!workflow || !step) {
       throw new Error('Active workflow configuration is unavailable');
     }
-    if (response.status === 'completed' && !active.directWorker) {
-      const transcriptAudit =
-        await this.delegationFailures.completedResponseAudit(active, response);
-      if (!transcriptAudit.verified) {
-        throw new Error(
-          `Subagent "${active.agent}" completed without a verifiable terminal transcript: ${transcriptAudit.reason}`,
-        );
-      }
-      if (transcriptAudit.warning) {
-        throw new Error(
-          `Subagent "${active.agent}" completed with an unresolved post-completion watchdog warning: ${transcriptAudit.warning}`,
-        );
-      }
-    }
-    let recoveredTerminalFailure: DelegationFailureDetails | undefined;
-    if (
-      response.status !== 'completed' ||
-      this.delegationFailures.hasContradictoryCompletion(response)
-    ) {
-      const failure = await this.delegationFailures.describeDelegationFailure(
-        active,
-        response,
+    if (response.status !== 'completed') {
+      throw new Error(
+        `Workflow worker "${active.agent}" ${response.status.replaceAll('_', ' ')}${response.error ? `: ${response.error}` : ''}`,
       );
-      terminalFailure = failure;
-      if (
-        response.status !== 'failed' ||
-        failure.diagnostic?.completionAfterFailure !== true
-      ) {
-        throw new Error(failure.reason);
-      }
-      const projectionError = this.delegationFailures.recoveredProjectionError(
-        active,
-        response,
-        failure.diagnostic,
-      );
-      if (projectionError) {
-        throw new Error(
-          this.delegationFailures.rejectedRecoveryReason(
-            failure,
-            projectionError,
-          ),
-        );
-      }
-      recoveredTerminalFailure = failure;
     }
     const requiredSkillWarning =
       step.requires.skills.length > 0
@@ -244,15 +173,6 @@ async function finishDelegation(
     try {
       serializedResult = await this.dependencies.readDelegatedResult(active);
     } catch (error) {
-      if (recoveredTerminalFailure) {
-        throw new Error(
-          this.delegationFailures.rejectedRecoveryReason(
-            recoveredTerminalFailure,
-            error,
-          ),
-          { cause: error },
-        );
-      }
       if (hasErrorCode(error, 'ENOENT')) {
         throw new Error(
           `Subagent "${active.agent}" completed without producing the required correlated structured_output result`,
@@ -262,49 +182,12 @@ async function finishDelegation(
       throw error;
     }
 
-    let result: WorkflowStepResult;
-    try {
-      const rawResult: unknown = JSON.parse(serializedResult);
-      result = parseDelegatedStepResult(rawResult, active.policy);
-    } catch (error) {
-      if (recoveredTerminalFailure) {
-        throw new Error(
-          this.delegationFailures.rejectedRecoveryReason(
-            recoveredTerminalFailure,
-            error,
-          ),
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    if (
-      recoveredTerminalFailure?.diagnostic &&
-      !this.delegationFailures.completionMatchesResult(
-        recoveredTerminalFailure.diagnostic,
-        result,
-        active.policy,
-      )
-    ) {
-      throw new Error(
-        this.delegationFailures.rejectedRecoveryReason(
-          recoveredTerminalFailure,
-          'structured_output transcript value does not match the correlated result',
-        ),
-      );
-    }
+    const rawResult: unknown = JSON.parse(serializedResult);
+    const result: WorkflowStepResult = parseDelegatedStepResult(
+      rawResult,
+      active.policy,
+    );
     const acceptedAt = terminalAt;
-    if (recoveredTerminalFailure) {
-      const isFalsePositive =
-        recoveredTerminalFailure.diagnostic?.correlation ===
-        'successful-output-before-completion';
-      this.latestContext?.ui.notify(
-        isFalsePositive
-          ? `Accepted "${active.stepId}" because the trusted child transcript proved the terminal tool error was a false positive and produced a matching structured result`
-          : `Accepted "${active.stepId}" because the child resolved an earlier tool failure and produced a valid structured result`,
-        'warning',
-      );
-    }
     if (step.gate?.submitOutcome === result.outcome) {
       this.run = recordCurrentStepResult(this.run, result, acceptedAt);
       await this.submitGate(
@@ -346,14 +229,7 @@ async function finishDelegation(
     const reason = error instanceof Error ? error.message : String(error);
     cleanupAttempted = true;
     await this.cleanupDelegation(active);
-    if (!this.retryDelegationAfterFailure(active, terminalFailure, reason)) {
-      const failureSummary = terminalFailure?.error
-        ? `Subagent ${terminalFailure.status.replaceAll('_', ' ')}: ${terminalFailure.error}`
-        : terminalFailure
-          ? `Subagent ${terminalFailure.status.replaceAll('_', ' ')}`
-          : reason;
-      this.pauseForDelegationFailure(reason, failureSummary);
-    }
+    this.pauseForDelegationFailure(reason);
   } finally {
     try {
       if (!cleanupAttempted) await this.cleanupDelegation(active);

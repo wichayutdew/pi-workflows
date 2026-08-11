@@ -4,16 +4,14 @@ import type { LoadedWorkflow, WorkflowStep } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
 import { allowedOutcomes } from '../engine/transitions.ts';
 import { digest } from '../digest.ts';
-import { deriveSubagentSessionRoot } from '../integrations/subagents/diagnostics.ts';
 import {
   encodeChildPolicy,
   type ChildStepPolicy,
   type SubagentDelegationRequest,
 } from '../integrations/subagents/protocol.ts';
-import { automaticRecoveryTask, buildDelegatedStepTask } from '../prompt.ts';
-import { MAX_DELEGATION_RECOVERY_ATTEMPTS } from './delegation-retry-policy.ts';
+import { buildDelegatedStepTask } from '../prompt.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
-import type { ActiveDelegation, DelegationRecovery } from './types.ts';
+import type { ActiveDelegation } from './types.ts';
 
 type DelegationPlanInput = {
   workflow: LoadedWorkflow;
@@ -21,7 +19,6 @@ type DelegationPlanInput = {
   step: WorkflowStep;
   sessionEpoch: number;
   latestContext: ExtensionContext | undefined;
-  recovery: DelegationRecovery | undefined;
 };
 
 export type DelegationPlan =
@@ -34,13 +31,6 @@ export type DelegationPlan =
       active: ActiveDelegation;
       request: SubagentDelegationRequest;
     };
-
-function delegationTranscriptBinding(
-  requestId: string,
-  policyDigest: string,
-): string {
-  return `<pi-workflows-delegation-binding-v1>${requestId}:${policyDigest}</pi-workflows-delegation-binding-v1>`;
-}
 
 /**
  * Creates one immutable subagent request from workflow state and injected
@@ -55,7 +45,7 @@ export function createDelegationPlan(
     | 'resolveWorkspaceDirectory'
   >,
 ): DelegationPlan {
-  const { workflow, run, step, latestContext, recovery } = input;
+  const { workflow, run, step, latestContext } = input;
   const agent = step.agent?.name;
   if (!agent) {
     return {
@@ -204,22 +194,7 @@ export function createDelegationPlan(
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
   };
-  const trustedSessionRoot = deriveSubagentSessionRoot(
-    latestContext.sessionManager.getSessionFile(),
-  );
-  const transcriptTask = [
-    buildDelegatedStepTask(workflow, run, ''),
-    delegationTranscriptBinding(requestId, policyDigest),
-    ...(recovery
-      ? [
-          automaticRecoveryTask(
-            recovery.failures.map(({ reason }) => reason),
-            recovery.attempt,
-            MAX_DELEGATION_RECOVERY_ATTEMPTS,
-          ),
-        ]
-      : []),
-  ].join('\n\n');
+  const task = buildDelegatedStepTask(workflow, run, '');
   const active: ActiveDelegation = {
     requestId,
     runId: run.runId,
@@ -228,19 +203,14 @@ export function createDelegationPlan(
     sessionEpoch: input.sessionEpoch,
     resultDirectory: workspace.resultDirectory,
     policy,
-    transcriptTask,
+    transcriptTask: task,
     agent,
-    directWorker: true,
-    ...(trustedSessionRoot ? { trustedSessionRoot } : {}),
-    broadRecoveryAuthorized: false,
-    recoveryAttemptCount: recovery?.attempt ?? 0,
-    recoveryFailures: recovery?.failures ?? [],
   };
   const request: SubagentDelegationRequest = {
     version: 1,
     requestId,
     agent,
-    task: `${encodeChildPolicy(policy)}\n\n${transcriptTask}`,
+    task: `${encodeChildPolicy(policy)}\n\n${task}`,
     cwd: delegationCwd,
     timeoutMs: 900_000,
     ...(agentProfile.model ? { model: agentProfile.model } : {}),

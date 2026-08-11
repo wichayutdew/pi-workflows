@@ -22,6 +22,19 @@ export type SubagentDelegationClientController = {
   readonly cancelActiveAndWait: (waitMs?: number) => Promise<boolean>;
 };
 
+export type DirectWorkerSpawn = (
+  command: string,
+  args: Array<string>,
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio: ['ignore', 'pipe', 'pipe'];
+  },
+) => ChildProcess & {
+  readonly stdout: NonNullable<ChildProcess['stdout']>;
+  readonly stderr: NonNullable<ChildProcess['stderr']>;
+};
+
 export const directWorkerCommand = (
   request: SubagentDelegationRequest,
 ): ReadonlyArray<string> => [
@@ -94,8 +107,7 @@ function redactProgressValue(value: unknown, key = ''): unknown {
 
 function formatToolCall(toolName: string, args: unknown): string {
   const rendered = JSON.stringify(redactProgressValue(args));
-  const detail = rendered === undefined ? '' : ` ${rendered}`;
-  return `call ${toolName}${detail}`.slice(0, MAX_PROGRESS_DETAIL_CHARS);
+  return `call ${toolName} ${rendered}`.slice(0, MAX_PROGRESS_DETAIL_CHARS);
 }
 
 /** Converts one Pi JSONL event into safe, operator-visible worker progress. */
@@ -108,9 +120,9 @@ export function workerProgressFromJsonLine(
   let event: WorkerJsonEvent;
   try {
     const parsed: unknown = JSON.parse(line);
-    if (!parsed || typeof parsed !== 'object')
+    if (typeof parsed !== 'object' || parsed === null)
       return { toolCount, responseText };
-    event = parsed as WorkerJsonEvent;
+    event = parsed;
   } catch {
     return { toolCount, responseText };
   }
@@ -167,7 +179,9 @@ export function workerProgressFromJsonLine(
   return { toolCount, responseText };
 }
 
-export function createSubagentDelegationClient(): SubagentDelegationClientController {
+export function createSubagentDelegationClient(
+  spawnWorker: DirectWorkerSpawn = spawn,
+): SubagentDelegationClientController {
   let active: { requestId: string; process: ChildProcess } | undefined;
 
   const delegate = (
@@ -183,7 +197,7 @@ export function createSubagentDelegationClient(): SubagentDelegationClientContro
       return Promise.reject(new Error('workflow worker was cancelled'));
     }
     return new Promise((resolve, reject) => {
-      const child = spawn('pi', directWorkerCommand(request), {
+      const child = spawnWorker('pi', [...directWorkerCommand(request)], {
         cwd: request.cwd,
         env: {
           ...process.env,
@@ -219,8 +233,8 @@ export function createSubagentDelegationClient(): SubagentDelegationClientContro
         stdoutBuffer += stdoutDecoder.write(chunk);
         consumeWorkerLines();
       };
-      child.stdout?.on('data', consumeWorkerOutput);
-      child.stderr?.on('data', (chunk: Buffer) => {
+      child.stdout.on('data', consumeWorkerOutput);
+      child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString('utf8');
       });
       const abort = (): void => {
@@ -250,9 +264,11 @@ export function createSubagentDelegationClient(): SubagentDelegationClientContro
       const current = active;
       if (!current) return true;
       current.process.kill('SIGTERM');
-      return new Promise((resolve) =>
-        current.process.once('close', () => resolve(true)),
-      );
+      return new Promise((resolve) => {
+        current.process.once('close', () => {
+          resolve(true);
+        });
+      });
     },
   };
 }

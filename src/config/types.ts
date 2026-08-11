@@ -4,8 +4,6 @@ export const WORKFLOW_SCHEMA_VERSION = 1 as const;
 export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
 export const AGENT_PROFILE_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
-/** @internal Legacy checkpoint compatibility only. */
-export const SUBAGENT_RUNTIME_NAME_PATTERN = AGENT_PROFILE_NAME_PATTERN;
 export const MAX_WORKSPACE_PATH_CHARS = 4_096;
 export const MAX_WORKSPACE_ALLOWED_ROOTS = 32;
 
@@ -48,24 +46,6 @@ export type StepAgent = {
   readonly name: string;
 };
 
-/** @internal Legacy runtime shape retained while historical checkpoints exist. */
-export type SubagentContext = 'fresh';
-/** @internal */
-export type SubagentTurnBudget = { readonly maxTurns: number; readonly graceTurns?: number };
-/** @internal */
-export type SubagentToolBudget = { readonly hard: number; readonly soft?: number; readonly block?: ReadonlyArray<string> | '*' };
-/** @internal Legacy checkpoint compatibility only; the workflow schema rejects it. */
-export type StepSubagent = {
-  readonly agent: string;
-  readonly context: SubagentContext;
-  readonly model?: string;
-  readonly timeoutMs: number;
-  readonly turnBudget?: SubagentTurnBudget;
-  readonly toolBudget?: SubagentToolBudget;
-  readonly artifacts: boolean;
-  readonly retryToolFailures: boolean;
-};
-
 export type PromptSpec =
   { readonly inline: string } | { readonly file: string };
 
@@ -98,8 +78,6 @@ export type WorkflowStep = {
   readonly prompt: PromptSpec;
   /** Optional workflow-owned role prompt for this main-agent step. */
   readonly agent?: StepAgent;
-  /** @internal Legacy checkpoint compatibility only. */
-  readonly subagent?: StepSubagent;
   readonly permissions: StepPermissions;
   readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;
@@ -138,19 +116,6 @@ export type PermissionCeiling = {
   readonly extensions: ReadonlyArray<string>;
   readonly skills: ReadonlyArray<string>;
   readonly bash: BashPermission;
-  readonly subagent?: SubagentPermissionCeiling;
-};
-
-export type SubagentPermissionCeiling = {
-  readonly agents: ReadonlyArray<string>;
-  readonly contexts: ReadonlyArray<SubagentContext>;
-  readonly models: ReadonlyArray<string>;
-  readonly maxTimeoutMs: number;
-  readonly maxTurns: number;
-  readonly maxGraceTurns: number;
-  readonly maxToolCalls: number;
-  readonly artifacts: boolean;
-  readonly retryToolFailures: boolean;
 };
 
 export type WorkflowSettings = {
@@ -187,14 +152,6 @@ export const EMPTY_REQUIREMENTS = {
   extensions: [],
   skills: [],
 } as const satisfies StepRequirements;
-
-export const DEFAULT_STEP_SUBAGENT = {
-  agent: 'pi-workflows.step',
-  context: 'fresh',
-  timeoutMs: 900_000,
-  artifacts: false,
-  retryToolFailures: false,
-} as const satisfies StepSubagent;
 
 export const DEFAULT_SETTINGS = {
   version: WORKFLOW_SCHEMA_VERSION,

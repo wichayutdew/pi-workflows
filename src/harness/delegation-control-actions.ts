@@ -1,33 +1,28 @@
 import { failRun } from '../engine/transitions.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import {
-  boundedFailureField,
-  MAX_DELEGATION_RECOVERY_ATTEMPTS,
-} from './delegation-retry-policy.ts';
-import {
   conciseStepFailureSummary,
   reportFailedStep,
 } from './step-reporting.ts';
-import type { ActiveDelegation, DelegationFailureDetails } from './types.ts';
+import type { ActiveDelegation } from './types.ts';
+
+const boundedFailureField = (value: string): string =>
+  value.length <= 500 ? value : `${value.slice(0, 499)}…`;
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
   | 'activeDelegation'
   | 'catalog'
   | 'cleanupDelegation'
-  | 'delegationFailures'
   | 'dependencies'
-  | 'isSessionActive'
   | 'isolateMainSessionTools'
   | 'latestContext'
-  | 'launchCurrentStep'
   | 'mainSteps'
   | 'pauseForExecutionFailure'
   | 'persist'
   | 'pi'
   | 'restoreBaselineTools'
   | 'run'
-  | 'sessionEpoch'
   | 'subagents'
   | 'updateStatus'
 >;
@@ -41,12 +36,6 @@ export type DelegationControlActions = {
     this: HarnessActionContext,
     active: ActiveDelegation,
   ) => Promise<void>;
-  retryDelegationAfterFailure: (
-    this: HarnessActionContext,
-    active: ActiveDelegation,
-    failure: DelegationFailureDetails | undefined,
-    reason: string,
-  ) => boolean;
   pauseForDelegationFailure: (
     this: HarnessActionContext,
     reason: string,
@@ -117,53 +106,6 @@ async function cleanupDelegation(
       // Cleanup and its warning are housekeeping; neither may pause the run.
     }
   }
-}
-
-function retryDelegationAfterFailure(
-  this: HarnessActionContext,
-  active: ActiveDelegation,
-  failure: DelegationFailureDetails | undefined,
-  reason: string,
-): boolean {
-  if (!failure) return false;
-  const fingerprint =
-    this.delegationFailures.delegationFailureFingerprint(failure);
-  const isRepeatedFailure = active.recoveryFailures.some(
-    (previousFailure) => previousFailure.fingerprint === fingerprint,
-  );
-  if (
-    active.recoveryAttemptCount >= MAX_DELEGATION_RECOVERY_ATTEMPTS ||
-    isRepeatedFailure ||
-    !this.delegationFailures.isRetryableTerminalFailure(failure) ||
-    !this.delegationFailures.isSafeToRetryDelegation(
-      active.policy,
-      active.broadRecoveryAuthorized,
-      failure.replayAudit,
-    ) ||
-    !this.isSessionActive ||
-    this.sessionEpoch !== active.sessionEpoch ||
-    !this.run ||
-    this.run.status !== 'running' ||
-    this.run.runId !== active.runId ||
-    this.run.currentStepId !== active.stepId ||
-    this.run.currentStepDigest !== active.stepDigest ||
-    this.activeDelegation
-  ) {
-    return false;
-  }
-  const workflow = this.catalog.workflows.get(this.run.workflowId);
-  if (!workflow) return false;
-
-  const attempt = active.recoveryAttemptCount + 1;
-  this.latestContext?.ui.notify(
-    `Automatic recovery for "${active.stepId}" after a subagent failure (${attempt}/${MAX_DELEGATION_RECOVERY_ATTEMPTS})`,
-    'warning',
-  );
-  this.launchCurrentStep(workflow, {
-    attempt,
-    failures: [...active.recoveryFailures, { fingerprint, reason }],
-  });
-  return true;
 }
 
 function pauseForDelegationFailure(
@@ -266,7 +208,6 @@ export function createDelegationControlActions(): DelegationControlActions {
   return {
     cancelActiveDelegation,
     cleanupDelegation,
-    retryDelegationAfterFailure,
     pauseForDelegationFailure,
     pauseForExecutionFailure,
     retainUnconfirmedDelegation,

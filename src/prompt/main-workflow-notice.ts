@@ -24,7 +24,9 @@ export function buildMainWorkflowNotice(
     '# Active workflow',
     '',
     `Workflow "${workflow.definition.id}" is running step "${run.currentStepId}" (${step.title}) in this session.`,
-    ...(step.agent ? [`Apply the "${step.agent.name}" workflow role prompt.`] : []),
+    ...(step.agent
+      ? [`Apply the "${step.agent.name}" workflow role prompt.`]
+      : []),
     'Perform only the active workflow step with its allowed resources.',
     'Call `workflow_complete_step` exactly once when finished.',
     `Use \`${statusShortcutLabel}\` or \`/workflow-status\` to inspect status, or \`/workflow-pause\` to halt and repair the workflow before resuming.`,

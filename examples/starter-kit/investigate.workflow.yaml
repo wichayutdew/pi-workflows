@@ -95,7 +95,13 @@ steps:
       tools: [read, ls, bash]
       mcp: *investigation-mcp
       extensions: [pi-web-tools]
-      skills: &validation-skills [caveman, coding-standards, systematic-debugging, verification-before-completion]
+      skills:
+        &validation-skills [
+          caveman,
+          coding-standards,
+          systematic-debugging,
+          verification-before-completion,
+        ]
       bash:
         mode: unrestricted
     requires:

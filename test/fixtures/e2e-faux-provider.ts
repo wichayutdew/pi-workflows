@@ -117,7 +117,7 @@ function observe(context: Context): Observation {
   const observation: Observation = {
     step,
     visit: nextVisit(step),
-    runtimeAgent: process.env.PI_SUBAGENT_CHILD_AGENT?.trim() ?? '',
+    runtimeAgent: process.env.PI_WORKFLOWS_CHILD_AGENT?.trim() ?? '',
     runtimeCwd: process.cwd(),
     promptLength: user.text.length,
     userMessageCount: user.count,

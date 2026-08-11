@@ -87,9 +87,7 @@ describe('when testing prompt', () => {
       expect(buildDelegatedStepTask(workflow, run, 'policy envelope')).toMatch(
         /policy envelope/,
       );
-      expect(buildMainWorkflowNotice(workflow, run)).toMatch(
-        /Active workflow/,
-      );
+      expect(buildMainWorkflowNotice(workflow, run)).toMatch(/Active workflow/);
 
       const delegatedRaw = baseWorkflow();
       const steps = delegatedRaw.steps as Record<

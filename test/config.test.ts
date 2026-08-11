@@ -15,20 +15,6 @@ import {
 import { baseWorkflow } from './helpers.ts';
 
 describe('when testing config', () => {
-  function projectSubagentCeiling() {
-    return {
-      agents: ['pi-workflows.step'],
-      contexts: ['fresh'],
-      models: [],
-      maxTimeoutMs: 60_000,
-      maxTurns: 10,
-      maxGraceTurns: 1,
-      maxToolCalls: 20,
-      artifacts: false,
-      retryToolFailures: false,
-    };
-  }
-
   function workspaceWorkflow(
     allowedRoots?: ReadonlyArray<string>,
   ): Record<string, unknown> {
@@ -60,7 +46,7 @@ describe('when testing config', () => {
       expect(result.value?.steps.inspect?.permissions.bash.mode).toBe(
         'allow-list',
       );
-      expect(result.value?.steps.inspect?.agent).toBe(undefined);
+      expect(result.value?.steps.inspect?.agent).toEqual({ name: 'scout' });
     });
 
     test('validates one-time workspace binding and permits delegated downstream cycles', () => {
@@ -333,7 +319,6 @@ describe('when testing config', () => {
               },
             ],
           },
-          subagent: projectSubagentCeiling(),
         },
       });
       expect(settings.errors).toEqual([]);
@@ -629,7 +614,7 @@ describe('when testing config', () => {
 
       // when
       const errors = malformed.map((raw) => validateSettings(raw).errors);
-      const forkCeiling = validateSettings({
+      const unknownAgentCeiling = validateSettings({
         version: 1,
         allowProjectWorkflows: true,
         permissionCeiling: {
@@ -638,10 +623,7 @@ describe('when testing config', () => {
           extensions: [],
           skills: [],
           bash: { mode: 'deny' },
-          subagent: {
-            ...projectSubagentCeiling(),
-            contexts: ['fork'],
-          },
+          agent: 'worker',
         },
       });
       const first = cloneEmptyRequirements();
@@ -653,12 +635,10 @@ describe('when testing config', () => {
       expect(errors.flat().join('\n')).toMatch(
         /required when project workflows are enabled/,
       );
-      expect(errors.flat().join('\n')).toMatch(
-        /at least one subagent is required/,
-      );
-      expect(forkCeiling.value).toBe(undefined);
-      expect(forkCeiling.errors.join('\n')).toMatch(
-        /contexts.*invalid value "fork"/,
+      expect(errors.flat().join('\n')).toMatch(/unknown property "subagent"/);
+      expect(unknownAgentCeiling.value).toBe(undefined);
+      expect(unknownAgentCeiling.errors.join('\n')).toMatch(
+        /unknown property "agent"/,
       );
       expect(second).toEqual({ tools: [], extensions: [], skills: [] });
     });
@@ -759,7 +739,6 @@ describe('when testing config', () => {
             mode: 'allow-list',
             allow: [{ executable: 'git', argsPrefix: ['diff'] }],
           },
-          subagent: projectSubagentCeiling(),
         },
       });
       expect(deniedSettings.value?.permissionCeiling).toBeTruthy();
@@ -779,7 +758,6 @@ describe('when testing config', () => {
             mode: 'allow-list',
             allow: [{ executable: 'git', argsPrefix: ['status'] }],
           },
-          subagent: projectSubagentCeiling(),
         },
       });
       expect(allowedSettings.value?.permissionCeiling).toBeTruthy();

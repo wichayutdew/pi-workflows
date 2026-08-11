@@ -29,9 +29,7 @@ import {
   resumeRun,
 } from '../src/engine/transitions.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
-import { createDelegationResponseActions } from '../src/harness/delegation-response-actions.ts';
 import { createStepExecutionActions } from '../src/harness/step-execution-actions.ts';
-import type { ActiveDelegation } from '../src/harness/types.ts';
 import type { WorkflowStepResult } from '../src/runtime/step-result.ts';
 import {
   redactStepLogText,
@@ -501,85 +499,6 @@ describe('when exploring workflow step evidence', () => {
     );
     expect(run.currentStepAttempts).toHaveLength(2);
     expect(run.currentStepAttempts?.[0]).toEqual(attached);
-  });
-
-  test('a terminal child failure attaches its transcript before the harness pauses', async () => {
-    const workflow = loadedWorkflow();
-    let run = createRun(workflow, '', [], 'trace-terminal-failure', 1);
-    run = beginSubagentStepAttempt(
-      run,
-      'request-terminal',
-      'worker',
-      'inspect before failure',
-      2,
-    );
-    const trustedRoot = '/tmp/pi-workflows-terminal-sessions';
-    const active = {
-      requestId: 'request-terminal',
-      runId: run.runId,
-      stepId: run.currentStepId,
-      stepDigest: run.currentStepDigest,
-      sessionEpoch: 1,
-      resultDirectory: '/tmp/pi-workflows-result',
-      policy: {} as ActiveDelegation['policy'],
-      transcriptTask: 'inspect before failure',
-      agent: 'worker',
-      trustedSessionRoot: trustedRoot,
-      broadRecoveryAuthorized: false,
-      recoveryAttemptCount: 0,
-      recoveryFailures: [],
-    } satisfies ActiveDelegation;
-    const fixture = {
-      activeDelegation: active as ActiveDelegation | undefined,
-      catalog: { workflows: new Map([[workflow.definition.id, workflow]]) },
-      dependencies: {
-        now: () => 3,
-        readDelegatedResult: async () => '',
-      },
-      isSessionActive: true,
-      run,
-      sessionEpoch: 1,
-      cleanupDelegation: async () => undefined,
-      delegationFailures: {
-        hasContradictoryCompletion: () => false,
-        describeDelegationFailure: async () => ({
-          reason: 'child failed',
-          status: 'failed' as const,
-        }),
-      },
-      retryDelegationAfterFailure: () => false,
-      pauseForDelegationFailure: (reason: string) => {
-        fixture.run = failRun(fixture.run, reason, 4);
-      },
-      releaseMainAfterCancellation: () => undefined,
-    };
-
-    await createDelegationResponseActions().finishDelegation.call(
-      fixture as unknown as HarnessActionContext,
-      active,
-      {
-        version: 1,
-        requestId: active.requestId,
-        status: 'failed',
-        error: 'child failed',
-        agent: active.agent,
-        runId: 'child-terminal',
-        childIndex: 0,
-        sessionFile: join(
-          trustedRoot,
-          'child-terminal',
-          'run-0',
-          'session.jsonl',
-        ),
-      },
-    );
-
-    expect(fixture.run.status).toBe('paused');
-    const attempt = fixture.run.currentStepAttempts?.[0];
-    expect(attempt?.kind === 'subagent' && attempt.transcript).toMatchObject({
-      runId: 'child-terminal',
-      childIndex: 0,
-    });
   });
 
   test('rejected and approved gate decisions stay paired with their attempts', () => {

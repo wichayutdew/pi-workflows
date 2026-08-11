@@ -13,7 +13,7 @@ steps:
     agent: worker
     workspace:
       bindOn: [ready]
-      allowedRoots: ["~/repositories/worktrees"]
+      allowedRoots: ['~/repositories/worktrees']
     permissions:
       tools: [read, ls, bash]
       skills: [caveman, coding-standards, using-git-worktrees]

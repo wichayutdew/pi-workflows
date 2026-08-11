@@ -107,14 +107,13 @@ function validateWorkspaceGraph(
       }
       return target && Object.hasOwn(steps, target) ? [target] : [];
     });
-    validateWorkspaceDescendants(steps, downstream, errors);
+    validateWorkspaceDescendants(steps, downstream);
   });
 }
 
 function validateWorkspaceDescendants(
   steps: Readonly<Record<string, WorkflowStep>>,
   initialStepIds: ReadonlyArray<string>,
-  errors: ValidationErrors,
 ): void {
   const pending = [...initialStepIds];
   const visited = new Set<string>();

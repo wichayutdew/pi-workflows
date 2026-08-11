@@ -88,7 +88,6 @@ describe('when persisting a workflow workspace binding', () => {
         step,
         sessionEpoch: 1,
         latestContext: sessionContext(startCwd),
-        recovery: undefined,
       },
       {
         createRequestId: () => 'workspace-delegation',
@@ -109,7 +108,6 @@ describe('when persisting a workflow workspace binding', () => {
       },
       active: {
         agent: 'worker',
-        directWorker: true,
       },
     });
     const movedPlan = createDelegationPlan(
@@ -119,7 +117,6 @@ describe('when persisting a workflow workspace binding', () => {
         step,
         sessionEpoch: 1,
         latestContext: sessionContext(startCwd),
-        recovery: undefined,
       },
       {
         createRequestId: () => 'moved-workspace-delegation',

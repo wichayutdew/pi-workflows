@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { SUBAGENT_RUNTIME_NAME_PATTERN } from '../../config/types.ts';
+import { AGENT_PROFILE_NAME_PATTERN } from '../../config/types.ts';
 import {
   DEFAULT_CHILD_POLICY_ENVIRONMENT,
   isSafeStepCapabilityPath,
@@ -61,11 +61,10 @@ const requiredString = (
 
 /**
  * Returns whether a name follows the runtime naming contract used by
- * pi-subagents.
+ * workflow agent profiles.
  */
-export const isSubagentRuntimeName = (
-  name: string | undefined,
-): name is string => Boolean(name && SUBAGENT_RUNTIME_NAME_PATTERN.test(name));
+export const isAgentProfileName = (name: string | undefined): name is string =>
+  Boolean(name && AGENT_PROFILE_NAME_PATTERN.test(name));
 
 const rejectUnknownProperties = (
   value: Readonly<Record<string, unknown>>,
@@ -115,8 +114,8 @@ const parseIdentityAndPaths = (
   if (!POLICY_DIGEST_PATTERN.test(policyDigest)) {
     throw new Error('child policy digest is invalid');
   }
-  if (!isSubagentRuntimeName(agent)) {
-    throw new Error('child policy agent is not a valid subagent runtime name');
+  if (!isAgentProfileName(agent)) {
+    throw new Error('child policy agent is not a valid agent profile name');
   }
   if (!CAPABILITY_TOKEN_PATTERN.test(capabilityToken)) {
     throw new Error('child policy capability token is invalid');

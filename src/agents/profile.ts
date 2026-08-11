@@ -32,7 +32,7 @@ export function parseAgentProfile(source: string, name: string): AgentProfile {
   if (end === -1) {
     throw new Error(`workflow agent profile is invalid: ${name}`);
   }
-  const metadata = parse(source.slice(4, end));
+  const metadata: unknown = parse(source.slice(4, end));
   if (!isRecord(metadata)) {
     throw new Error(
       `workflow agent profile metadata must be an object: ${name}`,
@@ -91,6 +91,8 @@ export function loadAgentProfile(
     if (error instanceof Error && error.message.startsWith('workflow agent')) {
       throw error;
     }
-    throw new Error(`workflow agent profile is unavailable: ${name}`);
+    throw new Error(`workflow agent profile is unavailable: ${name}`, {
+      cause: error,
+    });
   }
 }

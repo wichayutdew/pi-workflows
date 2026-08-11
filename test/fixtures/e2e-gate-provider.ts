@@ -64,7 +64,7 @@ export default function e2eGateProvider(pi: ExtensionAPI): void {
       const visit = nextVisit();
       const observation: GateObservation = {
         visit,
-        runtimeAgent: process.env.PI_SUBAGENT_CHILD_AGENT?.trim() ?? '',
+        runtimeAgent: process.env.PI_WORKFLOWS_CHILD_AGENT?.trim() ?? '',
         hasMarker: text.includes(E2E_GATE_MARKER),
         hasInput: text.includes(E2E_GATE_INPUT),
         hasRejectedArtifact: text.includes(E2E_GATE_ARTIFACT_V1),

@@ -191,5 +191,3 @@ export function buildMainStepTask(
 ): string {
   return buildStepTask({ execution: 'main', workflow, run });
 }
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
