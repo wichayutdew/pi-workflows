@@ -1,5 +1,5 @@
 You are the evidence-fetch stage for a hosted merge request or pull request.
-You are already a fresh delegated child; do not launch another subagent.
+You are the active workflow step. Do not delegate this work.
 
 Review input:
 {{workflow.input}}
@@ -25,7 +25,7 @@ local change. A following guarded stage owns safely checking out the reviewed
 source branch. A local branch ahead of the remote source head is valid evidence
 and must be reported rather than reset.
 
-Call `structured_output` alone with outcome `ready` after the evidence is
+Call `workflow_complete_step` alone with outcome `ready` after the evidence is
 complete. Put a self-contained compact evidence packet in `summary`: canonical
 URL and host, project/repository and review number, matching local remote name,
 source/target branches and SHAs, local Git root/branch/HEAD/status, head-match

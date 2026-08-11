@@ -12,7 +12,6 @@ import {
   type ValidationResult,
 } from './shared.ts';
 import { readStatusShortcut } from './shortcut.ts';
-import { parseSubagentPermissionCeiling } from './subagent.ts';
 
 function parsePermissionCeiling(
   value: unknown,
@@ -26,7 +25,7 @@ function parsePermissionCeiling(
   }
   rejectUnknownKeys(
     value,
-    ['tools', 'mcp', 'extensions', 'skills', 'bash', 'subagent'],
+    ['tools', 'mcp', 'extensions', 'skills', 'bash'],
     path,
     errors,
   );
@@ -43,18 +42,7 @@ function parsePermissionCeiling(
     path,
     errors,
   );
-  const subagent =
-    value.subagent === undefined
-      ? undefined
-      : parseSubagentPermissionCeiling(
-          value.subagent,
-          `${path}.subagent`,
-          errors,
-        );
-  return {
-    ...permissions,
-    ...(subagent ? { subagent } : {}),
-  };
+  return permissions;
 }
 
 /** Validate and normalize untrusted user workflow settings. */

@@ -25,6 +25,7 @@ export function baseWorkflow(): Record<string, unknown> {
     steps: {
       inspect: {
         prompt: 'Inspect {{workflow.input}}',
+        agent: 'scout',
         permissions: {
           tools: ['read', 'bash'],
           bash: {
@@ -42,6 +43,7 @@ export function baseWorkflow(): Record<string, unknown> {
       },
       implement: {
         prompt: 'Implement',
+        agent: 'worker',
         permissions: {
           tools: ['read', 'edit'],
         },

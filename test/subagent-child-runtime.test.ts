@@ -144,7 +144,7 @@ describe('when testing subagent child runtime', () => {
           mode: 0o600,
         });
         expect(rig.activeTools).toEqual([]);
-        expect(rig.registeredTools).toEqual([]);
+        expect(rig.registeredTools).toHaveLength(1);
 
         const toolCall = rig.handlers.get('tool_call')?.[0];
         expectTruthy(toolCall);
@@ -169,7 +169,7 @@ describe('when testing subagent child runtime', () => {
           }),
         ).toBe(undefined);
         expect(rig.activeTools).toEqual([]);
-        expect(rig.registeredTools).toEqual([]);
+        expect(rig.registeredTools).toHaveLength(1);
 
         const transformed = input({
           type: 'input',
@@ -701,7 +701,7 @@ describe('when testing subagent child runtime', () => {
         expect(capabilityErrors.join('\n')).toMatch(/capability is missing/);
         expect(capabilityErrors.join('\n')).toMatch(/capability is invalid/);
         expect(unavailableResult.text).toMatch(
-          /structured_output completion is unavailable/,
+          /workflow worker completion tool is unavailable/,
         );
         expect(unavailable.activeTools.at(-1)).toEqual([]);
         expect(missingResultDirectory.block).toBe(true);
@@ -803,8 +803,8 @@ describe('when testing subagent child runtime', () => {
 
     test('normalizes the default child-agent environment boundary', () => {
       // given
-      const previousChildAgent = process.env.PI_SUBAGENT_CHILD_AGENT;
-      process.env.PI_SUBAGENT_CHILD_AGENT = ' worker ';
+      const previousChildAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
+      process.env.PI_WORKFLOWS_CHILD_AGENT = ' worker ';
 
       try {
         // when
@@ -815,9 +815,9 @@ describe('when testing subagent child runtime', () => {
         expect(childAgent).toBe('worker');
       } finally {
         if (previousChildAgent === undefined) {
-          delete process.env.PI_SUBAGENT_CHILD_AGENT;
+          delete process.env.PI_WORKFLOWS_CHILD_AGENT;
         } else {
-          process.env.PI_SUBAGENT_CHILD_AGENT = previousChildAgent;
+          process.env.PI_WORKFLOWS_CHILD_AGENT = previousChildAgent;
         }
       }
     });

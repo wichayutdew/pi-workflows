@@ -15,11 +15,6 @@ import {
   type SubagentDelegationClientController,
 } from '../integrations/subagents/client.ts';
 import {
-  auditCompletedDelegationTranscript,
-  readDelegationReplayAudit,
-  readToolFailureDiagnostic,
-} from '../integrations/subagents/diagnostics.ts';
-import {
   createMainStepRuntime,
   type MainStepRuntimeController,
 } from '../runtime/main-step-runtime.ts';
@@ -61,9 +56,6 @@ export type WorkflowHarnessDependencies = {
   readonly requestPlannotatorReview: typeof requestPlannotatorReview;
   readonly requestPlannotatorReviewStatus: typeof requestPlannotatorReviewStatus;
   readonly requestPromptGateReview: typeof requestPromptGateReview;
-  readonly readDelegationReplayAudit: typeof readDelegationReplayAudit;
-  readonly readToolFailureDiagnostic: typeof readToolFailureDiagnostic;
-  readonly auditCompletedDelegationTranscript: typeof auditCompletedDelegationTranscript;
   readonly showWorkflowStatus: typeof showWorkflowStatus;
   readonly createSubagentClient: (
     pi: ExtensionAPI,
@@ -150,11 +142,8 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
   requestPromptGateReview,
-  readDelegationReplayAudit,
-  readToolFailureDiagnostic,
-  auditCompletedDelegationTranscript,
   showWorkflowStatus,
-  createSubagentClient: (pi) => createSubagentDelegationClient(pi.events),
+  createSubagentClient: () => createSubagentDelegationClient(),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),
   createMutationQueue: createSerialTaskQueue,
   flushUnwrittenSession,

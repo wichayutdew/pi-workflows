@@ -15,14 +15,14 @@ describe('when testing example', () => {
       const catalog = await loadCatalog({
         cwd: repositoryRoot,
         projectTrusted: false,
-        userDirectory: join(repositoryRoot, 'examples'),
+        userDirectory: join(repositoryRoot, 'examples', 'starter-kit'),
       });
       // then
       expect(catalog.diagnostics).toEqual([]);
-      expect(catalog.workflows.get('mr-comments')?.definition.command).toBe(
-        'mr-comments',
+      expect(catalog.workflows.get('mr-comment')?.definition.command).toBe(
+        'mr-comment',
       );
-      const example = catalog.workflows.get('mr-comments')?.definition;
+      const example = catalog.workflows.get('mr-comment')?.definition;
       expect(example?.steps.plan?.gate).toMatchObject({
         provider: 'plannotator',
         timeoutMs: 30_000,
@@ -50,22 +50,20 @@ describe('when testing example', () => {
         [],
       );
       expect(doctor.issues.some((issue) => issue.code === 'cycle')).toBe(true);
-      const planPrompt = catalog.workflows.get('mr-comments')?.prompts.plan;
+      const planPrompt = catalog.workflows.get('mr-comment')?.prompts.plan;
       expect(planPrompt).toContain('## Review summary');
-      expect(planPrompt).toContain('## Review focus');
-      expect(planPrompt).toContain('## Proposed changes');
+      expect(planPrompt).toContain('## Comment decisions');
+      expect(planPrompt).toContain('## Implementation plan');
       expect(planPrompt).toContain('## Validation');
       expect(planPrompt).toContain('## Risks');
-      expect(planPrompt).toMatch(/checkboxes only for acceptance criteria/i);
       expect(planPrompt).toMatch(
-        /format is defined by this\s+workflow prompt/i,
+        /first seven sections must be understandable/i,
       );
-      expect(planPrompt).toMatch(/treats the artifact as opaque/i);
       expect(planPrompt).toContain('{{gate.artifact}}');
-      expect(catalog.workflows.get('mr-comments')?.prompts.implement).toContain(
+      expect(catalog.workflows.get('mr-comment')?.prompts.implement).toContain(
         '{{reviewed.artifact}}',
       );
-      expect(catalog.workflows.get('mr-comments')?.prompts.verify).toContain(
+      expect(catalog.workflows.get('mr-comment')?.prompts.verify).toContain(
         '{{reviewed.artifact}}',
       );
 
@@ -91,15 +89,7 @@ describe('when testing example', () => {
           };
         };
       };
-      expect(workflowSchema.$defs?.step?.allOf).toEqual([
-        {
-          if: { required: ['workspace'] },
-          then: {
-            required: ['subagent'],
-            not: { required: ['gate'] },
-          },
-        },
-      ]);
+      expect(workflowSchema.$defs?.step?.allOf).toBeUndefined();
       expect(workflowSchema.$defs?.prompt?.oneOf?.[1]).toMatchObject({
         properties: {
           file: {
@@ -110,11 +100,20 @@ describe('when testing example', () => {
 
       const packageJson = JSON.parse(
         await readFile(join(repositoryRoot, 'package.json'), 'utf8'),
-      ) as { pi?: { subagents?: { agents?: string[] } } };
-      expect(packageJson.pi?.subagents?.agents).toEqual(['./agents']);
+      ) as { pi?: { extensions?: string[] } };
+      expect(packageJson.pi?.extensions).toEqual(['./src/index.ts']);
       expect(
-        await readFile(join(repositoryRoot, 'agents', 'step.md'), 'utf8'),
-      ).toMatch(/package: pi-workflows/);
+        await readFile(
+          join(
+            repositoryRoot,
+            'examples',
+            'starter-kit',
+            'agents',
+            'worker.md',
+          ),
+          'utf8',
+        ),
+      ).toMatch(/implementation role/i);
     });
 
     test('portable four-workflow starter kit loads with bounded graphs', async () => {
@@ -127,6 +126,7 @@ describe('when testing example', () => {
 
       expect(catalog.diagnostics).toEqual([]);
       expect([...catalog.workflows.keys()].sort()).toEqual([
+        'investigate',
         'mr-comment',
         'mr-review',
         'ticket',
@@ -138,18 +138,24 @@ describe('when testing example', () => {
             workflowId,
             Object.fromEntries(
               Object.entries(workflow.definition.steps).map(
-                ([stepId, step]) => [stepId, step.subagent?.agent],
+                ([stepId, step]) => [stepId, step.agent?.name],
               ),
             ),
           ]),
         ),
       ).toEqual({
+        investigate: {
+          retrieve: 'scout',
+          investigate: 'worker',
+          validate: 'reviewer',
+        },
         'mr-comment': {
           fetch: 'scout',
+          'checkout-source': 'worker',
           plan: 'planner',
           implement: 'worker',
           verify: 'reviewer',
-          publish: 'worker',
+          deliver: 'worker',
         },
         'mr-review': {
           fetch: 'scout',
@@ -178,17 +184,16 @@ describe('when testing example', () => {
             (issue) => issue.level === 'error',
           ),
         ).toEqual([]);
-        expect(loaded.definition.maxStepVisits).toBeLessThanOrEqual(4);
+        expect(loaded.definition.maxStepVisits).toBeLessThanOrEqual(20);
         for (const step of Object.values(loaded.definition.steps)) {
-          expect(step.permissions.skills).toEqual([]);
-          expect(step.permissions.extensions).toEqual([]);
+          expect(step.agent?.name).toMatch(/^[a-z0-9][a-z0-9-]*$/);
           expect(Object.values(step.transitions)).not.toContain('replan');
         }
         for (const prompt of Object.values(loaded.prompts)) {
           expect(prompt).not.toMatch(/\/Users\//);
-          expect(prompt).not.toMatch(
-            /caveman|superpowers|using-git-worktrees|pi-web-tools/i,
-          );
+          expect(prompt).not.toContain('structured_output');
+          expect(prompt).not.toMatch(/subagent|delegated child/i);
+          expect(prompt).toContain('workflow_complete_step');
         }
       }
 
@@ -199,19 +204,19 @@ describe('when testing example', () => {
           workflow.definition.steps['prepare-workspace']?.workspace,
         ).toEqual({
           bindOn: ['ready'],
-          allowedRoots: ['..'],
+          allowedRoots: ['~/repositories/worktrees'],
         });
         expect(workflow.prompts['prepare-workspace']).toMatch(
-          /dirty exact run-owned\s+worktree is resumable/i,
+          /dirty existing run-owned\s+worktree is valid resumable/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
-          /reuse it even when it is dirty[\s\S]*launched\s+from a different primary or linked worktree/i,
+          /reuse it\s+even when dirty[\s\S]*different primary\s+or\s+linked worktree/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
           /never reuse the current checkout merely because it is a linked worktree/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
-          /regardless of whether the source\s+checkout is primary or linked/i,
+          /regardless of whether the source\s+checkout is\s+primary or linked/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
           /source HEAD is already an ancestor[\s\S]*rebasing would be a no-op/i,
@@ -220,7 +225,7 @@ describe('when testing example', () => {
           /selected worktree is dirty[\s\S]*without stashing or rebasing/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
-          /selected worktree is clean[\s\S]*rebase only the exact run-owned branch/i,
+          /rebase only the exact run-owned dedicated branch/i,
         );
         expect(workflow.prompts['prepare-workspace']).toMatch(
           /Abort only the rebase started by this attempt[\s\S]*pre-attempt selected HEAD and status were restored/i,
@@ -234,10 +239,13 @@ describe('when testing example', () => {
         expect(workflow.prompts.plan).toContain('{{gate.artifact}}');
         expect(workflow.prompts.plan).toContain('{{gate.feedback}}');
         expect(workflow.prompts.plan).toMatch(
-          /captured source HEAD and initially selected HEAD\s+as\s+historical provenance/i,
+          /source HEAD and prepared\s+selected HEAD as historical provenance/i,
         );
-        expect(workflow.prompts.plan).toMatch(
-          /Plan from the observed selected HEAD[\s\S]*cleanliness is not required/i,
+        expect(workflow.prompts.plan).toContain(
+          'Use the observed current selected HEAD as',
+        );
+        expect(workflow.prompts.plan).toContain(
+          'cleanliness and equality with the original prepared HEAD are not',
         );
         expect(workflow.prompts.plan).toMatch(
           /Use outcome `workspace-refresh` only when[\s\S]*selected checkout is clean/i,
@@ -266,7 +274,7 @@ describe('when testing example', () => {
       const review = catalog.workflows.get('mr-review')!;
       expect(review.definition.start).toBe('fetch');
       expect(review.prompts.fetch).toMatch(
-        /MCP server first[\s\S]*host CLI[\s\S]*cURL/i,
+        /matching read-only MCP[\s\S]*`glab` or `gh`[\s\S]*read-only web tools/i,
       );
       expect(review.definition.steps.review?.gate?.provider).toBe(
         'plannotator',
@@ -279,7 +287,7 @@ describe('when testing example', () => {
         verified: '$done',
         failed: 'publish',
         retry: 'verify',
-        blocked: '$pause',
+        blocked: 'verify',
       });
       expect(review.prompts.review).toContain('{{gate.artifact}}');
       expect(review.prompts.review).toContain('{{gate.feedback}}');
@@ -288,10 +296,10 @@ describe('when testing example', () => {
         /actionable\s+verification\s+finding[\s\S]*corrective\s+publication\s+handoff/i,
       );
       expect(review.prompts.publish).toMatch(
-        /GitLab inline discussion[\s\S]*nested object[\s\S]*`--form`/i,
+        /GitLab inline-discussion[\s\S]*Fish `begin[\s\S]*`glab api`/i,
       );
       expect(review.prompts.publish).toMatch(
-        /Do not use `--field` or `--raw-field`[\s\S]*`position\[\.\.\.\]`/i,
+        /Never\s+synthesize, normalize, repair, re-quote, or add an action/i,
       );
       expect(review.prompts.verify).toMatch(
         /`failed`[\s\S]*next\s+publication\s+worker/i,
@@ -302,14 +310,13 @@ describe('when testing example', () => {
 
       const comment = catalog.workflows.get('mr-comment')!;
       expect(comment.definition.start).toBe('fetch');
-      expect(
-        Object.values(comment.definition.steps).every(
-          (step) => step.workspace === undefined,
-        ),
-      ).toBe(true);
+      expect(comment.definition.steps['checkout-source']?.workspace).toEqual({
+        bindOn: ['ready'],
+        allowedRoots: ['~/repositories/worktrees', '.'],
+      });
       for (const prompt of Object.values(comment.prompts)) {
         expect(prompt).toMatch(/current|checkout/i);
-        expect(prompt).toMatch(/Never create|never create/i);
+        expect(prompt).toMatch(/never\s+create/i);
       }
       expect(comment.definition.steps.plan?.transitions).toMatchObject({
         approved: 'implement',
@@ -324,7 +331,7 @@ describe('when testing example', () => {
         expect(step.requires.tools).not.toContain('mcp');
       }
       const publicationRules =
-        comment.definition.steps.publish?.permissions.bash.allow ?? [];
+        comment.definition.steps.deliver?.permissions.bash.allow ?? [];
       expect(
         publicationRules
           .filter((rule) => rule.executable === 'git')
@@ -341,19 +348,18 @@ describe('when testing example', () => {
           .map((rule) => rule.argsPrefix),
       ).toContainEqual(['api']);
       expect(comment.prompts.plan).toMatch(
-        /subcommand first[\s\S]*never add a dynamic `git -C`/i,
+        /subcommand first and omit `git -C`[\s\S]*not a dynamic `-C` prefix/i,
       );
-      expect(comment.prompts.plan).toMatch(
-        /prefer `glab api`[\s\S]*do not assume[\s\S]*`glab mr view` supports `--json`/i,
+      expect(comment.prompts.plan).toContain('prefer `glab api`');
+      expect(comment.prompts.plan).toContain('version-specific `glab mr view');
+      expect(comment.prompts.verify).toContain(
+        'failing required check is non-passing',
       );
       expect(comment.prompts.verify).toContain(
-        'regression, lint failure, formatting failure',
+        'delivery step automatically receives',
       );
-      expect(comment.prompts.verify).toContain(
-        'automatically proceeds to\nthe publisher',
-      );
-      expect(comment.prompts.publish).toContain(
-        'Automatically perform every required approved push and reply',
+      expect(comment.prompts.deliver).toContain(
+        'automatically\nperforms every approved required push and reply',
       );
     });
   });

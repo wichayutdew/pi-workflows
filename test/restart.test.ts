@@ -9,18 +9,18 @@ function workspaceWorkflow() {
   raw.steps = {
     prepare: {
       prompt: 'Prepare the workspace',
-      subagent: { agent: 'worker' },
+      agent: 'worker',
       workspace: { bindOn: ['ready'], allowedRoots: ['../worktrees'] },
       transitions: { ready: 'implement', blocked: '$pause' },
     },
     implement: {
       prompt: 'Implement',
-      subagent: { agent: 'worker' },
+      agent: 'worker',
       transitions: { ready: 'verify', blocked: '$pause' },
     },
     verify: {
       prompt: 'Verify',
-      subagent: { agent: 'reviewer' },
+      agent: 'reviewer',
       transitions: { passed: '$done', blocked: '$pause' },
     },
   };

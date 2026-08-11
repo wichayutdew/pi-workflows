@@ -9,12 +9,12 @@ function fixture() {
   const steps = raw.steps as Record<string, Record<string, unknown>>;
   steps.inspect = {
     ...steps.inspect,
-    subagent: { agent: 'worker' },
+    agent: 'worker',
     workspace: { bindOn: ['ready'], allowedRoots: ['..'] },
   };
   steps.implement = {
     ...steps.implement,
-    subagent: { agent: 'worker' },
+    agent: 'worker',
   };
   const workflow = loadedWorkflow(raw);
   const step = workflow.definition.steps.inspect;

@@ -14,7 +14,7 @@ describe('when testing preflight', () => {
         start: 'run',
         steps: {
           run: {
-            subagent: {},
+            agent: 'worker',
             prompt: 'Run',
             permissions: {
               tools: ['read'],
@@ -60,7 +60,6 @@ describe('when testing preflight', () => {
       expect(errors.join('\n')).toMatch(/required tool "read"/);
       expect(errors.join('\n')).toMatch(/required extension "plannotator"/);
       expect(errors.join('\n')).toMatch(/required skill "planning"/);
-      expect(errors.join('\n')).toMatch(/pi-subagents is required/);
     });
 
     test('main-agent steps and prompt gates need no optional integration', () => {

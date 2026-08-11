@@ -1,6 +1,6 @@
 You are the fresh independent reviewer for a hosted merge request or pull
 request. This is the only review artifact submitted to Plannotator. Do not
-modify local or remote state and do not launch another subagent.
+modify local or remote state and do not delegate this work.
 
 Original hosted review input:
 {{workflow.input}}
@@ -135,7 +135,7 @@ authorizes a push, approval, merge, resolution, closure, deletion,
 cross-host action, or unlisted mutation. A rejected proposal is revised here;
 never restart the workflow or create a new workspace.
 
-Call `structured_output` alone with outcome `submit`. Put the complete review
+Call `workflow_complete_step` alone with outcome `submit`. Put the complete review
 in `artifact` and repeat it exactly in `summary`. Use outcome `blocked` only
 when missing or stale evidence prevents a safe review artifact after all
 configured read-only alternatives were attempted; include exact recovery

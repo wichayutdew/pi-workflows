@@ -1,51 +1,188 @@
-import {
-  createDelegation,
-  DEFAULT_CLIENT_DEPENDENCIES,
-} from './client-delegation.ts';
-import type {
-  ActiveDelegation,
-  DelegateOptions,
-  SubagentDelegationClientDependencies,
-  SubagentEventBus,
-} from './client-types.ts';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import type {
   SubagentDelegationRequest,
   SubagentDelegationResponse,
+  SubagentDelegationUpdate,
 } from './protocol-events.ts';
 
-export type {
-  DelegateOptions,
-  SubagentDelegationClientDependencies,
-  SubagentEventBus,
-} from './client-types.ts';
+export type DelegateOptions = {
+  readonly signal?: AbortSignal;
+  readonly onUpdate?: (update: { readonly requestId: string }) => void;
+  readonly onLateTerminal?: (response: SubagentDelegationResponse) => void;
+};
 
-/**
- * Functional surface used by workflow orchestration.
- */
+/** A pi-workflows-owned foreground Pi process. */
 export type SubagentDelegationClientController = {
-  /** Request currently owned by this client, if any. */
   readonly activeRequestId: string | undefined;
-  /** Starts one correlated delegation. */
   readonly delegate: (
     request: SubagentDelegationRequest,
     options?: DelegateOptions,
   ) => Promise<SubagentDelegationResponse>;
-  /** Cancels the active delegation and waits for terminal confirmation. */
   readonly cancelActiveAndWait: (waitMs?: number) => Promise<boolean>;
 };
 
-/**
- * Creates an isolated subagent delegation controller.
- *
- * @param events - Event transport shared with the subagent runtime.
- * @param dependencies - Timer effects used for cancellation and timeouts.
- * @returns A controller that owns at most one active delegation.
- */
+export type DirectWorkerSpawn = (
+  command: string,
+  args: Array<string>,
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio: ['ignore', 'pipe', 'pipe'];
+  },
+) => ChildProcess & {
+  readonly stdout: NonNullable<ChildProcess['stdout']>;
+  readonly stderr: NonNullable<ChildProcess['stderr']>;
+};
+
+export const directWorkerCommand = (
+  request: SubagentDelegationRequest,
+): ReadonlyArray<string> => [
+  '--no-session',
+  '--mode',
+  'json',
+  ...(request.model ? ['--model', request.model] : []),
+  ...(request.thinking ? ['--thinking', request.thinking] : []),
+  '--print',
+  request.task,
+];
+
+export function directWorkerResponse(
+  request: SubagentDelegationRequest,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): SubagentDelegationResponse {
+  const status = code === 0 ? 'completed' : signal ? 'cancelled' : 'failed';
+  return {
+    requestId: request.requestId,
+    agent: request.agent,
+    status,
+    ...(code === null ? {} : { exitCode: code }),
+    ...(status !== 'completed' && stderr.trim()
+      ? { error: stderr.trim().slice(-4_000) }
+      : {}),
+  };
+}
+
+type WorkerJsonEvent = {
+  readonly type?: unknown;
+  readonly toolName?: unknown;
+  readonly args?: unknown;
+  readonly message?: { readonly role?: unknown };
+  readonly assistantMessageEvent?: {
+    readonly type?: unknown;
+    readonly delta?: unknown;
+  };
+};
+
+type WorkerProgress = {
+  readonly toolCount: number;
+  readonly responseText: string;
+  readonly update?: SubagentDelegationUpdate;
+};
+
+const MAX_PROGRESS_DETAIL_CHARS = 480;
+const SECRET_KEY = /authorization|cookie|password|secret|token|api[-_]?key/i;
+
+function redactProgressValue(value: unknown, key = ''): unknown {
+  if (SECRET_KEY.test(key)) return '[redacted]';
+  if (typeof value === 'string') {
+    return value.length > MAX_PROGRESS_DETAIL_CHARS
+      ? `${value.slice(0, MAX_PROGRESS_DETAIL_CHARS - 1)}…`
+      : value;
+  }
+  if (Array.isArray(value))
+    return value.map((item) => redactProgressValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        redactProgressValue(entryValue, entryKey),
+      ]),
+    );
+  }
+  return value;
+}
+
+function formatToolCall(toolName: string, args: unknown): string {
+  const rendered = JSON.stringify(redactProgressValue(args));
+  return `call ${toolName} ${rendered}`.slice(0, MAX_PROGRESS_DETAIL_CHARS);
+}
+
+/** Converts one Pi JSONL event into safe, operator-visible worker progress. */
+export function workerProgressFromJsonLine(
+  line: string,
+  requestId: string,
+  toolCount: number,
+  responseText = '',
+): WorkerProgress {
+  let event: WorkerJsonEvent;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (typeof parsed !== 'object' || parsed === null)
+      return { toolCount, responseText };
+    event = parsed;
+  } catch {
+    return { toolCount, responseText };
+  }
+  if (event.type === 'agent_start') {
+    return {
+      toolCount,
+      responseText,
+      update: { requestId, activity: 'thinking', toolCount },
+    };
+  }
+  if (event.type === 'message_start' && event.message?.role === 'assistant') {
+    return { toolCount, responseText: '' };
+  }
+  if (
+    event.type === 'message_update' &&
+    event.assistantMessageEvent?.type === 'text_delta' &&
+    typeof event.assistantMessageEvent.delta === 'string'
+  ) {
+    const nextResponseText =
+      `${responseText}${event.assistantMessageEvent.delta}`.slice(
+        -MAX_PROGRESS_DETAIL_CHARS,
+      );
+    return {
+      toolCount,
+      responseText: nextResponseText,
+      update: {
+        requestId,
+        activity: 'responding',
+        detail: `response: ${nextResponseText}`,
+        toolCount,
+      },
+    };
+  }
+  if (
+    (event.type === 'tool_execution_start' ||
+      event.type === 'tool_execution_update') &&
+    typeof event.toolName === 'string'
+  ) {
+    const nextToolCount =
+      event.type === 'tool_execution_start' ? toolCount + 1 : toolCount;
+    return {
+      toolCount: nextToolCount,
+      responseText,
+      update: {
+        requestId,
+        currentTool: event.toolName,
+        ...(event.type === 'tool_execution_start'
+          ? { detail: formatToolCall(event.toolName, event.args) }
+          : {}),
+        toolCount: nextToolCount,
+      },
+    };
+  }
+  return { toolCount, responseText };
+}
+
 export function createSubagentDelegationClient(
-  events: SubagentEventBus,
-  dependencies: SubagentDelegationClientDependencies = DEFAULT_CLIENT_DEPENDENCIES,
+  spawnWorker: DirectWorkerSpawn = spawn,
 ): SubagentDelegationClientController {
-  let active: ActiveDelegation | undefined;
+  let active: { requestId: string; process: ChildProcess } | undefined;
 
   const delegate = (
     request: SubagentDelegationRequest,
@@ -53,45 +190,67 @@ export function createSubagentDelegationClient(
   ): Promise<SubagentDelegationResponse> => {
     if (active) {
       return Promise.reject(
-        new Error(`subagent request "${active.requestId}" is still active`),
+        new Error(`workflow worker "${active.requestId}" is still active`),
       );
     }
     if (options.signal?.aborted) {
-      return Promise.reject(new Error('subagent delegation was cancelled'));
+      return Promise.reject(new Error('workflow worker was cancelled'));
     }
-
-    const delegation = createDelegation({
-      events,
-      request,
-      options,
-      dependencies,
-      releaseActive: (requestId) => {
-        if (active?.requestId === requestId) active = undefined;
-      },
-    });
-    active = delegation.active;
-    delegation.start();
-    return delegation.promise;
-  };
-
-  const cancelActiveAndWait = (waitMs = 5_000): Promise<boolean> => {
-    const current = active;
-    if (!current) return Promise.resolve(true);
-
-    current.requestCancellation();
-    return new Promise<boolean>((resolve) => {
-      let isFinished = false;
-      const finish = (isConfirmed: boolean): void => {
-        if (isFinished) return;
-        isFinished = true;
-        dependencies.cancelTimeout(timer);
-        resolve(isConfirmed);
+    return new Promise((resolve, reject) => {
+      const child = spawnWorker('pi', [...directWorkerCommand(request)], {
+        cwd: request.cwd,
+        env: {
+          ...process.env,
+          PI_WORKFLOWS_CHILD: '1',
+          PI_WORKFLOWS_CHILD_AGENT: request.agent,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      active = { requestId: request.requestId, process: child };
+      let stderr = '';
+      let stdoutBuffer = '';
+      let toolCount = 0;
+      let responseText = '';
+      const stdoutDecoder = new StringDecoder('utf8');
+      const consumeWorkerLines = (): void => {
+        while (true) {
+          const newline = stdoutBuffer.indexOf('\n');
+          if (newline === -1) return;
+          const line = stdoutBuffer.slice(0, newline);
+          stdoutBuffer = stdoutBuffer.slice(newline + 1);
+          const progress = workerProgressFromJsonLine(
+            line,
+            request.requestId,
+            toolCount,
+            responseText,
+          );
+          toolCount = progress.toolCount;
+          responseText = progress.responseText;
+          if (progress.update) options.onUpdate?.(progress.update);
+        }
       };
-      const timer = dependencies.scheduleTimeout(() => {
-        finish(false);
-      }, waitMs);
-      void current.terminal.then(() => {
-        finish(true);
+      const consumeWorkerOutput = (chunk: Buffer): void => {
+        stdoutBuffer += stdoutDecoder.write(chunk);
+        consumeWorkerLines();
+      };
+      child.stdout.on('data', consumeWorkerOutput);
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+      });
+      const abort = (): void => {
+        child.kill('SIGTERM');
+      };
+      options.signal?.addEventListener('abort', abort, { once: true });
+      child.once('error', (error) => {
+        if (active?.process === child) active = undefined;
+        reject(error);
+      });
+      child.once('close', (code, signal) => {
+        stdoutBuffer += stdoutDecoder.end();
+        consumeWorkerLines();
+        if (active?.process === child) active = undefined;
+        options.signal?.removeEventListener('abort', abort);
+        resolve(directWorkerResponse(request, code, signal, stderr));
       });
     });
   };
@@ -101,48 +260,31 @@ export function createSubagentDelegationClient(
       return active?.requestId;
     },
     delegate,
-    cancelActiveAndWait,
+    async cancelActiveAndWait(): Promise<boolean> {
+      const current = active;
+      if (!current) return true;
+      current.process.kill('SIGTERM');
+      return new Promise((resolve) => {
+        current.process.once('close', () => {
+          resolve(true);
+        });
+      });
+    },
   };
 }
 
-/**
- * Coordinates one foreground pi-subagents request at a time.
- *
- * Event and timer boundaries are constructor-injected; production defaults
- * preserve the original runtime behavior.
- */
 export class SubagentDelegationClient implements SubagentDelegationClientController {
-  readonly #controller: SubagentDelegationClientController;
-
-  /**
-   * Creates a client over the supplied event and timer boundaries.
-   */
-  constructor(
-    events: SubagentEventBus,
-    dependencies: SubagentDelegationClientDependencies = DEFAULT_CLIENT_DEPENDENCIES,
-  ) {
-    this.#controller = createSubagentDelegationClient(events, dependencies);
-  }
-
-  /** Returns the request currently owned by this client, if any. */
+  readonly #client = createSubagentDelegationClient();
   get activeRequestId(): string | undefined {
-    return this.#controller.activeRequestId;
+    return this.#client.activeRequestId;
   }
-
-  /**
-   * Starts a correlated delegation and resolves on its terminal event.
-   */
   delegate(
     request: SubagentDelegationRequest,
-    options: DelegateOptions = {},
+    options?: DelegateOptions,
   ): Promise<SubagentDelegationResponse> {
-    return this.#controller.delegate(request, options);
+    return this.#client.delegate(request, options);
   }
-
-  /**
-   * Requests cancellation and waits briefly for terminal confirmation.
-   */
-  cancelActiveAndWait(waitMs = 5_000): Promise<boolean> {
-    return this.#controller.cancelActiveAndWait(waitMs);
+  cancelActiveAndWait(waitMs?: number): Promise<boolean> {
+    return this.#client.cancelActiveAndWait(waitMs);
   }
 }

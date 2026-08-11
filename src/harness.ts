@@ -24,10 +24,6 @@ import {
 import type { MainStepRuntimeController } from './runtime/main-step-runtime.ts';
 import type { SerialTaskQueueController } from './runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from './runtime/step-result.ts';
-import {
-  createDelegationFailureActions,
-  type DelegationFailureActions,
-} from './harness/delegation-failure.ts';
 import { createEmptyCatalog } from './harness/catalog.ts';
 import {
   createWorkflowHarnessDependencies,
@@ -36,8 +32,6 @@ import {
 import type {
   ActiveDelegation,
   ActivePromptReview,
-  DelegationRecovery,
-  DelegationFailureDetails,
   MainStepIdentity,
   WorkflowStartContext,
 } from './harness/types.ts';
@@ -79,7 +73,6 @@ const CORE_ACTIONS = createCoreActions();
 export class WorkflowHarness implements WorkflowCommandController {
   private readonly pi: ExtensionAPI;
   private readonly dependencies: WorkflowHarnessDependencies;
-  private readonly delegationFailures: DelegationFailureActions;
   private readonly subagents: SubagentDelegationClientController;
   private readonly mainSteps: MainStepRuntimeController;
   private catalog: WorkflowCatalog = createEmptyCatalog();
@@ -149,10 +142,8 @@ export class WorkflowHarness implements WorkflowCommandController {
     LIFECYCLE_ACTIONS.registerLifecycle;
   private readonly registerPolicy: () => void =
     LIFECYCLE_ACTIONS.registerPolicy;
-  private readonly launchCurrentStep: (
-    workflow: LoadedWorkflow,
-    recovery?: DelegationRecovery,
-  ) => void = STEP_EXECUTION_ACTIONS.launchCurrentStep;
+  private readonly launchCurrentStep: (workflow: LoadedWorkflow) => void =
+    STEP_EXECUTION_ACTIONS.launchCurrentStep;
   private readonly launchMainStep: (
     workflow: LoadedWorkflow,
     run: WorkflowRun,
@@ -200,11 +191,6 @@ export class WorkflowHarness implements WorkflowCommandController {
   private readonly cleanupDelegation: (
     active: ActiveDelegation,
   ) => Promise<void> = DELEGATION_CONTROL_ACTIONS.cleanupDelegation;
-  private readonly retryDelegationAfterFailure: (
-    active: ActiveDelegation,
-    failure: DelegationFailureDetails | undefined,
-    reason: string,
-  ) => boolean = DELEGATION_CONTROL_ACTIONS.retryDelegationAfterFailure;
   private readonly pauseForDelegationFailure: (
     reason: string,
     failureSummary?: string,
@@ -298,7 +284,6 @@ export class WorkflowHarness implements WorkflowCommandController {
   ) {
     this.pi = pi;
     this.dependencies = createWorkflowHarnessDependencies(dependencyOverrides);
-    this.delegationFailures = createDelegationFailureActions(this.dependencies);
     this.statusShortcut = statusShortcut;
     this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
     this.subagents = this.dependencies.createSubagentClient(pi);

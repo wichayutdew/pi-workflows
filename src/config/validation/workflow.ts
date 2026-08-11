@@ -91,9 +91,6 @@ function validateWorkspaceGraph(
         `${workspacePath}: only one workspace-binding step is allowed; "${firstBinderId}" also configures workspace binding`,
       );
     }
-    if (!step.subagent) {
-      errors.push(`${workspacePath}: workspace binding requires a subagent`);
-    }
     if (step.gate) {
       errors.push(
         `${workspacePath}: workspace binding is not allowed on a gated step`,
@@ -110,14 +107,13 @@ function validateWorkspaceGraph(
       }
       return target && Object.hasOwn(steps, target) ? [target] : [];
     });
-    validateWorkspaceDescendants(steps, downstream, errors);
+    validateWorkspaceDescendants(steps, downstream);
   });
 }
 
 function validateWorkspaceDescendants(
   steps: Readonly<Record<string, WorkflowStep>>,
   initialStepIds: ReadonlyArray<string>,
-  errors: ValidationErrors,
 ): void {
   const pending = [...initialStepIds];
   const visited = new Set<string>();
@@ -127,11 +123,6 @@ function validateWorkspaceDescendants(
     visited.add(stepId);
     const step = steps[stepId];
     if (!step) continue;
-    if (!step.subagent) {
-      errors.push(
-        `workflow.steps.${stepId}.subagent: every nonterminal step reachable after workspace binding must use a subagent`,
-      );
-    }
     Object.values(step.transitions).forEach((target) => {
       if (
         target !== '$done' &&

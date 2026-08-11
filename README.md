@@ -6,7 +6,7 @@
 
 Pi Workflows is a declarative, pauseable workflow harness for Pi. Define steps,
 tools, prompts, approvals, and outcomes in YAML; it provides bounded execution,
-durable checkpoints, isolated subagent work, and a live status view without
+durable checkpoints, main-session step policy, and a live status view without
 dictating your language, framework, or delivery process.
 
 ## See it in action
@@ -32,6 +32,9 @@ dictating your language, framework, or delivery process.
 - Pause for human approval and resume from the same durable checkpoint.
 - Keep worktree-bound iterations safe, including follow-up enhancements.
 - Enforce declared resources and stop unsafe loops before they run away.
+- Assign a workflow-owned role prompt with `agent: planner`, `worker`,
+  `reviewer`, or `scout`; customize profiles under your user workflow
+  directory's `agents/` folder.
 
 ## Explore
 

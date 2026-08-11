@@ -20,18 +20,36 @@ cd pi-workflows
 
 The remaining commands assume your shell is at the repository root.
 
-## 2. Install the starter integrations
+## 2. Install the approval integration
 
-The starter workflows use Pi Subagents profiles and Plannotator approval gates:
+The starter workflows use built-in role prompts and Plannotator approval gates:
 
 ```bash
-pi install npm:pi-subagents
 pi install npm:@plannotator/pi-extension
 ```
 
-The kit selects the `scout`, `planner`, `worker`, and `reviewer` profiles.
-Change those names in the workflow files if your Pi Subagents setup uses
-different profiles.
+The kit selects the `scout`, `planner`, `worker`, and `reviewer` role prompts.
+Set each step's `agent` field to a different role when needed. To customize a
+role, create `~/.pi/agent/workflows/agents/<role>.md` (or
+`$PI_WORKFLOWS_DIR/agents/<role>.md`); user profiles override the bundled
+prompt fallback.
+
+An agent profile may optionally begin with YAML frontmatter. Its user-owned
+`model` and `thinking` values apply only to Pi workers launched for that
+profile:
+
+```markdown
+---
+model: provider/model-id
+thinking: high
+---
+
+Role instructions for this agent.
+```
+
+`thinking` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
+`max`. Omit `model` to use the current Pi default. Pi validates the model name
+against its configured catalog when the worker starts.
 
 ## 3. Copy the four starter workflows
 
@@ -42,6 +60,7 @@ workflow directory:
 mkdir -p ~/.pi/agent/workflows
 cp examples/starter-kit/*.workflow.yaml ~/.pi/agent/workflows/
 cp -R examples/starter-kit/steps ~/.pi/agent/workflows/
+cp -R examples/starter-kit/agents ~/.pi/agent/workflows/
 ```
 
 Review and merge files if that directory already contains workflows; do not

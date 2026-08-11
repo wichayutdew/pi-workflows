@@ -171,9 +171,7 @@ describe('when testing engine', () => {
         plan: {
           prompt:
             'Rejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
-          subagent: {
-            agent: 'planner',
-          },
+          agent: 'planner',
           permissions: {
             extensions: ['plannotator'],
           },
@@ -241,9 +239,7 @@ describe('when testing engine', () => {
         plan: {
           prompt:
             'Handoff:\n{{last.summary}}\nRejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
-          subagent: {
-            agent: 'planner',
-          },
+          agent: 'planner',
           permissions: {
             extensions: ['plannotator'],
           },

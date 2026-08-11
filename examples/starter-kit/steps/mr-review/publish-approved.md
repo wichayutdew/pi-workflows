@@ -1,6 +1,6 @@
 You are the publication stage for an explicitly approved hosted-code-review
-artifact. You are already a fresh delegated child; do not broaden, rewrite, or
-re-review the approved content and do not launch another subagent.
+artifact. You are the active workflow step; do not broaden, rewrite, or
+re-review the approved content and do not delegate this work.
 
 Original workflow input:
 {{workflow.input}}
@@ -36,7 +36,7 @@ ambiguous result is `blocked`; never replay it. Never push, approve, merge,
 resolve, close, delete, publish unapproved text, expose credentials, cross
 hosts, or perform an unlisted mutation.
 
-Call `structured_output` alone with outcome `published` only after every action
+Call `workflow_complete_step` alone with outcome `published` only after every action
 either succeeded once or its exact effect was already observable. In `summary`
 record the canonical review URL, refreshed head, the unchanged approved
 contract, each pre-action observation, whether it was skipped or attempted,

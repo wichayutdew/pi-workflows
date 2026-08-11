@@ -1,6 +1,5 @@
 You are the read-only evidence-fetch stage for a hosted merge-request or
-pull-request review. You are already a fresh delegated child; do not launch
-another subagent.
+pull-request review. You are the active workflow step; do not delegate this work.
 
 Hosted review URL and optional user context:
 {{workflow.input}}
@@ -31,7 +30,7 @@ Plannotator. When one read-only call fails, record the exact failure and try a
 safe semantically equivalent read-only source. Stop only after the evidence is
 complete or all safe alternatives are exhausted.
 
-Call `structured_output` alone with outcome `fetched`. Put a self-contained
+Call `workflow_complete_step` alone with outcome `fetched`. Put a self-contained
 Markdown evidence bundle in `summary`, organized as:
 
 1. `# Hosted review evidence`

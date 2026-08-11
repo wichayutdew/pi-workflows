@@ -20,14 +20,11 @@ import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts'
 import type { SerialTaskQueueController } from '../runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { WorkflowStatusSnapshot } from '../workflow-status.ts';
-import type { DelegationFailureActions } from './delegation-failure.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
 import type { SettledStepReport } from './step-reporting.ts';
 import type {
   ActiveDelegation,
   ActivePromptReview,
-  DelegationRecovery,
-  DelegationFailureDetails,
   MainStepIdentity,
   WorkflowStartContext,
 } from './types.ts';
@@ -41,7 +38,6 @@ import type {
 export type HarnessActionContext = {
   pi: ExtensionAPI;
   dependencies: WorkflowHarnessDependencies;
-  delegationFailures: DelegationFailureActions;
   subagents: SubagentDelegationClientController;
   mainSteps: MainStepRuntimeController;
   catalog: WorkflowCatalog;
@@ -98,10 +94,7 @@ export type HarnessActionContext = {
   registerLifecycle: () => void;
   registerPolicy: () => void;
   registerMultilineCommandInput: () => void;
-  launchCurrentStep: (
-    workflow: LoadedWorkflow,
-    recovery?: DelegationRecovery,
-  ) => void;
+  launchCurrentStep: (workflow: LoadedWorkflow) => void;
   launchMainStep: (
     workflow: LoadedWorkflow,
     run: WorkflowRun,
@@ -142,11 +135,6 @@ export type HarnessActionContext = {
   ) => Promise<void>;
   cancelActiveDelegation: (reason: string) => Promise<boolean>;
   cleanupDelegation: (active: ActiveDelegation) => Promise<void>;
-  retryDelegationAfterFailure: (
-    active: ActiveDelegation,
-    failure: DelegationFailureDetails | undefined,
-    reason: string,
-  ) => boolean;
   pauseForDelegationFailure: (reason: string, failureSummary?: string) => void;
   pauseForExecutionFailure: (
     label: string,

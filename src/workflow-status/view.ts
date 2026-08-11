@@ -17,6 +17,7 @@ import { padAnsi } from './layout.ts';
 import { renderBoard, renderEmptyBoard } from './render-board.ts';
 import { buildPathEntries } from './render-path.ts';
 import {
+  renderLiveWorkerActivity,
   renderStepDetail,
   selectedStepDetail,
   stepTranscriptCacheKey,
@@ -45,7 +46,7 @@ export type WorkflowStatusViewDependencies = {
 
 type ViewportState = {
   readonly isClosed: boolean;
-  readonly mode: 'board' | 'detail';
+  readonly mode: 'board' | 'detail' | 'live';
   readonly selectedIndex: number;
   readonly scrollOffset: number;
   readonly viewportRows: number;
@@ -196,7 +197,9 @@ export class WorkflowStatusView implements Component {
       return;
     }
     if (matchesKey(data, 'escape')) {
-      if (this.state.mode === 'detail') {
+      if (this.state.mode === 'live') {
+        this.showDetail();
+      } else if (this.state.mode === 'detail') {
         this.showBoard();
       } else {
         this.close();
@@ -206,7 +209,12 @@ export class WorkflowStatusView implements Component {
     const pageSize = Math.max(1, this.state.viewportRows - 2);
     const contentHeight = Math.max(1, this.state.viewportRows - 1);
     const halfPageSize = Math.max(1, Math.floor(contentHeight / 2));
-    if (this.state.mode === 'detail') {
+    if (this.state.mode === 'detail' || this.state.mode === 'live') {
+      if (matchesKey(data, Key.tab)) {
+        if (this.state.mode === 'detail') this.showLive();
+        else this.showDetail();
+        return;
+      }
       if (data === 'gg' || (data === 'g' && this.pendingDetailTopKey)) {
         this.pendingDetailTopKey = false;
         this.setScrollOffset(0);
@@ -220,7 +228,8 @@ export class WorkflowStatusView implements Component {
       if (data === 'G') {
         this.setScrollOffset(Number.MAX_SAFE_INTEGER);
       } else if (matchesKey(data, Key.left) || data === 'h') {
-        this.showBoard();
+        if (this.state.mode === 'live') this.showDetail();
+        else this.showBoard();
       } else if (matchesKey(data, Key.down) || data === 'j') {
         this.setScrollOffset(this.state.scrollOffset + 1);
       } else if (matchesKey(data, Key.up) || data === 'k') {
@@ -288,14 +297,21 @@ export class WorkflowStatusView implements Component {
             this.transcriptCache,
             contentWidth,
           )
-        : renderBoard(
-            this.theme,
-            snapshot,
-            contentWidth,
-            false,
-            this.statusShortcutLabel,
-            this.state.selectedIndex,
-          )
+        : this.state.mode === 'live'
+          ? renderLiveWorkerActivity(
+              this.theme,
+              snapshot,
+              this.state.selectedIndex,
+              contentWidth,
+            )
+          : renderBoard(
+              this.theme,
+              snapshot,
+              contentWidth,
+              false,
+              this.statusShortcutLabel,
+              this.state.selectedIndex,
+            )
       : renderEmptyBoard(this.theme, contentWidth);
     if (snapshot && this.state.mode === 'detail') {
       this.ensureSelectedTranscripts(snapshot);
@@ -311,8 +327,10 @@ export class WorkflowStatusView implements Component {
       this.statusShortcutLabel,
       this.theme,
       this.state.mode === 'detail'
-        ? '↑↓/jk · Ctrl+D/U half-page · gg/G top/bottom · PgUp/PgDn · ←/h/Esc'
-        : '↑/↓ or j/k select · Enter/→/l inspect · PgUp/PgDn',
+        ? '↑↓/jk · Ctrl+D/U half-page · gg/G top/bottom · PgUp/PgDn · Tab live · ←/h/Esc'
+        : this.state.mode === 'live'
+          ? '↑↓/jk · Ctrl+D/U half-page · gg/G top/bottom · PgUp/PgDn · Tab/←/h/Esc overview'
+          : '↑/↓ or j/k select · Enter/→/l inspect · PgUp/PgDn',
     );
     this.state = page.state;
     return page.lines;
@@ -373,6 +391,23 @@ export class WorkflowStatusView implements Component {
     if (this.state.mode === 'board') return;
     this.pendingDetailTopKey = false;
     this.state = { ...this.state, mode: 'board', scrollOffset: 0 };
+    this.tui.requestRender(true);
+  }
+
+  private showDetail(): void {
+    if (this.state.mode === 'detail') return;
+    this.pendingDetailTopKey = false;
+    this.state = { ...this.state, mode: 'detail', scrollOffset: 0 };
+    this.tui.requestRender(true);
+  }
+
+  private showLive(): void {
+    const snapshot = this.getSnapshot();
+    if (!snapshot) return;
+    const entry = buildPathEntries(snapshot)[this.state.selectedIndex];
+    if (!entry?.isCurrent || snapshot.execution?.kind !== 'subagent') return;
+    this.pendingDetailTopKey = false;
+    this.state = { ...this.state, mode: 'live', scrollOffset: 0 };
     this.tui.requestRender(true);
   }
 

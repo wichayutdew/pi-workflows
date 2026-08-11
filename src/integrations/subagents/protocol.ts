@@ -11,7 +11,7 @@ export type {
   ChildStepPolicy,
   ExtractedChildPolicy,
 } from './child-policy-types.ts';
-export { isSubagentRuntimeName } from './child-policy-validation.ts';
+export { isAgentProfileName } from './child-policy-validation.ts';
 export { parseDelegatedStepResult } from './delegated-result.ts';
 export type { DelegatedStepResult } from './delegated-result.ts';
 export {

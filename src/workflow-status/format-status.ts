@@ -26,7 +26,11 @@ export function formatWorkflowProgressStatus(
   );
   const activity =
     run.status === 'awaiting-gate' ? 'awaiting review' : 'working';
-  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity} · ${statusShortcutLabel}`;
+  const workerProgress =
+    snapshot.execution?.kind === 'subagent'
+      ? ` · ${snapshot.execution.progress}`
+      : '';
+  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity}${workerProgress} · ${statusShortcutLabel}`;
 }
 
 /** Format a plain-text workflow status suitable for fallback notifications. */

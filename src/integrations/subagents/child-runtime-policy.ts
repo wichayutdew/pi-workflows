@@ -8,13 +8,7 @@ import type { ChildStepPolicy } from './child-policy-types.ts';
 export const childPolicyStep = (policy: ChildStepPolicy): WorkflowStep => ({
   title: policy.stepTitle,
   prompt: { inline: 'Delegated workflow step' },
-  subagent: {
-    agent: policy.agent,
-    context: 'fresh',
-    timeoutMs: 900_000,
-    artifacts: false,
-    retryToolFailures: false,
-  },
+  agent: { name: policy.agent },
   permissions: policy.permissions,
   requires: { tools: [], extensions: [], skills: [] },
   transitions: {},

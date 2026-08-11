@@ -597,19 +597,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["prompt", "transitions"],
-      "allOf": [
-        {
-          "if": {
-            "required": ["workspace"]
-          },
-          "then": {
-            "required": ["subagent"],
-            "not": {
-              "required": ["gate"]
-            }
-          }
-        }
-      ],
       "properties": {
         "title": {
           "type": "string",
@@ -618,8 +605,8 @@
         "prompt": {
           "$ref": "#/$defs/prompt"
         },
-        "subagent": {
-          "$ref": "#/$defs/subagent"
+        "agent": {
+          "$ref": "#/$defs/subagentRuntimeName"
         },
         "permissions": {
           "$ref": "#/$defs/permissions"

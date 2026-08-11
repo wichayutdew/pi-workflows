@@ -46,7 +46,7 @@ export type SubagentTranscriptReference = {
   readonly trustedRoot: string;
   /** Exact child session returned by the delegation protocol. */
   readonly sessionFile: string;
-  /** Pi-subagents run identity used to confine the session path. */
+  /** Legacy child-run identity used to confine the session path. */
   readonly runId: string;
   readonly childIndex: number;
 };

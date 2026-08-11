@@ -2,7 +2,7 @@ import type { KeyId } from '@earendil-works/pi-tui';
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
 export const DEFAULT_STATUS_SHORTCUT = 'ctrl+alt+w' as const satisfies KeyId;
-export const SUBAGENT_RUNTIME_NAME_PATTERN =
+export const AGENT_PROFILE_NAME_PATTERN =
   /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
 export const MAX_WORKSPACE_PATH_CHARS = 4_096;
 export const MAX_WORKSPACE_ALLOWED_ROOTS = 32;
@@ -41,35 +41,9 @@ export type StepRequirements = {
   readonly skills: ReadonlyArray<string>;
 };
 
-export type SubagentContext = 'fresh';
-
-export type SubagentTurnBudget = {
-  readonly maxTurns: number;
-  readonly graceTurns?: number;
-};
-
-export type SubagentToolBudget = {
-  readonly hard: number;
-  readonly soft?: number;
-  readonly block?: ReadonlyArray<string> | '*';
-};
-
-export type StepSubagent = {
-  /** Pi Subagents agent profile launched for this isolated step. */
-  readonly agent: string;
-  /** Workflow steps always use a fresh context. */
-  readonly context: SubagentContext;
-  readonly model?: string;
-  readonly timeoutMs: number;
-  readonly turnBudget?: SubagentTurnBudget;
-  readonly toolBudget?: SubagentToolBudget;
-  readonly artifacts: boolean;
-  /**
-   * Authorizes bounded automatic recovery when Bash can execute commands.
-   * Every failed attempt must still have a complete, mutation-safe replay
-   * audit.
-   */
-  readonly retryToolFailures: boolean;
+export type StepAgent = {
+  /** Workflow-owned role prompt applied to this main-agent step. */
+  readonly name: string;
 };
 
 export type PromptSpec =
@@ -102,8 +76,8 @@ export type StepWorkspaceBinding = {
 export type WorkflowStep = {
   readonly title: string;
   readonly prompt: PromptSpec;
-  /** Omit to execute this step in the main Pi agent. */
-  readonly subagent?: StepSubagent;
+  /** Optional workflow-owned role prompt for this main-agent step. */
+  readonly agent?: StepAgent;
   readonly permissions: StepPermissions;
   readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;
@@ -142,19 +116,6 @@ export type PermissionCeiling = {
   readonly extensions: ReadonlyArray<string>;
   readonly skills: ReadonlyArray<string>;
   readonly bash: BashPermission;
-  readonly subagent?: SubagentPermissionCeiling;
-};
-
-export type SubagentPermissionCeiling = {
-  readonly agents: ReadonlyArray<string>;
-  readonly contexts: ReadonlyArray<SubagentContext>;
-  readonly models: ReadonlyArray<string>;
-  readonly maxTimeoutMs: number;
-  readonly maxTurns: number;
-  readonly maxGraceTurns: number;
-  readonly maxToolCalls: number;
-  readonly artifacts: boolean;
-  readonly retryToolFailures: boolean;
 };
 
 export type WorkflowSettings = {
@@ -191,14 +152,6 @@ export const EMPTY_REQUIREMENTS = {
   extensions: [],
   skills: [],
 } as const satisfies StepRequirements;
-
-export const DEFAULT_STEP_SUBAGENT = {
-  agent: 'pi-workflows.step',
-  context: 'fresh',
-  timeoutMs: 900_000,
-  artifacts: false,
-  retryToolFailures: false,
-} as const satisfies StepSubagent;
 
 export const DEFAULT_SETTINGS = {
   version: WORKFLOW_SCHEMA_VERSION,

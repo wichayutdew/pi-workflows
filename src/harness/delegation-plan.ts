@@ -1,19 +1,17 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { loadAgentProfile } from '../agents/profile.ts';
 import type { LoadedWorkflow, WorkflowStep } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
 import { allowedOutcomes } from '../engine/transitions.ts';
 import { digest } from '../digest.ts';
-import { deriveSubagentSessionRoot } from '../integrations/subagents/diagnostics.ts';
 import {
   encodeChildPolicy,
   type ChildStepPolicy,
   type SubagentDelegationRequest,
 } from '../integrations/subagents/protocol.ts';
-import { automaticRecoveryTask, buildDelegatedStepTask } from '../prompt.ts';
-import { WORKFLOW_COMPLETION_PARAMETERS } from '../runtime/completion-tool.ts';
-import { MAX_DELEGATION_RECOVERY_ATTEMPTS } from './delegation-retry-policy.ts';
+import { buildDelegatedStepTask } from '../prompt.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
-import type { ActiveDelegation, DelegationRecovery } from './types.ts';
+import type { ActiveDelegation } from './types.ts';
 
 type DelegationPlanInput = {
   workflow: LoadedWorkflow;
@@ -21,7 +19,6 @@ type DelegationPlanInput = {
   step: WorkflowStep;
   sessionEpoch: number;
   latestContext: ExtensionContext | undefined;
-  recovery: DelegationRecovery | undefined;
 };
 
 export type DelegationPlan =
@@ -34,13 +31,6 @@ export type DelegationPlan =
       active: ActiveDelegation;
       request: SubagentDelegationRequest;
     };
-
-function delegationTranscriptBinding(
-  requestId: string,
-  policyDigest: string,
-): string {
-  return `<pi-workflows-delegation-binding-v1>${requestId}:${policyDigest}</pi-workflows-delegation-binding-v1>`;
-}
 
 /**
  * Creates one immutable subagent request from workflow state and injected
@@ -55,12 +45,21 @@ export function createDelegationPlan(
     | 'resolveWorkspaceDirectory'
   >,
 ): DelegationPlan {
-  const { workflow, run, step, latestContext, recovery } = input;
-  const subagent = step.subagent;
-  if (!subagent) {
+  const { workflow, run, step, latestContext } = input;
+  const agent = step.agent?.name;
+  if (!agent) {
     return {
       kind: 'invalid',
-      reason: `Step "${run.currentStepId}" has no subagent configuration`,
+      reason: `Step "${run.currentStepId}" has no agent profile`,
+    };
+  }
+  let agentProfile;
+  try {
+    agentProfile = loadAgentProfile(agent);
+  } catch (error) {
+    return {
+      kind: 'invalid',
+      reason: error instanceof Error ? error.message : String(error),
     };
   }
   if (!run.cwd) {
@@ -160,7 +159,7 @@ export function createDelegationPlan(
   const policyDigest = digest({
     version: 1,
     requestId,
-    agent: subagent.agent,
+    agent,
     runId: run.runId,
     stepId: run.currentStepId,
     stepDigest: run.currentStepDigest,
@@ -174,7 +173,7 @@ export function createDelegationPlan(
   const policy: ChildStepPolicy = {
     version: 1,
     requestId,
-    agent: subagent.agent,
+    agent,
     workflowId: workflow.definition.id,
     runId: run.runId,
     stepId: run.currentStepId,
@@ -195,22 +194,7 @@ export function createDelegationPlan(
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
   };
-  const trustedSessionRoot = deriveSubagentSessionRoot(
-    latestContext.sessionManager.getSessionFile(),
-  );
-  const transcriptTask = [
-    buildDelegatedStepTask(workflow, run, ''),
-    delegationTranscriptBinding(requestId, policyDigest),
-    ...(recovery
-      ? [
-          automaticRecoveryTask(
-            recovery.failures.map(({ reason }) => reason),
-            recovery.attempt,
-            MAX_DELEGATION_RECOVERY_ATTEMPTS,
-          ),
-        ]
-      : []),
-  ].join('\n\n');
+  const task = buildDelegatedStepTask(workflow, run, '');
   const active: ActiveDelegation = {
     requestId,
     runId: run.runId,
@@ -219,56 +203,18 @@ export function createDelegationPlan(
     sessionEpoch: input.sessionEpoch,
     resultDirectory: workspace.resultDirectory,
     policy,
-    transcriptTask,
-    agent: subagent.agent,
-    ...(trustedSessionRoot ? { trustedSessionRoot } : {}),
-    broadRecoveryAuthorized: subagent.retryToolFailures,
-    recoveryAttemptCount: recovery?.attempt ?? 0,
-    recoveryFailures: recovery?.failures ?? [],
+    transcriptTask: task,
+    agent,
   };
   const request: SubagentDelegationRequest = {
     version: 1,
     requestId,
-    agent: subagent.agent,
-    task: `${encodeChildPolicy(policy)}\n\n${transcriptTask}`,
-    // Workflow steps are isolation boundaries. Parent/sibling transcripts are
-    // replaced by the explicit workflow handoff.
-    context: 'fresh',
+    agent,
+    task: `${encodeChildPolicy(policy)}\n\n${task}`,
     cwd: delegationCwd,
-    timeoutMs: subagent.timeoutMs,
-    skill:
-      step.permissions.skills.length > 0 ? [...step.permissions.skills] : false,
-    output: false,
-    // TypeBox schemas are structurally JSON objects, but the upstream contract
-    // exposes a generic record.
-    outputSchema: WORKFLOW_COMPLETION_PARAMETERS as unknown as Record<
-      string,
-      unknown
-    >,
-    agentContract: { version: 1 },
-    artifacts: subagent.artifacts,
-    ...(subagent.model ? { model: subagent.model } : {}),
-    ...(subagent.turnBudget
-      ? { turnBudget: structuredClone(subagent.turnBudget) }
-      : {}),
-    ...(subagent.toolBudget
-      ? {
-          toolBudget: {
-            hard: subagent.toolBudget.hard,
-            ...(subagent.toolBudget.soft === undefined
-              ? {}
-              : { soft: subagent.toolBudget.soft }),
-            ...(subagent.toolBudget.block === undefined
-              ? {}
-              : {
-                  block:
-                    subagent.toolBudget.block === '*'
-                      ? '*'
-                      : [...subagent.toolBudget.block],
-                }),
-          },
-        }
-      : {}),
+    timeoutMs: 900_000,
+    ...(agentProfile.model ? { model: agentProfile.model } : {}),
+    ...(agentProfile.thinking ? { thinking: agentProfile.thinking } : {}),
   };
 
   return { kind: 'ready', active, request };

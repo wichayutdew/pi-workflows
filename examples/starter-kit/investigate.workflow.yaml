@@ -10,18 +10,7 @@ steps:
     title: Retrieve investigation scope and Jira evidence
     prompt:
       file: steps/investigate/retrieve.md
-    subagent:
-      agent: scout
-      context: fresh
-      timeoutMs: 1800000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 35
-        graceTurns: 3
-      toolBudget:
-        soft: 90
-        hard: 150
-        block: "*"
+    agent: scout
     permissions:
       tools: [read, ls, bash]
       mcp: &jira-read-mcp
@@ -74,19 +63,7 @@ steps:
     title: Investigate approved scope and write findings
     prompt:
       file: steps/investigate/investigate.md
-    subagent:
-      agent: worker
-      context: fresh
-      timeoutMs: 3600000
-      artifacts: true
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 70
-        graceTurns: 5
-      toolBudget:
-        soft: 180
-        hard: 300
-        block: "*"
+    agent: worker
     permissions:
       tools: [read, ls, bash, edit, write]
       mcp: &investigation-mcp
@@ -113,23 +90,18 @@ steps:
     title: Independently validate investigation findings
     prompt:
       file: steps/investigate/validate.md
-    subagent:
-      agent: reviewer
-      context: fresh
-      timeoutMs: 3600000
-      retryToolFailures: true
-      turnBudget:
-        maxTurns: 100
-        graceTurns: 5
-      toolBudget:
-        soft: 150
-        hard: 250
-        block: "*"
+    agent: reviewer
     permissions:
       tools: [read, ls, bash]
       mcp: *investigation-mcp
       extensions: [pi-web-tools]
-      skills: &validation-skills [caveman, coding-standards, systematic-debugging, verification-before-completion]
+      skills:
+        &validation-skills [
+          caveman,
+          coding-standards,
+          systematic-debugging,
+          verification-before-completion,
+        ]
       bash:
         mode: unrestricted
     requires:

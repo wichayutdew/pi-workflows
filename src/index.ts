@@ -3,7 +3,6 @@ import type { KeyId } from '@earendil-works/pi-tui';
 import { defaultUserWorkflowDirectory, loadSettings } from './config/load.ts';
 import { WorkflowHarness } from './harness.ts';
 import { registerSubagentChildRuntime } from './integrations/subagents/child-runtime.ts';
-import { isSubagentRuntimeName } from './integrations/subagents/protocol.ts';
 
 /**
  * Asynchronous entry point accepted by Pi's extension loader.
@@ -25,7 +24,6 @@ export type PiWorkflowsExtensionDependencies = {
   readonly loadSettings: typeof loadSettings;
   readonly userWorkflowDirectory: () => string;
   readonly runtimeEnvironment: () => PiWorkflowsRuntimeEnvironment;
-  readonly isSubagentRuntimeName: typeof isSubagentRuntimeName;
   readonly registerChildRuntime: (pi: ExtensionAPI, childAgent: string) => void;
   readonly createHarness: (pi: ExtensionAPI, statusShortcut: KeyId) => void;
 };
@@ -34,10 +32,9 @@ const DEFAULT_DEPENDENCIES = {
   loadSettings,
   userWorkflowDirectory: defaultUserWorkflowDirectory,
   runtimeEnvironment: (): PiWorkflowsRuntimeEnvironment => ({
-    isSubagentChild: process.env.PI_SUBAGENT_CHILD === '1',
-    childAgent: process.env.PI_SUBAGENT_CHILD_AGENT?.trim(),
+    isSubagentChild: process.env.PI_WORKFLOWS_CHILD === '1',
+    childAgent: process.env.PI_WORKFLOWS_CHILD_AGENT?.trim(),
   }),
-  isSubagentRuntimeName,
   registerChildRuntime: (pi, childAgent): void => {
     registerSubagentChildRuntime(pi, { childAgent });
   },
@@ -59,10 +56,8 @@ export function createPiWorkflowsExtension(
   return async (pi): Promise<void> => {
     const environment = dependencies.runtimeEnvironment();
 
-    if (environment.isSubagentChild) {
-      if (dependencies.isSubagentRuntimeName(environment.childAgent)) {
-        dependencies.registerChildRuntime(pi, environment.childAgent);
-      }
+    if (environment.isSubagentChild && environment.childAgent) {
+      dependencies.registerChildRuntime(pi, environment.childAgent);
       return;
     }
 

@@ -15,7 +15,7 @@ import type { MainStepExecution } from '../runtime/main-step-runtime.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { createDelegationPlan } from './delegation-plan.ts';
-import type { DelegationRecovery, MainStepIdentity } from './types.ts';
+import type { MainStepIdentity } from './types.ts';
 import { resolveStepEffects } from './step-effects.ts';
 
 type HarnessActionContext = Pick<
@@ -50,7 +50,6 @@ export type StepExecutionActions = {
   launchCurrentStep: (
     this: HarnessActionContext,
     workflow: LoadedWorkflow,
-    recovery?: DelegationRecovery,
   ) => void;
   launchMainStep: (
     this: HarnessActionContext,
@@ -87,7 +86,6 @@ export type StepExecutionActions = {
 function launchCurrentStep(
   this: HarnessActionContext,
   workflow: LoadedWorkflow,
-  recovery?: DelegationRecovery,
 ): void {
   const run = this.run;
   if (
@@ -106,11 +104,6 @@ function launchCurrentStep(
     );
     return;
   }
-  if (!step.subagent) {
-    this.launchMainStep(workflow, run, step);
-    return;
-  }
-
   const plan = createDelegationPlan(
     {
       workflow,
@@ -118,7 +111,6 @@ function launchCurrentStep(
       step,
       sessionEpoch: this.sessionEpoch,
       latestContext: this.latestContext,
-      recovery,
     },
     this.dependencies,
   );
@@ -243,6 +235,7 @@ function launchMainStep(
     outcomes: allowedOutcomes(workflow, run),
     summaryMaxChars: workflow.definition.summaryMaxChars,
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
+    ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
     onTrace: (lines, context) =>
       this.queueMainStepLog(identity, lines, context),
     onSettled: (result, context) =>
