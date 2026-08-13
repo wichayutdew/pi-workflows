@@ -53,7 +53,7 @@ identical. Record both the failed and recovered calls. Never skip a check, drop
 a safety flag such as `--frozen-lockfile`, broaden a path or ref, change a
 dependency version, or add an external effect to make recovery pass.
 
-If a plausible safe recovery needs more fresh context, call `workflow_complete_step`
+If a plausible safe recovery needs more fresh context, call `structured_output`
 with outcome `retry`. Its summary must include the exact failed call and error,
 alternatives attempted, current observed state, the next safe alternative, and
 the exact approved fenced `json` contract unchanged. Use `blocked` when reviewed
@@ -61,7 +61,7 @@ intent, sources, commands, targets, or authority are missing, stale,
 contradictory, or materially invalid, or after safe alternatives are exhausted
 and retry cannot resolve the environmental or access constraint.
 
-Call `workflow_complete_step` alone with outcome `ready` only after all worker
+Call `structured_output` alone with outcome `ready` only after all worker
 criteria pass. Its summary must repeat the approved criteria and repository
 contracts, list changed files and tests, give RED and GREEN evidence, exact
 commands and results, commit SHAs, final status, and remaining risks so a fresh

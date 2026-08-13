@@ -17,7 +17,7 @@ discussion, note, or review collection and independently prove the exact
 marker, body, head, effect kind, optional path/line, and remote identifier or
 URL. Do not accept the publication ledger alone as proof.
 
-Call `workflow_complete_step` alone with:
+Call `structured_output` alone with:
 
 - `verified` only when every approved effect is currently observable exactly
   once or in the explicitly idempotent form described by the contract;

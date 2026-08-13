@@ -13,7 +13,7 @@ contract, head, anchor, or target is materially stale; do not request a live
 decision.
 
 Refresh the same-host review head and anchors using only non-mutating commands.
-If they changed, call `workflow_complete_step` with outcome `blocked` and execute
+If they changed, call `structured_output` with outcome `blocked` and execute
 nothing. Before each approved action, query its observable remote effect: for a
 push, compare the exact remote ref and SHA; for a comment, search the exact
 review, anchor, and body. Also read any latest retry or paused attempt in the
@@ -37,7 +37,7 @@ already observable; never blindly replay it.
 Never force-push, approve, merge, resolve a discussion, close, delete, expose
 credentials, cross hosts, or perform an unlisted mutation.
 
-Call `workflow_complete_step` alone with outcome `drafted` only after every
+Call `structured_output` alone with outcome `drafted` only after every
 approved action either succeeds now or is proven already complete. In the
 summary, record every exact command, the state observed before it, whether it
 was skipped or attempted, the result and remote correlation, and all remaining

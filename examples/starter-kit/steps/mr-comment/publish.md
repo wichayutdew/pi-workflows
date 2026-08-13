@@ -11,7 +11,7 @@ Operate only from the workflow's current Git root, branch, and worktree. Never
 create, switch, reset, clean, delete, or prepare another branch or worktree.
 Refresh the same-host review head, comment anchors, local HEAD/status, and
 remote branch read-only. If any approved identity or precondition is stale,
-call `workflow_complete_step` with outcome `superseded` and execute nothing.
+call `structured_output` with outcome `superseded` and execute nothing.
 
 For each approved remote action, first query its observable effect. Skip it only
 when the exact push SHA or exact reply by the current user is already present.
@@ -30,7 +30,7 @@ After any mutation-capable call is attempted, ambiguity remains `blocked`
 unless the exact effect is observable; never blindly replay it. Include a full
 action ledger on every retry or block.
 
-Call `workflow_complete_step` alone with outcome `published` only after every
+Call `structured_output` alone with outcome `published` only after every
 approved push/reply either succeeds now or is proven already complete. Record
 the exact action, observed pre-state, attempted/skipped status, result, remote
 correlation, final remote head, and reply identifiers in `summary`. Use

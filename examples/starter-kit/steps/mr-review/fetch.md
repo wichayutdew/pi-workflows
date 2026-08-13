@@ -30,7 +30,7 @@ Plannotator. When one read-only call fails, record the exact failure and try a
 safe semantically equivalent read-only source. Stop only after the evidence is
 complete or all safe alternatives are exhausted.
 
-Call `workflow_complete_step` alone with outcome `fetched`. Put a self-contained
+Call `structured_output` alone with outcome `fetched`. Put a self-contained
 Markdown evidence bundle in `summary`, organized as:
 
 1. `# Hosted review evidence`

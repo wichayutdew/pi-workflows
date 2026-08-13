@@ -69,7 +69,7 @@ step authorizes concrete Git subcommands, not a dynamic `-C` prefix. For
 machine-readable GitLab state, prefer `glab api` and do not assume
 version-specific `glab mr view --json` support.
 
-Call `workflow_complete_step` alone with outcome `submit` only when the artifact is
+Call `structured_output` alone with outcome `submit` only when the artifact is
 complete enough to implement and publish without another planning decision.
 Put that complete plan in `artifact`. Put a self-contained handoff in
 `summary`, repeating URL/host/head, checkout identity, all classifications,

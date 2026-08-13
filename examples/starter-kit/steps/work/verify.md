@@ -54,7 +54,7 @@ with exact evidence when reviewed intent, targets, commands, or authority are
 materially invalid, or after safe alternatives are exhausted and retry cannot
 resolve the environmental or access constraint.
 
-Call `workflow_complete_step` alone with outcome `passed` only when every
+Call `structured_output` alone with outcome `passed` only when every
 criterion and required command passes with no actionable finding. The summary
 must repeat all approved criteria and contracts and provide fresh evidence.
 Use outcome `failed` for an actionable implementation or verification finding;

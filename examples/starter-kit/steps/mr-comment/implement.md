@@ -31,7 +31,7 @@ equivalent commit already exists.
 Do not push, post replies, resolve discussions, approve, merge, close, delete,
 or mutate any remote system in this step.
 
-Call `workflow_complete_step` alone with outcome `ready` when local work is ready for
+Call `structured_output` alone with outcome `ready` when local work is ready for
 independent verification. The `summary` must repeat the URL/host/reviewed head,
 current branch and HEAD, every comment classification, scoped changes, tests,
 RED/GREEN evidence, exact commands/results, commit SHA or reply-only state,

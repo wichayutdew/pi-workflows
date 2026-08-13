@@ -69,7 +69,7 @@ structure. Supporting documents must distinguish direct evidence from context.
 Risks must include contradictory, unavailable, stale, security, or scope
 limitations when relevant.
 
-Call `workflow_complete_step` alone with outcome `ready` only after writing the
+Call `structured_output` alone with outcome `ready` only after writing the
 report. Its summary must include the exact report path and a claim ledger: each
 material claim, its supporting source, confidence, and unresolved limitation.
 Use `retry` for a transient evidence or report-write failure after safe recovery

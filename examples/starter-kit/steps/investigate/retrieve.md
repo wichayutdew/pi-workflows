@@ -59,5 +59,5 @@ report in this stage.
 Use `retry` only for a transient read-only retrieval failure after safe
 alternatives were attempted. Use `blocked` for empty or insufficient scope, or
 when required Jira evidence remains unavailable. Do not ask a terminal
-question. Call `workflow_complete_step` alone with outcome `submit`, `retry`, or
+question. Call `structured_output` alone with outcome `submit`, `retry`, or
 `blocked`.

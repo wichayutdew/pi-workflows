@@ -98,7 +98,7 @@ worktree must have the captured source HEAD and clean status. A dirty exact
 run-owned worktree remains valid and unchanged. In all cases, the source
 checkout must remain unchanged.
 
-Call `workflow_complete_step` alone with outcome `ready` only after those checks
+Call `structured_output` alone with outcome `ready` only after those checks
 pass. Include `workspace: {cwd: "<absolute selected worktree path>"}`. The
 summary must be a self-contained workspace manifest containing source Git root,
 source branch/ref and captured HEAD; selected worktree path, dedicated branch,

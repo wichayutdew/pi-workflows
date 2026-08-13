@@ -25,7 +25,7 @@ local change. A following guarded stage owns safely checking out the reviewed
 source branch. A local branch ahead of the remote source head is valid evidence
 and must be reported rather than reset.
 
-Call `workflow_complete_step` alone with outcome `ready` after the evidence is
+Call `structured_output` alone with outcome `ready` after the evidence is
 complete. Put a self-contained compact evidence packet in `summary`: canonical
 URL and host, project/repository and review number, matching local remote name,
 source/target branches and SHAs, local Git root/branch/HEAD/status, head-match

@@ -29,7 +29,7 @@ and public comment replies. When a code fix was committed, require its matching
 non-force push action before the replies. A valid unresolved review comment
 requires its approved public reply action. Never execute one here.
 
-Call `workflow_complete_step` alone:
+Call `structured_output` alone:
 
 - `ready` when all criteria pass and one or more approved remote actions remain;
 - `no-actions` when all criteria pass and no remote action remains;

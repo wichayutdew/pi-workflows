@@ -191,9 +191,9 @@ describe('when testing example', () => {
         }
         for (const prompt of Object.values(loaded.prompts)) {
           expect(prompt).not.toMatch(/\/Users\//);
-          expect(prompt).not.toContain('structured_output');
+          expect(prompt).toContain('structured_output');
           expect(prompt).not.toMatch(/subagent|delegated child/i);
-          expect(prompt).toContain('workflow_complete_step');
+          expect(prompt).not.toContain('workflow_complete_step');
         }
       }
 

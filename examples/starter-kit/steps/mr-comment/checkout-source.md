@@ -29,7 +29,7 @@ path:
 1. If a registered worktree already owns the exact source branch, validate that
    its Git root, branch, remote identity, and history match the fetched review.
    Do not modify it. On `ready`, bind the workflow to that exact worktree by
-   including `workspace.cwd` in `workflow_complete_step`. The workspace path must be
+   including `workspace.cwd` in `structured_output`. The workspace path must be
    an absolute directory under an allowed workspace root.
 2. Otherwise, if the current worktree is clean and its current branch is the
    source branch, leave it selected and bind the workflow to its absolute cwd.
@@ -51,7 +51,7 @@ the remote source head, call `blocked`; do not reconcile history. A local HEAD
 ahead of the fetched review head is valid resumable work and must be reported.
 If Git refuses a required switch, preserve state and call `blocked`.
 
-Call `workflow_complete_step` alone with outcome `ready` only after the source
+Call `structured_output` alone with outcome `ready` only after the source
 branch is selected safely. Include `workspace.cwd` for the selected worktree.
 Its `summary` must preserve the complete fetched evidence and add: exact
 selected repository root, matching remote, source branch, fetched source SHA,

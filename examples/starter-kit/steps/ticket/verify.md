@@ -94,7 +94,7 @@ attempts, current state, next alternative, and unchanged approved contract. Use
 authority, or after safe alternatives are exhausted and retry cannot resolve
 the environmental or access constraint.
 
-Call `workflow_complete_step` alone with outcome `passed` only when all ticket and
+Call `structured_output` alone with outcome `passed` only when all ticket and
 user criteria pass with no actionable finding, the verified SHA is published,
 and the matching GitLab MR is observable. Repeat the full criteria and
 contracts with fresh evidence, remote branch result, and MR URL/identity in the

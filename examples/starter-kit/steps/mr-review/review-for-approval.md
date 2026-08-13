@@ -135,7 +135,7 @@ authorizes a push, approval, merge, resolution, closure, deletion,
 cross-host action, or unlisted mutation. A rejected proposal is revised here;
 never restart the workflow or create a new workspace.
 
-Call `workflow_complete_step` alone with outcome `submit`. Put the complete review
+Call `structured_output` alone with outcome `submit`. Put the complete review
 in `artifact` and repeat it exactly in `summary`. Use outcome `blocked` only
 when missing or stale evidence prevents a safe review artifact after all
 configured read-only alternatives were attempted; include exact recovery

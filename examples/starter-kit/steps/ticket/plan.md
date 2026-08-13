@@ -168,7 +168,7 @@ Resolve all other uncertainty with an evidence-backed default in Review summary
 or Risks. Plannotator feedback may change those defaults; approval resolves
 every decision by accepting the final artifact.
 
-Call `workflow_complete_step` alone with outcome `submit`. Put the full Markdown
+Call `structured_output` alone with outcome `submit`. Put the full Markdown
 plan in `artifact`. Put a self-contained execution handoff in `summary`,
 including authoritative ticket facts, every criterion, the repository
 contract, exact commands, and risks. Include the exact fenced `json` contract

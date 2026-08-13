@@ -54,7 +54,7 @@ effects remain identical. Record failed and recovered calls. Never skip or
 weaken a check, drop a safety flag, broaden a path or ref, change a dependency
 version, or add an external effect.
 
-If a plausible safe recovery needs a fresh context, call `workflow_complete_step`
+If a plausible safe recovery needs a fresh context, call `structured_output`
 with outcome `retry`. Include the exact failed call and error, alternatives
 attempted, current observed state, next safe alternative, and the exact
 approved fenced `json` contract unchanged. Use `blocked` when reviewed intent,
@@ -62,7 +62,7 @@ authority, targets, or commands are missing, stale, contradictory, or
 materially invalid, or after safe alternatives are exhausted and retry cannot
 resolve the environmental or access constraint.
 
-Call `workflow_complete_step` alone with outcome `ready` only after all worker
+Call `structured_output` alone with outcome `ready` only after all worker
 criteria pass. Its summary must repeat authoritative ticket criteria and every
 repository contract, list changed files and tests, RED/GREEN evidence, exact
 commands and results, commit SHAs, final status, and risks. Include the exact
