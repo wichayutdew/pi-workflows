@@ -81,6 +81,10 @@ describe('when testing example', () => {
         ),
       ) as {
         $defs?: {
+          artifactContract?: {
+            required?: string[];
+            properties?: Record<string, unknown>;
+          };
           step?: {
             allOf?: unknown;
           };
@@ -89,6 +93,17 @@ describe('when testing example', () => {
           };
         };
       };
+      expect(workflowSchema.$defs?.artifactContract).toMatchObject({
+        required: [
+          'maxChars',
+          'requiredSubstrings',
+          'forbiddenSubstrings',
+          'equalOccurrenceGroups',
+        ],
+        properties: {
+          onValidationFailure: { const: 'retry' },
+        },
+      });
       expect(workflowSchema.$defs?.step?.allOf).toBeUndefined();
       expect(workflowSchema.$defs?.prompt?.oneOf?.[1]).toMatchObject({
         properties: {

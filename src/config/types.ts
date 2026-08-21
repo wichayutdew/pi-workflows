@@ -49,10 +49,19 @@ export type StepAgent = {
 export type PromptSpec =
   { readonly inline: string } | { readonly file: string };
 
+export type ArtifactContract = {
+  readonly maxChars: number;
+  readonly requiredSubstrings: ReadonlyArray<string>;
+  readonly forbiddenSubstrings: ReadonlyArray<string>;
+  readonly equalOccurrenceGroups: ReadonlyArray<ReadonlyArray<string>>;
+  readonly onValidationFailure?: 'retry';
+};
+
 type GateDefinition = {
   readonly submitOutcome: string;
   readonly approvedOutcome: string;
   readonly rejectedOutcome: string;
+  readonly artifactContract?: ArtifactContract;
 };
 
 export type PromptGate = GateDefinition & {

@@ -514,6 +514,61 @@
         }
       }
     },
+    "artifactContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxChars",
+        "requiredSubstrings",
+        "forbiddenSubstrings",
+        "equalOccurrenceGroups"
+      ],
+      "properties": {
+        "maxChars": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000
+        },
+        "requiredSubstrings": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "forbiddenSubstrings": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "equalOccurrenceGroups": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        },
+        "onValidationFailure": {
+          "const": "retry"
+        }
+      }
+    },
     "gate": {
       "oneOf": [
         {
@@ -533,6 +588,9 @@
             },
             "rejectedOutcome": {
               "$ref": "#/$defs/identifier"
+            },
+            "artifactContract": {
+              "$ref": "#/$defs/artifactContract"
             }
           }
         },
@@ -563,6 +621,9 @@
               "minimum": 1000,
               "maximum": 30000,
               "default": 30000
+            },
+            "artifactContract": {
+              "$ref": "#/$defs/artifactContract"
             }
           }
         }
