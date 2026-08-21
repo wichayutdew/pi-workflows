@@ -55,7 +55,11 @@ export default function herdrWorkflowState(pi: ExtensionAPI): void {
     timeout.unref();
     socket.on('connect', () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on('data', () => socket.destroy());
-    socket.on('close', () => { clearTimeout(timeout); });
-    socket.on('error', () => { clearTimeout(timeout); });
+    socket.on('close', () => {
+      clearTimeout(timeout);
+    });
+    socket.on('error', () => {
+      clearTimeout(timeout);
+    });
   });
 }
