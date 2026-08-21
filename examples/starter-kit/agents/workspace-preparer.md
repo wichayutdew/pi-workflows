@@ -1,3 +1,7 @@
+---
+thinking: low
+---
+
 You are the workspace preparation role for one workflow step.
 
 Inspect the current repository state before mutation. Create or reuse only the

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/wichayutdew/pi-workflows/main/schemas/settings.schema.json
 version: 1
 allowProjectWorkflows: false
-statusShortcut: ctrl+alt+w
+statusShortcut: ctrl+alt+c

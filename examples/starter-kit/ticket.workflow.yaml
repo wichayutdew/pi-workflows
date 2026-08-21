@@ -1,7 +1,7 @@
 version: 1
 id: ticket
 command: ticket
-description: Prepare a dedicated workspace, plan, implement, and verify a Jira ticket
+description: 'Prepare a dedicated workspace, plan, implement, and verify an issue-tracker ticket. Example: /ticket PROJ-123 Fix a missing client-id header'
 start: prepare-workspace
 maxStepVisits: 20
 summaryMaxChars: 30000
@@ -10,18 +10,19 @@ steps:
     title: Prepare dedicated branch and worktree
     prompt:
       file: steps/shared/prepare-workspace.md
-    agent: worker
+    agent: workspace-preparer
     workspace:
-      bindOn: [ready]
-      allowedRoots: ['~/repositories/worktrees']
+      bindOn:
+        - ready
+      allowedRoots:
+        - ~/repositories/worktrees
     permissions:
       tools: [read, ls, bash]
-      skills: [caveman, coding-standards, using-git-worktrees]
+      mcp: []
+      extensions: [/]
+      skills: [using-git-worktrees, caveman]
       bash:
         mode: unrestricted
-    requires:
-      tools: [read, ls, bash]
-      skills: [caveman, coding-standards, using-git-worktrees]
     transitions:
       ready: plan
       retry: prepare-workspace
@@ -32,65 +33,38 @@ steps:
       file: steps/ticket/plan.md
     agent: planner
     permissions:
-      tools: [read, ls, bash]
-      mcp: &ticket-mcp
-        - atlassian/atlassian_getAccessibleAtlassianResources
-        - atlassian/atlassian_getJiraIssue
-        - atlassian/atlassian_getJiraIssueRemoteIssueLinks
-        - atlassian/atlassian_searchJiraIssuesUsingJql
-        - context7/resolve-library-id
-        - context7/query-docs
-        - sourcegraph/code_finder
-        - sourcegraph/commit_search
-        - sourcegraph/diff_search
-        - sourcegraph/keyword_search
-        - sourcegraph/list_files
-        - sourcegraph/list_repos
-        - sourcegraph/nls_search
-        - sourcegraph/read_file
-        - gh_grep/searchGitHub
-      extensions: [pi-web-tools]
+      tools: [read, ls, bash, mcp]
+      mcp: [atlassian, context7, sourcegraph, glean, gitlab]
+      extensions: [/]
       skills:
-        &ticket-plan-skills [
-          caveman,
+        [
           jira-ticket,
           coding-standards,
-          brainstorming,
+          writing-plans,
+          search-code-sourcegraph,
+          caveman,
         ]
       bash:
-        mode: allow-list
-        allow: &ticket-inspection-bash
-          - executable: grep
-          - executable: head
-          - executable: ls
-          - executable: pwd
-          - executable: rg
-          - executable: stat
-          - executable: tail
-          - executable: wc
-          - executable: git
-            argsPrefixes:
-              [
-                [status],
-                [diff],
-                [grep],
-                [log],
-                [ls-files],
-                [rev-parse],
-                [show],
-                [merge-base],
-                [rev-list],
-                [worktree, list],
-              ]
-    requires:
-      tools: [read, ls, bash, mcp]
-      skills: *ticket-plan-skills
+        mode: unrestricted
     gate:
       provider: plannotator
       submitOutcome: submit
       approvedOutcome: approved
       rejectedOutcome: changes-requested
       timeoutMs: 30000
+      artifactContract:
+        maxChars: 10000
+        requiredSubstrings:
+          - '## Review summary'
+          - '## Review focus'
+          - '## Proposed approach'
+          - '## Validation'
+          - '## Risks'
+          - '## Execution appendix (machine-readable)'
+          - '## Publication contract'
+        forbiddenSubstrings:
+          - 'The complete gate artifact is the exact Markdown saved at'
+        onValidationFailure: retry
     transitions:
       approved: implement
       changes-requested: plan
@@ -103,23 +77,13 @@ steps:
       file: steps/ticket/implement.md
     agent: worker
     permissions:
-      tools: [read, ls, bash, edit, write]
-      mcp: *ticket-mcp
+      tools: [read, ls, bash, edit, write, mcp]
+      mcp: [context7]
+      extensions: [/]
       skills:
-        &ticket-implement-skills [
-          caveman,
-          jira-ticket,
-          coding-standards,
-          systematic-debugging,
-          test-driven-development,
-          verification-before-completion,
-          receiving-code-review,
-        ]
+        [coding-standards, test-driven-development, lint-commands, caveman]
       bash:
         mode: unrestricted
-    requires:
-      tools: [read, ls, bash, edit, write, mcp]
-      skills: *ticket-implement-skills
     transitions:
       ready: verify
       retry: implement
@@ -130,20 +94,13 @@ steps:
       file: steps/ticket/verify.md
     agent: reviewer
     permissions:
-      tools: [read, ls, bash]
-      mcp: *ticket-mcp
+      tools: [read, ls, bash, mcp]
+      mcp: [gitlab]
+      extensions: [/]
       skills:
-        &ticket-verify-skills [
-          caveman,
-          jira-ticket,
-          coding-standards,
-          verification-before-completion,
-        ]
+        [verification-before-completion, lint-commands, commit-format, caveman]
       bash:
         mode: unrestricted
-    requires:
-      tools: [read, ls, bash, mcp]
-      skills: *ticket-verify-skills
     transitions:
       passed: $done
       failed: implement

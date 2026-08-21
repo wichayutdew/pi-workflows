@@ -28,7 +28,7 @@ The starter workflows use built-in role prompts and Plannotator approval gates:
 pi install npm:@plannotator/pi-extension
 ```
 
-The kit selects the `scout`, `planner`, `worker`, and `reviewer` role prompts.
+The kit selects the `scout`, `planner`, `worker`, `reviewer`, and `workspace-preparer` role prompts.
 Set each step's `agent` field to a different role when needed. To customize a
 role, create `~/.pi/agent/workflows/agents/<role>.md` (or
 `$PI_WORKFLOWS_DIR/agents/<role>.md`); user profiles override the bundled
@@ -51,7 +51,7 @@ Role instructions for this agent.
 `max`. Omit `model` to use the current Pi default. Pi validates the model name
 against its configured catalog when the worker starts.
 
-## 3. Copy the four starter workflows
+## 3. Copy the starter workflows
 
 Copy the workflow definitions and all referenced prompt files into your user
 workflow directory:
@@ -68,12 +68,14 @@ blindly overwrite your existing configuration.
 
 The copy provides these commands:
 
-| Command       | Workflow                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------------- |
-| `/work`       | Prepare a dedicated worktree, approve a plan, implement a local change, and verify it.    |
-| `/ticket`     | Prepare a dedicated worktree, read a ticket, approve a plan, implement it, and verify it. |
-| `/mr-review`  | Fetch, approve, publish, and verify a hosted merge-request or pull-request review.        |
-| `/mr-comment` | Fetch review comments, approve fixes, implement, verify, push, and reply.                 |
+| Command | Workflow |
+| --- | --- |
+| `/work` | Prepare a dedicated worktree, approve a plan, implement a local change, and verify it. |
+| `/ticket` | Prepare a dedicated worktree, read an issue-tracker ticket, approve a plan, implement it, and verify it. |
+| `/jira` | Draft and approve a generic Epic-and-Stories creation plan before creating issue-tracker items. |
+| `/investigate` | Scope, investigate, and validate a cross-system issue using locally configured evidence sources. |
+| `/mr-review` | Fetch, approve, publish, and verify a hosted merge-request or pull-request review. |
+| `/mr-comment` | Fetch review comments, approve fixes, implement, verify, push, and reply. |
 
 ## 4. Tailor the starter kit
 
@@ -83,11 +85,8 @@ Before using a workflow, make its authority explicit for your environment:
    `ticket.workflow.yaml` to safe directories where a worktree may be created
    or reused. Roots may be relative to the run-start directory, absolute, or
    home-relative (for example, `~/repositories/worktrees`).
-2. Configure or replace the `atlassian`, `gitlab`, and `github` MCP selectors.
-   The MR workflows can use their configured GitHub/GitLab CLIs or cURL
-   fallbacks; the ticket workflow requires Atlassian MCP by default.
-3. Review every prompt and unrestricted Bash permission before allowing it to
-   run against a repository.
+2. Configure or replace issue-tracker, forge, code-search, and observability integrations for your environment. No endpoint, organization, or credential is bundled.
+3. Review every prompt and unrestricted Bash permission before allowing it to run against a repository.
 
 ## 5. Reload, validate, and run
 
@@ -98,6 +97,8 @@ Reload Pi and validate every copied workflow before the first execution:
 /workflow-reload
 /workflow-doctor work
 /workflow-doctor ticket
+/workflow-doctor jira
+/workflow-doctor investigate
 /workflow-doctor mr-review
 /workflow-doctor mr-comment
 ```
@@ -107,6 +108,8 @@ Start from the repository checkout that should supply the source workspace:
 ```text
 /work update the navigation
 /ticket PROJ-123 retry failed requests
+/jira Create a release Epic and two implementation stories
+/investigate Investigate elevated request failures
 /mr-review https://gitlab.example.com/group/project/-/merge_requests/42
 /mr-comment https://github.com/example/project/pull/42
 ```

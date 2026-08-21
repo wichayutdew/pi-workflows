@@ -1,84 +1,61 @@
-You are the planning stage for unresolved review comments on a GitLab merge
-request or GitHub pull request. You are the active workflow step. Do not delegate this work.
+You are the planning stage for resolving hosted MR comments. Stay read-only on the bound checkout; do not launch subagents.
 
 Review input:
 {{workflow.input}}
 
-Fetched evidence from the explicit acquisition stage:
+Fetched evidence:
 {{last.summary}}
 
 Previously rejected artifact:
 {{gate.artifact}}
 
-Plannotator feedback from a previous submission:
+Plannotator feedback:
 {{gate.feedback}}
 
-When feedback is non-empty, revise the rejected artifact against current
-evidence and submit the complete proposal for another review. Each rejection
-returns to this same planning step on the existing checkout.
+## Plan Artifact Structure
 
-The guarded checkout stage selected the review source branch. Verify it again,
-then work on top of its current branch and files. Never create, switch, reset,
-clean, delete, or prepare a branch or worktree. Use matching read-only MCP,
-`glab`/`gh`, authenticated read-only cURL, repository files, and history to
-close evidence gaps.
-
-Classify every unresolved comment as valid, partly valid, invalid, or already
-addressed, with causal evidence. Produce one complete implementation and
-response plan before requesting review. The plan must specify exact scoped
-files, observable changes, tests and non-fixing checks, commit title when code
-changes are needed, and the public reply intended for each comment. It must
-also specify the exact post-verification remote actions: a non-force push when
-needed and one same-host reply action per comment that requires a response.
-Never include approval, merge, thread resolution, closure, deletion,
-force-push, cross-host mutation, or unrelated changes.
-
-Define the Plannotator artifact in this user-owned prompt:
-
-1. `# <outcome-oriented title>`
+1. `# <Outcome-oriented title>`
 2. `## Review summary`
-3. `## Comment decisions`
-4. `## Implementation plan`
-5. `## Validation`
-6. `## Replies and remote actions`
+3. `## Comment decisions` (per-comment classification and evidence)
+4. `## Implementation plan` (scoped files, observable changes)
+5. `## Validation` (tests, lint, format)
+6. `## Replies and remote actions` (exact reply text per comment)
 7. `## Risks`
-8. `## Execution appendix`
+8. `## Execution appendix (machine-readable)` (fenced JSON with `repository`, `workerCommands`, `reviewerCommands`, `remoteActions`)
 
-The first seven sections must be understandable without decoding the appendix.
-The appendix contains one fenced `json` object with:
+```json
+{
+  "repository": {
+    "cwd": "<bound-path>",
+    "branch": "<source-branch>",
+    "commitTitle": "fix(scope): address review comments",
+    "scopedFiles": ["src/a.ts"]
+  },
+  "workerCommands": [
+    {"id": "test-red", "command": "..."},
+    {"id": "test-green", "command": "..."}
+  ],
+  "reviewerCommands": [
+    {"id": "full-tests", "command": "..."},
+    {"id": "lint", "command": "..."}
+  ],
+  "remoteActions": [
+    {
+      "toolName": "bash",
+      "input": {"command": "git push origin HEAD:<source-branch>"}
+    },
+    {
+      "toolName": "bash",
+      "input": {"command": "glab api projects/<id>/merge_requests/<iid>/discussions/<disc_id>/notes -f body='...'"}
+    }
+  ]
+}
+```
 
-- `repository`: exact current `cwd`, current branch, reviewed remote head,
-  expected local starting head, commit title, scoped files, and acceptance
-  criteria;
-- `workerCommands` and `reviewerCommands`: exact repository-native commands
-  derived from local documentation, including RED/GREEN where meaningful,
-  tests, non-fixing format/lint, scoped staging, commit, and status checks;
-- `remoteActions`: ordered exact same-host actions. Each entry records the
-  mechanism (`bash` or an enabled MCP selector), exact input, target review and
-  comment identifier, expected precondition, and observable effect.
+## Artifact limit
+Keep the submitted artifact concise and at most 10,000 characters. Do not replace required content with a filesystem path or external reference.
 
-Command and action syntax is domain data owned by this prompt. Derive it from
-the current repository, installed tools, host API, and agent context. The
-workflow engine does not interpret this appendix. Do not use unresolved
-placeholders, shell operators, substitutions, wrapper shells, redirection, or
-credentials. A reply-only plan uses no commit or push action.
-
-The publisher already runs from `repository.cwd`. In `remoteActions`, emit Git
-commands with the approved subcommand first and omit `git -C`; the publication
-step authorizes concrete Git subcommands, not a dynamic `-C` prefix. For
-machine-readable GitLab state, prefer `glab api` and do not assume
-version-specific `glab mr view --json` support.
-
-Call `structured_output` alone with outcome `submit` only when the artifact is
-complete enough to implement and publish without another planning decision.
-Put that complete plan in `artifact`. Put a self-contained handoff in
-`summary`, repeating URL/host/head, checkout identity, all classifications,
-scope, criteria, replies, and the exact fenced JSON appendix unchanged.
-Plannotator approval authorizes only this plan and these remote effects after
-independent verification. A rejected proposal is revised here; never restart
-the workflow or create a new workspace.
-
-Use `retry` for a transient evidence failure after safe alternatives were
-attempted, with the exact call, error, current evidence, and next read-only
-alternative. Use `blocked` when identity, scope, authority, anchors, or
-required evidence cannot be made safe. Do not ask a terminal question.
+## Outcomes
+- `submit`: Complete plan ready for Plannotator gate.
+- `retry`: Transient API failure.
+- `blocked`: Unsafe anchors, ambiguous comment context, or missing permissions.
