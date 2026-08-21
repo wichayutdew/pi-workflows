@@ -23,6 +23,7 @@
     "src",
     "examples",
     "schemas",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
@@ -34,6 +35,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir=dist --target=node --format=esm --packages=external",
+    "patch:herdr": "node ./scripts/patch-herdr-agent-state.mjs",
     "format": "bunx --bun prettier . --write",
     "format:check": "bunx --bun prettier . --check",
     "lint": "bun --bun eslint .",
