@@ -115,7 +115,10 @@ describe('when testing example', () => {
       const packageJson = JSON.parse(
         await readFile(join(repositoryRoot, 'package.json'), 'utf8'),
       ) as { pi?: { extensions?: string[] } };
-      expect(packageJson.pi?.extensions).toEqual(['./src/index.ts']);
+      expect(packageJson.pi?.extensions).toEqual([
+        './src/index.ts',
+        './src/herdr-workflow-state.ts',
+      ]);
       expect(
         await readFile(
           join(
