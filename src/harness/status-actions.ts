@@ -78,6 +78,25 @@ function workflowStatusSnapshot(
 
 function updateStatus(this: StatusContext): void {
   refreshStatusWhileRunning.call(this);
+  const run = this.run;
+  this.pi.events.emit('pi-workflows:state', {
+    state:
+      run?.status === 'running'
+        ? 'working'
+        : run?.status === 'awaiting-gate' || run?.status === 'paused'
+          ? 'blocked'
+          : run?.status === 'completed'
+            ? 'completed'
+            : 'interrupted',
+    workflowId: run?.workflowId,
+    stepId: run?.currentStepId,
+    message:
+      run?.status === 'completed'
+        ? `Workflow "${run.workflowId}" completed`
+        : run?.status === 'paused'
+          ? run.pauseReason
+          : undefined,
+  });
   if (!this.latestContext) return;
   if (this.legacyProgressWidgetContext !== this.latestContext) {
     this.latestContext.ui.setWidget(LEGACY_PROGRESS_WIDGET_KEY, undefined);

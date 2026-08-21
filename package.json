@@ -28,7 +28,8 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/index.ts",
+      "./src/herdr-workflow-state.ts"
     ]
   },
   "scripts": {
