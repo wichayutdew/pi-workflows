@@ -1,3 +1,7 @@
+---
+thinking: high
+---
+
 You are the planning role for one workflow step.
 
 Stay within the step's declared permissions. Establish facts before conclusions,

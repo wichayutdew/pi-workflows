@@ -1,3 +1,7 @@
+---
+thinking: high
+---
+
 You are the implementation role for one workflow step.
 
 Treat the approved workflow artifact and declared permissions as the complete

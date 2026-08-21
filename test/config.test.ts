@@ -49,6 +49,75 @@ describe('when testing config', () => {
       expect(result.value?.steps.inspect?.agent).toEqual({ name: 'scout' });
     });
 
+    test('parses gate artifact contracts and rejects malformed contracts', () => {
+      const raw = baseWorkflow();
+      const inspect = (raw.steps as Record<string, Record<string, unknown>>)
+        .inspect!;
+      inspect.gate = {
+        provider: 'prompt',
+        submitOutcome: 'submit',
+        approvedOutcome: 'ready',
+        rejectedOutcome: 'blocked',
+        artifactContract: {
+          maxChars: 100,
+          requiredSubstrings: ['# Plan', '## Evidence'],
+          forbiddenSubstrings: ['saved at /'],
+          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+          onValidationFailure: 'retry',
+        },
+      };
+      inspect.transitions = {
+        ready: 'implement',
+        blocked: '$pause',
+        retry: 'inspect',
+      };
+
+      expect(validateWorkflow(raw).errors).toEqual([]);
+      expect(validateWorkflow(raw).value?.steps.inspect?.gate).toMatchObject({
+        artifactContract: {
+          maxChars: 100,
+          requiredSubstrings: ['# Plan', '## Evidence'],
+          forbiddenSubstrings: ['saved at /'],
+          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+        },
+      });
+
+      const malformed = structuredClone(raw);
+      const gate = (
+        (malformed.steps as Record<string, Record<string, unknown>>).inspect!
+          .gate as Record<string, unknown>
+      ).artifactContract as Record<string, unknown>;
+      Object.assign(gate, {
+        maxChars: 0,
+        requiredSubstrings: ['', '# Plan'],
+        forbiddenSubstrings: ['saved at /', 'saved at /'],
+        equalOccurrenceGroups: [
+          ['**Question:**', '**Question:**'],
+          ['only one'],
+        ],
+        unexpected: true,
+      });
+
+      const messages = validateWorkflow(malformed).errors.join('\n');
+      expect(messages).toMatch(/unknown property "unexpected"/);
+      expect(messages).toMatch(/expected an integer from 1 to 200000/);
+      expect(messages).toMatch(/must not be empty/);
+      expect(messages).toMatch(/duplicate value "saved at \//);
+      expect(messages).toMatch(/duplicate value "\*\*Question:\*\*"/);
+      expect(messages).toMatch(/at least two values are required/);
+
+      const withoutMax = structuredClone(raw);
+      delete (
+        (
+          (withoutMax.steps as Record<string, Record<string, unknown>>).inspect!
+            .gate as Record<string, unknown>
+        ).artifactContract as Record<string, unknown>
+      ).maxChars;
+      expect(validateWorkflow(withoutMax).errors.join('\n')).toMatch(
+        /maxChars: expected an integer from 1 to 200000/,
+      );
+    });
+
     test('validates one-time workspace binding and permits delegated downstream cycles', () => {
       const withDefaultRoot = workspaceWorkflow();
       const defaultSteps = withDefaultRoot.steps as Record<

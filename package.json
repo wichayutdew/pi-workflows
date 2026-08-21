@@ -23,16 +23,19 @@
     "src",
     "examples",
     "schemas",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/index.ts",
+      "./src/herdr-workflow-state.ts"
     ]
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir=dist --target=node --format=esm --packages=external",
+    "patch:herdr": "node ./scripts/patch-herdr-agent-state.mjs",
     "format": "bunx --bun prettier . --write",
     "format:check": "bunx --bun prettier . --check",
     "lint": "bun --bun eslint .",
@@ -56,7 +59,7 @@
     "@earendil-works/pi-coding-agent": "^0.81.1",
     "@earendil-works/pi-tui": "^0.81.1",
     "@eslint/js": "^10.0.1",
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
@@ -65,7 +68,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.64.0"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.0",
   "engines": {
     "node": ">=22.19.0"
   }

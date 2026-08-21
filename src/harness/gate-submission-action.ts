@@ -1,7 +1,9 @@
 import type { LoadedWorkflow } from '../config/types.ts';
 import type { WorkflowRun } from '../engine/state.ts';
+import { validateArtifactContract } from './artifact-contract.ts';
 import {
   attachGateReviewId,
+  advanceRun,
   beginGate,
   failGate,
   failRun,
@@ -19,6 +21,7 @@ type HarnessActionContext = Pick<
   | 'pi'
   | 'restoreBaselineTools'
   | 'run'
+  | 'settleAfterTransition'
   | 'sessionEpoch'
   | 'updateStatus'
 >;
@@ -63,6 +66,31 @@ async function submitGate(
     this.dependencies.createRequestId();
   const step = workflow.definition.steps[originalRun.currentStepId];
   if (!step?.gate) throw new Error('Current step has no gate');
+  const contractError = validateArtifactContract(
+    artifact,
+    step.gate.artifactContract,
+  );
+  if (contractError) {
+    if (step.gate.artifactContract?.onValidationFailure !== 'retry') {
+      throw new Error(contractError);
+    }
+    const retrySummary = `Artifact contract failed: ${contractError}`;
+    this.run = advanceRun(
+      workflow,
+      originalRun,
+      'retry',
+      retrySummary,
+      this.dependencies.now(),
+    );
+    this.persist();
+    this.updateStatus();
+    this.settleAfterTransition(workflow, {
+      stepId: originalRun.currentStepId,
+      outcome: 'retry',
+      summary: retrySummary,
+    });
+    return;
+  }
 
   this.run = beginGate(
     workflow,

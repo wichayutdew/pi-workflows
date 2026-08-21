@@ -2,6 +2,7 @@ import { isAbsolute, win32 } from 'node:path';
 import {
   MAX_WORKSPACE_ALLOWED_ROOTS,
   MAX_WORKSPACE_PATH_CHARS,
+  type ArtifactContract,
   type PromptSpec,
   type StepWorkspaceBinding,
   type WorkflowGate,
@@ -68,6 +69,106 @@ function parseTransitions(
   return transitions;
 }
 
+function parseArtifactContract(
+  value: unknown,
+  path: string,
+  errors: ValidationErrors,
+): ArtifactContract | undefined {
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value)) {
+    errors.push(`${path}: expected an object`);
+    return undefined;
+  }
+  rejectUnknownKeys(
+    value,
+    [
+      'maxChars',
+      'requiredSubstrings',
+      'forbiddenSubstrings',
+      'equalOccurrenceGroups',
+      'onValidationFailure',
+    ],
+    path,
+    errors,
+  );
+  if (value.maxChars === undefined) {
+    errors.push(`${path}.maxChars: expected an integer from 1 to 200000`);
+  }
+  const maxChars = readInteger(
+    value.maxChars,
+    200_000,
+    `${path}.maxChars`,
+    errors,
+    { min: 1, max: 200_000 },
+  );
+  const parseSubstrings = (field: string): Array<string> => {
+    const values = readStringList(
+      value[field],
+      `${path}.${field}`,
+      errors,
+      /.+/,
+    );
+    if (values.length > 32) {
+      errors.push(`${path}.${field}: at most 32 values are allowed`);
+    }
+    values.forEach((substring, index) => {
+      if (substring.length > 1_024) {
+        errors.push(`${path}.${field}[${index}]: exceeds 1024 characters`);
+      }
+    });
+    return values;
+  };
+  const equalOccurrenceGroups = (() => {
+    if (value.equalOccurrenceGroups === undefined) return [];
+    if (!Array.isArray(value.equalOccurrenceGroups)) {
+      errors.push(`${path}.equalOccurrenceGroups: expected an array`);
+      return [];
+    }
+    if (value.equalOccurrenceGroups.length > 32) {
+      errors.push(
+        `${path}.equalOccurrenceGroups: at most 32 groups are allowed`,
+      );
+    }
+    return value.equalOccurrenceGroups.reduce<Array<Array<string>>>(
+      (groups, group, index) => {
+        const groupPath = `${path}.equalOccurrenceGroups[${index}]`;
+        const values = readStringList(group, groupPath, errors, /.+/);
+        if (values.length < 2) {
+          errors.push(`${groupPath}: at least two values are required`);
+        }
+        if (values.length > 32) {
+          errors.push(`${groupPath}: at most 32 values are allowed`);
+        }
+        values.forEach((substring, valueIndex) => {
+          if (substring.length > 1_024) {
+            errors.push(`${groupPath}[${valueIndex}]: exceeds 1024 characters`);
+          }
+        });
+        return [...groups, values];
+      },
+      [],
+    );
+  })();
+  const onValidationFailure =
+    value.onValidationFailure === undefined
+      ? undefined
+      : readString(
+          value.onValidationFailure,
+          `${path}.onValidationFailure`,
+          errors,
+        );
+  if (onValidationFailure !== undefined && onValidationFailure !== 'retry') {
+    errors.push(`${path}.onValidationFailure: expected retry`);
+  }
+  return {
+    maxChars,
+    requiredSubstrings: parseSubstrings('requiredSubstrings'),
+    forbiddenSubstrings: parseSubstrings('forbiddenSubstrings'),
+    equalOccurrenceGroups,
+    ...(onValidationFailure === 'retry' ? { onValidationFailure } : {}),
+  };
+}
+
 function parseGate(
   value: unknown,
   path: string,
@@ -86,6 +187,7 @@ function parseGate(
       'approvedOutcome',
       'rejectedOutcome',
       'timeoutMs',
+      'artifactContract',
     ],
     path,
     errors,
@@ -120,6 +222,11 @@ function parseGate(
     errors,
     { pattern: OUTCOME_PATTERN },
   );
+  const artifactContract = parseArtifactContract(
+    value.artifactContract,
+    `${path}.artifactContract`,
+    errors,
+  );
   if (provider === 'prompt' && value.timeoutMs !== undefined) {
     errors.push(`${path}.timeoutMs: only valid with provider "plannotator"`);
   }
@@ -136,12 +243,14 @@ function parseGate(
         submitOutcome,
         approvedOutcome,
         rejectedOutcome,
+        ...(artifactContract ? { artifactContract } : {}),
       }
     : {
         provider,
         submitOutcome,
         approvedOutcome,
         rejectedOutcome,
+        ...(artifactContract ? { artifactContract } : {}),
         timeoutMs: readInteger(
           value.timeoutMs,
           30_000,
@@ -310,6 +419,14 @@ export function parseWorkflowStep(
     if (Object.hasOwn(transitions, gate.submitOutcome)) {
       errors.push(
         `${path}.transitions: submitOutcome is handled by the gate and must not be a transition`,
+      );
+    }
+    if (
+      gate.artifactContract?.onValidationFailure === 'retry' &&
+      !Object.hasOwn(transitions, 'retry')
+    ) {
+      errors.push(
+        `${path}.transitions: artifact-contract retry requires a "retry" transition`,
       );
     }
   }

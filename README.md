@@ -36,6 +36,36 @@ dictating your language, framework, or delivery process.
   `reviewer`, or `scout`; customize profiles under your user workflow
   directory's `agents/` folder.
 
+## Herdr workflow status
+
+When Pi runs delegated workflow steps, the parent agent may be idle while child work continues. Pi Workflows includes a Herdr companion extension that reports workflow lifecycle state so the pane remains **working** until the workflow completes, pauses, or is interrupted.
+
+The companion is inactive unless Herdr provides `HERDR_ENV=1`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID`. It uses Herdr's existing managed Pi reporter, so it does not create a competing pane agent.
+
+### Install from npm
+
+```bash
+pi install npm:@wichayutdew/pi-workflows
+```
+
+Start a new Pi session in Herdr, then run a workflow normally. Herdr should show the pane as working while the workflow is active and display the terminal workflow message after completion or interruption.
+
+### Reapply after a Herdr update
+
+Herdr manages `~/.pi/agent/extensions/herdr-agent-state.ts`; an integration update can replace the workflow lifecycle patch. Locate the installed package with `pi list`, change into that package directory, and run:
+
+```bash
+npm run patch:herdr
+```
+
+The script patches the managed integration at its default location. It is idempotent, so it is safe to run after every Herdr update. To patch a non-default integration path, set `HERDR_PI_EXTENSION_PATH` before running the script:
+
+```bash
+HERDR_PI_EXTENSION_PATH=/path/to/herdr-agent-state.ts npm run patch:herdr
+```
+
+Restart Pi or run `/reload` after patching. If Herdr's managed extension changes shape and the script reports an unsupported layout, do not edit it manually; update Pi Workflows or report the integration change.
+
 ## Explore
 
 - [Getting started guide](./GETTING_STARTED.md) — install Pi Workflows and

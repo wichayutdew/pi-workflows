@@ -20,7 +20,10 @@ type Notice = {
   level: string;
 };
 
-function gatedWorkflow(provider: 'prompt' | 'plannotator'): LoadedWorkflow {
+function gatedWorkflow(
+  provider: 'prompt' | 'plannotator',
+  artifactContract?: Record<string, unknown>,
+): LoadedWorkflow {
   const raw = baseWorkflow();
   const steps = raw.steps as Record<string, Record<string, unknown>>;
   const inspect = steps.inspect!;
@@ -36,6 +39,7 @@ function gatedWorkflow(provider: 'prompt' | 'plannotator'): LoadedWorkflow {
     approvedOutcome: 'ready',
     rejectedOutcome: 'blocked',
     ...(provider === 'plannotator' ? { timeoutMs: 1_000 } : {}),
+    ...(artifactContract ? { artifactContract } : {}),
   };
   return loadedWorkflow(raw);
 }
@@ -81,6 +85,7 @@ function createGateFixture(run: WorkflowRun, workflow: LoadedWorkflow) {
       failed: boolean;
     }>,
     persisted: 0,
+    plannotatorRequests: 0,
     restoredTools: 0,
     settled: 0,
     statusUpdates: 0,
@@ -100,11 +105,10 @@ function createGateFixture(run: WorkflowRun, workflow: LoadedWorkflow) {
         now += 1;
         return now;
       },
-      requestPlannotatorReview:
-        async (): Promise<PlannotatorStartResponse> => ({
-          status: 'unavailable',
-          error: 'Plannotator is offline',
-        }),
+      requestPlannotatorReview: async (): Promise<PlannotatorStartResponse> => {
+        calls.plannotatorRequests += 1;
+        return { status: 'unavailable', error: 'Plannotator is offline' };
+      },
       requestPromptGateReview: async () => ({
         status: 'dismissed' as const,
       }),
@@ -156,6 +160,107 @@ function activeReview(): ActivePromptReview {
 }
 
 describe('when testing gate actions', () => {
+  test('rejects artifacts that violate a gate contract before opening review', async () => {
+    const artifactContract = {
+      maxChars: 1_000,
+      requiredSubstrings: ['# Plan', '## Evidence'],
+      forbiddenSubstrings: ['saved at /'],
+      equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+    };
+    const workflow = gatedWorkflow('plannotator', artifactContract);
+    const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
+    const { calls, fixture } = createGateFixture(originalRun, workflow);
+
+    await expect(
+      createGateSubmissionAction().submitGate.call(
+        fixture as unknown as HarnessActionContext,
+        workflow,
+        originalRun,
+        'submit',
+        'Plan ready',
+        'The complete gate artifact is the exact Markdown saved at /tmp/plan.md',
+      ),
+    ).rejects.toThrow('missing required text');
+
+    expect(fixture.run).toBe(originalRun);
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(calls.persisted).toBe(0);
+    expect(calls.restoredTools).toBe(0);
+  });
+
+  test('rejects overlong or incomplete repeated artifact sections before opening review', async () => {
+    const workflow = gatedWorkflow('plannotator', {
+      maxChars: 20,
+      requiredSubstrings: ['# Plan'],
+      forbiddenSubstrings: [],
+      equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+    });
+    const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
+    const { calls, fixture } = createGateFixture(originalRun, workflow);
+
+    await expect(
+      createGateSubmissionAction().submitGate.call(
+        fixture as unknown as HarnessActionContext,
+        workflow,
+        originalRun,
+        'submit',
+        'Plan ready',
+        '# Plan\n**Question:**\n**Answer:**\n'.repeat(2),
+      ),
+    ).rejects.toThrow('exceeds 20 characters');
+
+    expect(calls.plannotatorRequests).toBe(0);
+  });
+
+  test('retries a configured artifact-contract failure without opening review', async () => {
+    const raw = baseWorkflow();
+    const steps = raw.steps as Record<string, Record<string, unknown>>;
+    steps.inspect!.gate = {
+      provider: 'plannotator',
+      submitOutcome: 'submit',
+      approvedOutcome: 'ready',
+      rejectedOutcome: 'blocked',
+      timeoutMs: 1_000,
+      artifactContract: {
+        maxChars: 1_000,
+        requiredSubstrings: ['# Plan'],
+        forbiddenSubstrings: [],
+        equalOccurrenceGroups: [],
+        onValidationFailure: 'retry',
+      },
+    };
+    steps.inspect!.transitions = {
+      ready: 'implement',
+      blocked: '$pause',
+      retry: 'inspect',
+    };
+    const retryWorkflow = loadedWorkflow(raw);
+    const originalRun = createRun(
+      retryWorkflow,
+      'request',
+      ['read'],
+      'run-1',
+      1,
+    );
+    const { calls, fixture } = createGateFixture(originalRun, retryWorkflow);
+
+    await createGateSubmissionAction().submitGate.call(
+      fixture as unknown as HarnessActionContext,
+      retryWorkflow,
+      originalRun,
+      'submit',
+      'Plan ready',
+      'missing plan heading',
+    );
+
+    expect(fixture.run).toMatchObject({
+      status: 'running',
+      currentStepId: 'inspect',
+    });
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(calls.persisted).toBe(1);
+  });
+
   test('fails a Plannotator submission when the provider is unavailable', async () => {
     const workflow = gatedWorkflow('plannotator');
     const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
