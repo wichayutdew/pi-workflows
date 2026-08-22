@@ -3,6 +3,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   fauxAssistantMessage,
   fauxProvider,
+  fauxText,
   fauxToolCall,
   type Context,
 } from '@earendil-works/pi-ai';
@@ -39,6 +40,7 @@ interface Observation {
   hasWorkflowInput: boolean;
   hasExpectedProfile: boolean;
   hasReplanOutcome: boolean;
+  hasCompletionRepair: boolean;
   violations: string[];
 }
 
@@ -134,10 +136,13 @@ function observe(context: Context): Observation {
       expectedAgent.length > 0 &&
       user.text.includes(`Agent profile: ${expectedAgent}`),
     hasReplanOutcome: /Valid outcomes:.*\breplan\b/i.test(user.text),
+    hasCompletionRepair: user.text.includes(
+      'The delegated step settled without its required correlated result.',
+    ),
     violations: [],
   };
 
-  if (user.count !== 1) {
+  if (user.count !== 1 && !observation.hasCompletionRepair) {
     observation.violations.push(
       `expected one fresh user message, received ${user.count}`,
     );
@@ -261,6 +266,14 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
       record(observation);
       if (observation.violations.length > 0) {
         throw new Error(observation.violations.join('; '));
+      }
+
+      if (
+        observation.step === 'plan' &&
+        observation.visit === 1 &&
+        !observation.hasCompletionRepair
+      ) {
+        return fauxAssistantMessage([fauxText('Planning is complete.')]);
       }
 
       const result =

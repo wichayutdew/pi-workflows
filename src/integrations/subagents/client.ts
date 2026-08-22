@@ -5,6 +5,10 @@ import type {
   SubagentDelegationResponse,
   SubagentDelegationUpdate,
 } from './protocol-events.ts';
+import type {
+  DelegationDiagnostic,
+  DelegationDiagnosticCall,
+} from './diagnostics.ts';
 
 export type DelegateOptions = {
   readonly signal?: AbortSignal;
@@ -52,6 +56,7 @@ export function directWorkerResponse(
   code: number | null,
   signal: NodeJS.Signals | null,
   stderr: string,
+  diagnostic?: DelegationDiagnostic,
 ): SubagentDelegationResponse {
   const status = code === 0 ? 'completed' : signal ? 'cancelled' : 'failed';
   return {
@@ -62,12 +67,15 @@ export function directWorkerResponse(
     ...(status !== 'completed' && stderr.trim()
       ? { error: stderr.trim().slice(-4_000) }
       : {}),
+    ...(diagnostic ? { diagnostic } : {}),
   };
 }
 
 type WorkerJsonEvent = {
   readonly type?: unknown;
+  readonly toolCallId?: unknown;
   readonly toolName?: unknown;
+  readonly isError?: unknown;
   readonly args?: unknown;
   readonly message?: { readonly role?: unknown };
   readonly assistantMessageEvent?: {
@@ -83,6 +91,7 @@ type WorkerProgress = {
 };
 
 const MAX_PROGRESS_DETAIL_CHARS = 480;
+const MAX_DIAGNOSTIC_CALLS = 64;
 const SECRET_KEY = /authorization|cookie|password|secret|token|api[-_]?key/i;
 
 function redactProgressValue(value: unknown, key = ''): unknown {
@@ -109,6 +118,70 @@ function formatToolCall(toolName: string, args: unknown): string {
   const rendered = JSON.stringify(redactProgressValue(args));
   return `call ${toolName} ${rendered}`.slice(0, MAX_PROGRESS_DETAIL_CHARS);
 }
+
+type MutableDiagnostic = {
+  settled: boolean;
+  truncated: boolean;
+  calls: Map<string, DelegationDiagnosticCall>;
+};
+
+const createDiagnostic = (): MutableDiagnostic => ({
+  settled: false,
+  truncated: false,
+  calls: new Map(),
+});
+
+const diagnosticSnapshot = (
+  diagnostic: MutableDiagnostic,
+): DelegationDiagnostic => ({
+  settled: diagnostic.settled,
+  truncated: diagnostic.truncated,
+  calls: [...diagnostic.calls.values()],
+});
+
+const recordWorkerDiagnostic = (
+  line: string,
+  diagnostic: MutableDiagnostic,
+): void => {
+  let event: WorkerJsonEvent;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (typeof parsed !== 'object' || parsed === null) return;
+    event = parsed;
+  } catch {
+    return;
+  }
+  if (event.type === 'agent_settled') {
+    diagnostic.settled = true;
+    return;
+  }
+  if (
+    (event.type !== 'tool_execution_start' &&
+      event.type !== 'tool_execution_end') ||
+    typeof event.toolName !== 'string' ||
+    typeof event.toolCallId !== 'string'
+  ) {
+    return;
+  }
+  if (!diagnostic.calls.has(event.toolCallId)) {
+    if (diagnostic.calls.size >= MAX_DIAGNOSTIC_CALLS) {
+      diagnostic.truncated = true;
+      return;
+    }
+    diagnostic.calls.set(event.toolCallId, {
+      id: event.toolCallId,
+      name: event.toolName,
+      state: 'started',
+    });
+  }
+  if (event.type === 'tool_execution_end') {
+    diagnostic.calls.set(event.toolCallId, {
+      id: event.toolCallId,
+      name: event.toolName,
+      state: event.isError === false ? 'completed' : 'failed',
+    });
+  }
+};
 
 /** Converts one Pi JSONL event into safe, operator-visible worker progress. */
 export function workerProgressFromJsonLine(
@@ -211,6 +284,7 @@ export function createSubagentDelegationClient(
       let stdoutBuffer = '';
       let toolCount = 0;
       let responseText = '';
+      const diagnostic = createDiagnostic();
       const stdoutDecoder = new StringDecoder('utf8');
       const consumeWorkerLines = (): void => {
         while (true) {
@@ -218,6 +292,7 @@ export function createSubagentDelegationClient(
           if (newline === -1) return;
           const line = stdoutBuffer.slice(0, newline);
           stdoutBuffer = stdoutBuffer.slice(newline + 1);
+          recordWorkerDiagnostic(line, diagnostic);
           const progress = workerProgressFromJsonLine(
             line,
             request.requestId,
@@ -250,7 +325,15 @@ export function createSubagentDelegationClient(
         consumeWorkerLines();
         if (active?.process === child) active = undefined;
         options.signal?.removeEventListener('abort', abort);
-        resolve(directWorkerResponse(request, code, signal, stderr));
+        resolve(
+          directWorkerResponse(
+            request,
+            code,
+            signal,
+            stderr,
+            diagnosticSnapshot(diagnostic),
+          ),
+        );
       });
     });
   };

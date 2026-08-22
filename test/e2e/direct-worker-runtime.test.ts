@@ -291,9 +291,16 @@ describe('direct Pi workflow workers', () => {
           },
         ]);
         expect(checkpoint.lastSummary).toBe(E2E_FINAL_SUMMARY);
+        const observations = (await readFile(tracePath, 'utf8'))
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line) as { step: string; visit: number });
+        expect(observations).toHaveLength(6);
         expect(
-          (await readFile(tracePath, 'utf8')).trim().split('\n'),
-        ).toHaveLength(5);
+          observations
+            .filter(({ step }) => step === 'plan')
+            .map(({ visit }) => visit),
+        ).toEqual([1, 2]);
         expect(expectedLauncherDirectory).toBe(
           await realpath(launcherDirectory),
         );

@@ -47,7 +47,7 @@ describe('when running a direct workflow worker', () => {
     child.stdout.emit(
       'data',
       Buffer.from(
-        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolName":"read","args":{"path":"README.md"}}\n',
+        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolCallId":"read-1","toolName":"read","args":{"path":"README.md"}}\n{"type":"tool_execution_end","toolCallId":"read-1","toolName":"read","isError":false}\n{"type":"agent_settled"}\n',
       ),
     );
     child.stderr.emit('data', Buffer.from('MCP startup notice'));
@@ -58,6 +58,11 @@ describe('when running a direct workflow worker', () => {
       agent: 'worker',
       status: 'completed',
       exitCode: 0,
+      diagnostic: {
+        settled: true,
+        truncated: false,
+        calls: [{ id: 'read-1', name: 'read', state: 'completed' }],
+      },
     });
     expect(calls[0]?.slice(0, 2)).toEqual([
       'pi',

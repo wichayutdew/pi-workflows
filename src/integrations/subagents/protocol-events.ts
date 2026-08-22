@@ -1,3 +1,5 @@
+import type { DelegationDiagnostic } from './diagnostics.ts';
+
 export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
 export const SUBAGENT_DELEGATION_REQUEST_EVENT =
   'prompt-template:subagent:request';
@@ -41,4 +43,5 @@ export type SubagentDelegationResponse = {
   readonly error?: string;
   readonly exitCode?: number;
   readonly warnings?: ReadonlyArray<string>;
+  readonly diagnostic?: DelegationDiagnostic;
 };
