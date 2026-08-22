@@ -14,10 +14,12 @@ describe('when testing extension', () => {
       );
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
       const previousChild = process.env.PI_WORKFLOWS_CHILD;
+      const previousChildRuntime = process.env.PI_WORKFLOWS_CHILD_RUNTIME;
       const previousAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
       process.env.PI_WORKFLOWS_DIR = directory;
-      delete process.env.PI_WORKFLOWS_CHILD;
-      delete process.env.PI_WORKFLOWS_CHILD_AGENT;
+      process.env.PI_WORKFLOWS_CHILD = '1';
+      delete process.env.PI_WORKFLOWS_CHILD_RUNTIME;
+      process.env.PI_WORKFLOWS_CHILD_AGENT = 'worker';
       const commands = new Set<string>();
       const tools = new Set<string>();
       const events = new Set<string>();
@@ -67,6 +69,9 @@ describe('when testing extension', () => {
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
         if (previousChild === undefined) delete process.env.PI_WORKFLOWS_CHILD;
         else process.env.PI_WORKFLOWS_CHILD = previousChild;
+        if (previousChildRuntime === undefined)
+          delete process.env.PI_WORKFLOWS_CHILD_RUNTIME;
+        else process.env.PI_WORKFLOWS_CHILD_RUNTIME = previousChildRuntime;
         if (previousAgent === undefined)
           delete process.env.PI_WORKFLOWS_CHILD_AGENT;
         else process.env.PI_WORKFLOWS_CHILD_AGENT = previousAgent;
@@ -126,8 +131,10 @@ describe('when testing extension', () => {
     test('the entry point installs the direct worker policy runtime', async () => {
       // given
       const previousChild = process.env.PI_WORKFLOWS_CHILD;
+      const previousChildRuntime = process.env.PI_WORKFLOWS_CHILD_RUNTIME;
       const previousAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
       process.env.PI_WORKFLOWS_CHILD = '1';
+      process.env.PI_WORKFLOWS_CHILD_RUNTIME = '1';
       process.env.PI_WORKFLOWS_CHILD_AGENT = 'reviewer';
       const commands = new Set<string>();
       const tools = new Set<string>();
@@ -162,6 +169,9 @@ describe('when testing extension', () => {
       } finally {
         if (previousChild === undefined) delete process.env.PI_WORKFLOWS_CHILD;
         else process.env.PI_WORKFLOWS_CHILD = previousChild;
+        if (previousChildRuntime === undefined)
+          delete process.env.PI_WORKFLOWS_CHILD_RUNTIME;
+        else process.env.PI_WORKFLOWS_CHILD_RUNTIME = previousChildRuntime;
         if (previousAgent === undefined)
           delete process.env.PI_WORKFLOWS_CHILD_AGENT;
         else process.env.PI_WORKFLOWS_CHILD_AGENT = previousAgent;

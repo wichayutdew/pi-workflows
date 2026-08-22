@@ -3,6 +3,7 @@ import type { TUI } from '@earendil-works/pi-tui';
 import type { LoadedWorkflow } from '../config/types.ts';
 import type { WorkflowRun, WorkflowRunStatus } from '../engine/state.ts';
 import type { StepExecutionAttempt } from '../engine/state.ts';
+import type { UsageAggregate } from '../engine/usage.ts';
 import type { StepTranscriptLog } from './transcript-reader.ts';
 
 export type WorkflowStatusExecution =
@@ -38,6 +39,7 @@ export type PathEntry = {
   readonly status: StepDisplayStatus;
   readonly visit: number;
   readonly outcome?: string;
+  readonly usage?: UsageAggregate;
   readonly isCurrent: boolean;
 };
 

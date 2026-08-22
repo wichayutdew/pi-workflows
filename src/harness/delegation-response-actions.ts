@@ -4,7 +4,11 @@ import {
   type SubagentDelegationUpdate,
 } from '../integrations/subagents/protocol.ts';
 import { advanceRun } from '../engine/transitions.ts';
-import { recordCurrentStepResult } from '../engine/step-trace.ts';
+import {
+  recordCurrentStepResult,
+  recordCurrentStepUsage,
+  usageAggregateFromModels,
+} from '../engine/step-trace.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import type { ActiveDelegation } from './types.ts';
@@ -23,6 +27,7 @@ type HarnessActionContext = Pick<
   | 'launchCurrentStep'
   | 'mutationQueue'
   | 'pauseForDelegationFailure'
+  | 'persist'
   | 'releaseMainAfterCancellation'
   | 'retainUnconfirmedDelegation'
   | 'run'
@@ -150,7 +155,22 @@ async function finishDelegation(
     ) {
       return;
     }
+    if (response.requestId !== active.requestId) {
+      throw new Error(
+        'Workflow worker returned an uncorrelated terminal response',
+      );
+    }
     const terminalAt = this.dependencies.now();
+    if (response.usage && response.usage.length > 0) {
+      this.run = recordCurrentStepUsage(
+        this.run,
+        active.requestId,
+        usageAggregateFromModels(response.usage),
+        terminalAt,
+      );
+      this.persist();
+      this.updateStatus();
+    }
     const workflow = this.catalog.workflows.get(this.run.workflowId);
     const step = workflow?.definition.steps[this.run.currentStepId];
     if (!workflow || !step) {

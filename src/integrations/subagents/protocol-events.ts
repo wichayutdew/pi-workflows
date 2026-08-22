@@ -1,5 +1,5 @@
 import type { DelegationDiagnostic } from './diagnostics.ts';
-
+import type { UsageTotals } from '../../engine/usage.ts';
 export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
 export const SUBAGENT_DELEGATION_REQUEST_EVENT =
   'prompt-template:subagent:request';
@@ -35,6 +35,12 @@ export type SubagentDelegationUpdate = {
 };
 export type SubagentDelegationStatus = 'completed' | 'failed' | 'cancelled';
 
+export type SubagentModelUsage = {
+  readonly provider: string;
+  readonly model: string;
+  readonly usage: UsageTotals;
+};
+
 export type SubagentDelegationResponse = {
   readonly version?: number;
   readonly requestId: string;
@@ -44,4 +50,6 @@ export type SubagentDelegationResponse = {
   readonly exitCode?: number;
   readonly warnings?: ReadonlyArray<string>;
   readonly diagnostic?: DelegationDiagnostic;
+  /** Usage captured from terminal worker messages only. */
+  readonly usage?: ReadonlyArray<SubagentModelUsage>;
 };

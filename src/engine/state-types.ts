@@ -1,3 +1,5 @@
+import type { UsageAggregate } from './usage.ts';
+
 export const RUN_STATE_VERSION = 1 as const;
 export const MAX_GATE_FEEDBACK_CHARS = 50_000;
 export const MAX_RESUME_INPUT_CHARS = 16_000;
@@ -67,6 +69,8 @@ export type StepExecutionAttempt =
       readonly logTruncated?: true | undefined;
       readonly omittedLogEvents?: number | undefined;
       readonly startedAt: number;
+      /** Finalized Pi usage for this exact attempt, if available. */
+      readonly usage?: UsageAggregate | undefined;
       readonly result?: StepAttemptResult | undefined;
       readonly gateDecision?: StepGateDecision | undefined;
     }
@@ -81,6 +85,8 @@ export type StepExecutionAttempt =
       readonly taskTruncated?: true | undefined;
       readonly omittedTaskChars?: number | undefined;
       readonly startedAt: number;
+      /** Finalized Pi usage for this exact attempt, if available. */
+      readonly usage?: UsageAggregate | undefined;
       readonly transcript?: SubagentTranscriptReference | undefined;
       readonly result?: StepAttemptResult | undefined;
       readonly gateDecision?: StepGateDecision | undefined;
@@ -101,6 +107,8 @@ export type StepHistoryEntry = {
   readonly attempts?: ReadonlyArray<StepExecutionAttempt> | undefined;
   /** Older attempts compacted to keep the checkpoint bounded. */
   readonly omittedAttempts?: number | undefined;
+  /** Aggregate usage for this step, including compacted attempts. */
+  readonly usage?: UsageAggregate | undefined;
   readonly completedAt: number;
 };
 
@@ -142,6 +150,8 @@ export type WorkflowRun = {
     ReadonlyArray<StepExecutionAttempt> | undefined;
   /** Older current-step attempts compacted from the checkpoint. */
   readonly currentStepOmittedAttempts?: number | undefined;
+  /** Aggregate usage for the current step, including compacted attempts. */
+  readonly currentStepUsage?: UsageAggregate | undefined;
   readonly startedAt: number;
   readonly updatedAt: number;
   /**

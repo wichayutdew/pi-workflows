@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
+import { normalizeUsage, type UsageTotals } from '../src/engine/usage.ts';
 import {
   createSubagentDelegationClient,
+  workerUsageFromJsonLine,
   type DirectWorkerSpawn,
 } from '../src/integrations/subagents/client.ts';
 
@@ -47,7 +49,7 @@ describe('when running a direct workflow worker', () => {
     child.stdout.emit(
       'data',
       Buffer.from(
-        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolCallId":"read-1","toolName":"read","args":{"path":"README.md"}}\n{"type":"tool_execution_end","toolCallId":"read-1","toolName":"read","isError":false}\n{"type":"agent_settled"}\n',
+        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolCallId":"read-1","toolName":"read","args":{"path":"README.md"}}\n{"type":"tool_execution_end","toolCallId":"read-1","toolName":"read","isError":false}\n{"type":"message_end","message":{"role":"assistant","provider":"openai","model":"gpt-test","usage":{"input":3,"output":2,"cost":0.003}}}\n{"type":"agent_settled"}\n',
       ),
     );
     child.stderr.emit('data', Buffer.from('MCP startup notice'));
@@ -63,11 +65,33 @@ describe('when running a direct workflow worker', () => {
         truncated: false,
         calls: [{ id: 'read-1', name: 'read', state: 'completed' }],
       },
+      usage: [
+        {
+          provider: 'openai',
+          model: 'gpt-test',
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputCostUsd: 0,
+            outputCostUsd: 0,
+            cacheReadCostUsd: 0,
+            cacheWriteCostUsd: 0,
+            otherCostUsd: 0.003,
+            totalCostUsd: 0.003,
+          },
+        },
+      ],
     });
     expect(calls[0]?.slice(0, 2)).toEqual([
       'pi',
       ['--no-session', '--mode', 'json', '--print', request.task],
     ]);
+    expect(
+      (calls[0]?.[2] as { env: NodeJS.ProcessEnv }).env
+        .PI_WORKFLOWS_CHILD_RUNTIME,
+    ).toBe('1');
     expect(updates).toEqual([
       { requestId: request.requestId, activity: 'thinking', toolCount: 0 },
       {
@@ -78,6 +102,124 @@ describe('when running a direct workflow worker', () => {
       },
     ]);
     expect(client.activeRequestId).toBeUndefined();
+  });
+
+  test('collects only terminal assistant and tool usage by model', () => {
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_update',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-test',
+            usage: { input: 999, output: 999, cost: 9 },
+          },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-test',
+            usage: {
+              input: 3,
+              output: 2,
+              inputCost: 0.001,
+              outputCost: 0.002,
+              cost: 0.003,
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-test',
+        usage: {
+          inputTokens: 3,
+          outputTokens: 2,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          inputCostUsd: 0.001,
+          outputCostUsd: 0.002,
+          cacheReadCostUsd: 0,
+          cacheWriteCostUsd: 0,
+          otherCostUsd: 0,
+          totalCostUsd: 0.003,
+        },
+      },
+    ]);
+  });
+
+  test('collects terminal assistant usage with the real Pi nested cost shape', () => {
+    const assistantUsage = {
+      input: 4,
+      output: 2,
+      cacheRead: 1,
+      cacheWrite: 0,
+      totalTokens: 7,
+      cost: {
+        input: 0.001,
+        output: 0.002,
+        cacheRead: 0.0005,
+        cacheWrite: 0,
+        total: 0.0035,
+      },
+    };
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4',
+            usage: assistantUsage,
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-4',
+        usage: normalizeUsage(assistantUsage) as UsageTotals,
+      },
+    ]);
+  });
+
+  test('attributes terminal tool-result usage to the last assistant model', () => {
+    const toolUsage = {
+      input: 2,
+      output: 0,
+      cost: { input: 0.0002, total: 0.0002 },
+    };
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'read-1',
+            toolName: 'read',
+            isError: false,
+            usage: toolUsage,
+          },
+        }),
+        'openai',
+        'gpt-4',
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-4',
+        usage: normalizeUsage(toolUsage) as UsageTotals,
+      },
+    ]);
   });
 
   test('rejects spawn failures and waits for cancellation to close', async () => {

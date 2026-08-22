@@ -19,6 +19,7 @@ import type {
 import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts';
 import type { SerialTaskQueueController } from '../runtime/serial-task-queue.ts';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
+import type { ModelUsage } from '../engine/usage.ts';
 import type { WorkflowStatusSnapshot } from '../workflow-status.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
 import type { SettledStepReport } from './step-reporting.ts';
@@ -104,11 +105,13 @@ export type HarnessActionContext = {
     identity: MainStepIdentity,
     lines: ReadonlyArray<string>,
     context: ExtensionContext,
+    usage?: ReadonlyArray<ModelUsage>,
   ) => Promise<void>;
   recordMainStepLog: (
     identity: MainStepIdentity,
     lines: ReadonlyArray<string>,
     context: ExtensionContext,
+    usage?: ReadonlyArray<ModelUsage>,
   ) => Promise<void>;
   queueMainStepResult: (
     identity: MainStepIdentity,

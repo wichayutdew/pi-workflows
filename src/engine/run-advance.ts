@@ -33,6 +33,7 @@ const completedStep = (
   ...(run.currentStepOmittedAttempts
     ? { omittedAttempts: run.currentStepOmittedAttempts }
     : {}),
+  ...(run.currentStepUsage ? { usage: run.currentStepUsage } : {}),
   completedAt: now,
 });
 
@@ -126,6 +127,7 @@ export const advanceRun = (
         history: [...run.history, completed],
         currentStepAttempts: undefined,
         currentStepOmittedAttempts: undefined,
+        currentStepUsage: undefined,
         ...(cwd ? { cwd } : {}),
         ...(effects.workspaceCwd ? { restartWorkspaceCwd: undefined } : {}),
         stepHandoff: summary,
@@ -175,6 +177,7 @@ export const advanceRun = (
       history: [...run.history, completed],
       currentStepAttempts: undefined,
       currentStepOmittedAttempts: undefined,
+      currentStepUsage: undefined,
       ...(cwd ? { cwd } : {}),
       ...(effects.workspaceCwd ? { restartWorkspaceCwd: undefined } : {}),
       stepHandoff: preservesGateRevisionContext ? run.stepHandoff : summary,

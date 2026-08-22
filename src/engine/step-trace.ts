@@ -2,6 +2,11 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import { redactStepLogText } from '../step-log.ts';
 import {
+  emptyUsageAggregate,
+  mergeUsage,
+  type UsageAggregate,
+} from './usage.ts';
+import {
   MAX_STEP_TRACE_ARTIFACT_CHARS,
   MAX_STEP_TRACE_ATTEMPTS,
   MAX_STEP_TRACE_LOG_CHARS,
@@ -52,7 +57,8 @@ function attemptSize(attempt: StepExecutionAttempt): number {
       : 0) +
     (attempt.gateDecision?.requestId.length ?? 0) +
     (attempt.gateDecision?.feedback.length ?? 0) +
-    (attempt.gateDecision?.reviewId?.length ?? 0)
+    (attempt.gateDecision?.reviewId?.length ?? 0) +
+    (attempt.usage ? JSON.stringify(attempt.usage).length : 0)
   );
 }
 
@@ -122,10 +128,18 @@ function compactAttempt(attempt: StepExecutionAttempt): StepExecutionAttempt {
 
 /** Returns the bounded checkpoint payload attributable to step traces. */
 export function workflowTraceChars(run: WorkflowRun): number {
-  return [
+  const attempts = [
     ...run.history.flatMap((entry) => entry.attempts ?? []),
     ...(run.currentStepAttempts ?? []),
   ].reduce((total, attempt) => total + attemptSize(attempt), 0);
+  const aggregates = [
+    ...run.history.map((entry) => entry.usage),
+    run.currentStepUsage,
+  ].reduce(
+    (total, usage) => total + (usage ? JSON.stringify(usage).length : 0),
+    0,
+  );
+  return attempts + aggregates;
 }
 
 function compactRunTraceBudget(run: WorkflowRun): WorkflowRun {
@@ -441,6 +455,45 @@ function attemptResult(
 }
 
 /** Stores the submitted result on the latest attempt before transition. */
+/**
+ * Attaches finalized usage to its exact attempt. The separate current
+ * aggregate deliberately survives trace eviction and is copied to history.
+ */
+export function recordCurrentStepUsage(
+  run: WorkflowRun,
+  requestId: string,
+  usage: UsageAggregate,
+  now: number,
+): WorkflowRun {
+  const attempts = run.currentStepAttempts;
+  const index = attempts?.findIndex(
+    (attempt) => attempt.requestId === requestId,
+  );
+  if (index === undefined || index < 0 || !attempts) return run;
+  const attempt = attempts[index];
+  if (!attempt) return run;
+  const currentStepAttempts = [...attempts];
+  currentStepAttempts[index] = {
+    ...attempt,
+    usage: mergeUsage(attempt.usage ?? emptyUsageAggregate(), usage.models),
+  };
+  return compactRunTraceBudget({
+    ...run,
+    currentStepAttempts,
+    currentStepUsage: mergeUsage(
+      run.currentStepUsage ?? emptyUsageAggregate(),
+      usage.models,
+    ),
+    updatedAt: now,
+  });
+}
+
+export function usageAggregateFromModels(
+  entries: UsageAggregate['models'],
+): UsageAggregate {
+  return mergeUsage(emptyUsageAggregate(), entries);
+}
+
 export function recordCurrentStepResult(
   run: WorkflowRun,
   result: WorkflowStepResult,

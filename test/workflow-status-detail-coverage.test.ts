@@ -13,6 +13,7 @@ import {
   MAX_STEP_TRACE_LOG_EVENTS,
   createRun,
 } from '../src/engine/state.ts';
+import { normalizeUsage, type UsageTotals } from '../src/engine/usage.ts';
 import {
   renderStepDetail,
   stepTranscriptCacheKey,
@@ -106,6 +107,24 @@ describe('when rendering less common workflow step evidence', () => {
         logTruncated: true,
         omittedLogEvents: 1,
         startedAt: 3,
+        usage: {
+          usage: normalizeUsage({
+            input: 4,
+            output: 2,
+            cost: { input: 0.001, output: 0.002, total: 0.003 },
+          }) as UsageTotals,
+          models: [
+            {
+              provider: 'openai',
+              model: 'gpt-4',
+              usage: normalizeUsage({
+                input: 4,
+                output: 2,
+                cost: { input: 0.001, output: 0.002, total: 0.003 },
+              }) as UsageTotals,
+            },
+          ],
+        },
         result: {
           outcome: 'submit',
           summary: 'Result summary',
@@ -181,6 +200,10 @@ describe('when rendering less common workflow step evidence', () => {
     expect(output).toContain('decision rejected');
     expect(output).toContain('review-42');
     expect(output).toContain('Approved feedback');
+    expect(output).toContain('$0.00');
+    expect(output).toContain('openai/gpt-4');
+    expect(output).toContain('4 in');
+    expect(output).toContain('2 out');
   });
 
   test('renders current pause evidence, legacy numbering, no trace, and narrow invalid selections', () => {

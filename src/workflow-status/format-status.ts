@@ -6,6 +6,7 @@ import {
   workflowStatusIcon,
 } from './formatting.ts';
 import { renderBoard } from './render-board.ts';
+import { formatUsage, workflowUsage } from './format-usage.ts';
 import type { WorkflowStatusSnapshot, WorkflowStatusTheme } from './types.ts';
 
 const UNSTYLED_THEME = {
@@ -30,7 +31,9 @@ export function formatWorkflowProgressStatus(
     snapshot.execution?.kind === 'subagent'
       ? ` · ${snapshot.execution.progress}`
       : '';
-  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity}${workerProgress} · ${statusShortcutLabel}`;
+  const usage = workflowUsage(run);
+  const usageText = usage.models.length > 0 ? ` · ${formatUsage(usage)}` : '';
+  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity}${workerProgress}${usageText} · ${statusShortcutLabel}`;
 }
 
 /** Format a plain-text workflow status suitable for fallback notifications. */
@@ -50,6 +53,9 @@ export function formatWorkflowStatusText(
     `Status: ${run.status}`,
     `Step: ${run.currentStepId}`,
     `Completed steps: ${run.history.length}`,
+    ...(workflowUsage(run).models.length > 0
+      ? [`Usage: ${formatUsage(workflowUsage(run))}`]
+      : []),
   ];
   if (run.cwd && run.startCwd && run.cwd !== run.startCwd) {
     lines.push(`Workspace: ${run.cwd}`);

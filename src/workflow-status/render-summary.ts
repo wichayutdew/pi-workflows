@@ -14,6 +14,7 @@ import {
   stepTitle,
 } from './formatting.ts';
 import { clampRows, keyValueLines } from './layout.ts';
+import { formatUsage, workflowUsage } from './format-usage.ts';
 import type { WorkflowStatusSnapshot, WorkflowStatusTheme } from './types.ts';
 
 const MAX_REASON_ROWS = 5;
@@ -113,6 +114,21 @@ export function renderSummaryLines(
     ),
   ];
 
+  const usage = workflowUsage(run);
+  if (usage.models.length > 0) {
+    lines.push(...keyValueLines(theme, 'usage', formatUsage(usage), width));
+    lines.push(
+      ...usage.models.flatMap((entry) =>
+        keyValueLines(
+          theme,
+          'model',
+          `${entry.provider}/${entry.model} · ${formatUsage({ usage: entry.usage, models: [] })}`,
+          width,
+          'muted',
+        ),
+      ),
+    );
+  }
   if (run.cwd && run.startCwd && run.cwd !== run.startCwd) {
     lines.push(...keyValueLines(theme, 'workspace', run.cwd, width, 'accent'));
   }

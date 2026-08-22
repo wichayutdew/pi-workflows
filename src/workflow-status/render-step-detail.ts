@@ -5,6 +5,7 @@ import type {
 } from '../engine/state.ts';
 import { redactStepDetailText } from '../step-log.ts';
 import { boxed, keyValueLines } from './layout.ts';
+import { formatUsage } from './format-usage.ts';
 import { buildPathEntries } from './render-path.ts';
 import type { StepTranscriptLog } from './transcript-reader.ts';
 import type { WorkflowStatusSnapshot, WorkflowStatusTheme } from './types.ts';
@@ -241,6 +242,20 @@ function renderAttempt(
   return [
     theme.bold(theme.fg('accent', `Attempt ${attemptNumber} · ${actor}`)),
     ...keyValueLines(theme, 'request', attempt.requestId, width, 'muted'),
+    ...(attempt.usage
+      ? [
+          ...keyValueLines(theme, 'usage', formatUsage(attempt.usage), width),
+          ...attempt.usage.models.flatMap((entry) =>
+            keyValueLines(
+              theme,
+              'model',
+              `${entry.provider}/${entry.model} · ${formatUsage({ usage: entry.usage, models: [] })}`,
+              width,
+              'muted',
+            ),
+          ),
+        ]
+      : []),
     '',
     theme.bold('Requirement fed to the agent'),
     ...wrapPlain(`${attempt.task}${truncation}`, width, theme),
@@ -404,6 +419,20 @@ export function renderStepDetail(
     ...keyValueLines(theme, 'step', entry.stepId, width),
     ...keyValueLines(theme, 'visit', String(entry.visit), width),
     ...keyValueLines(theme, 'status', entry.status, width),
+    ...(entry.usage
+      ? [
+          ...keyValueLines(theme, 'usage', formatUsage(entry.usage), width),
+          ...entry.usage.models.flatMap((model) =>
+            keyValueLines(
+              theme,
+              'model',
+              `${model.provider}/${model.model} · ${formatUsage({ usage: model.usage, models: [] })}`,
+              width,
+              'muted',
+            ),
+          ),
+        ]
+      : []),
     ...(history
       ? [
           ...keyValueLines(theme, 'outcome', history.outcome, width, 'success'),
