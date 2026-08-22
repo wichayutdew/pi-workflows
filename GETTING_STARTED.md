@@ -30,8 +30,7 @@ pi install npm:@plannotator/pi-extension
 
 The kit selects the `scout`, `planner`, `worker`, `reviewer`, and `workspace-preparer` role prompts.
 Set each step's `agent` field to a different role when needed. To customize a
-role, create `~/.pi/agent/workflows/agents/<role>.md` (or
-`$PI_WORKFLOWS_DIR/agents/<role>.md`); user profiles override the bundled
+role, create `~/.agents/agents/<role>.md`; user profiles override the bundled
 prompt fallback.
 
 An agent profile may optionally begin with YAML frontmatter. Its user-owned
@@ -60,7 +59,7 @@ workflow directory:
 mkdir -p ~/.pi/agent/workflows
 cp examples/starter-kit/*.workflow.yaml ~/.pi/agent/workflows/
 cp -R examples/starter-kit/steps ~/.pi/agent/workflows/
-cp -R examples/starter-kit/agents ~/.pi/agent/workflows/
+cp -R examples/starter-kit/agents ~/.agents/
 ```
 
 Review and merge files if that directory already contains workflows; do not

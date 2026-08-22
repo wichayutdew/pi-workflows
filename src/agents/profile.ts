@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
-import { defaultUserWorkflowDirectory } from '../config/load.ts';
 
 export const THINKING_LEVELS = [
   'off',
@@ -74,12 +74,14 @@ export function parseAgentProfile(source: string, name: string): AgentProfile {
   };
 }
 
+const DEFAULT_AGENT_PROFILE_DIRECTORY = join(homedir(), '.agents', 'agents');
+
 /** Loads a user-owned agent profile, with a bundled prompt-only fallback. */
 export function loadAgentProfile(
   name: string,
-  userDirectory = defaultUserWorkflowDirectory(),
+  agentProfileDirectory = DEFAULT_AGENT_PROFILE_DIRECTORY,
 ): AgentProfile {
-  const userPath = join(userDirectory, 'agents', `${name}.md`);
+  const userPath = join(agentProfileDirectory, `${name}.md`);
   const bundledUrl = new URL(
     `../../examples/starter-kit/agents/${name}.md`,
     import.meta.url,

@@ -33,8 +33,7 @@ dictating your language, framework, or delivery process.
 - Keep worktree-bound iterations safe, including follow-up enhancements.
 - Enforce declared resources and stop unsafe loops before they run away.
 - Assign a workflow-owned role prompt with `agent: planner`, `worker`,
-  `reviewer`, or `scout`; customize profiles under your user workflow
-  directory's `agents/` folder.
+  `reviewer`, or `scout`; customize profiles under `~/.agents/agents`.
 
 ## Herdr workflow status
 
