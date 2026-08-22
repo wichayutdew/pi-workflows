@@ -56,10 +56,10 @@ Copy the workflow definitions and all referenced prompt files into your user
 workflow directory:
 
 ```bash
-mkdir -p ~/.pi/agent/workflows
+mkdir -p ~/.pi/agent/workflows ~/.agents/agents
 cp examples/starter-kit/*.workflow.yaml ~/.pi/agent/workflows/
 cp -R examples/starter-kit/steps ~/.pi/agent/workflows/
-cp -R examples/starter-kit/agents ~/.agents/
+cp examples/starter-kit/agents/*.md ~/.agents/agents/
 ```
 
 Review and merge files if that directory already contains workflows; do not

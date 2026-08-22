@@ -13,7 +13,11 @@ describe('when testing extension', () => {
         join(tmpdir(), 'pi-workflows-extension-default-'),
       );
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      const previousChild = process.env.PI_WORKFLOWS_CHILD;
+      const previousAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
       process.env.PI_WORKFLOWS_DIR = directory;
+      delete process.env.PI_WORKFLOWS_CHILD;
+      delete process.env.PI_WORKFLOWS_CHILD_AGENT;
       const commands = new Set<string>();
       const tools = new Set<string>();
       const events = new Set<string>();
@@ -61,6 +65,11 @@ describe('when testing extension', () => {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        if (previousChild === undefined) delete process.env.PI_WORKFLOWS_CHILD;
+        else process.env.PI_WORKFLOWS_CHILD = previousChild;
+        if (previousAgent === undefined)
+          delete process.env.PI_WORKFLOWS_CHILD_AGENT;
+        else process.env.PI_WORKFLOWS_CHILD_AGENT = previousAgent;
         await rm(directory, { recursive: true, force: true });
       }
     });
@@ -71,7 +80,11 @@ describe('when testing extension', () => {
         join(tmpdir(), 'pi-workflows-extension-shortcut-'),
       );
       const previousDirectory = process.env.PI_WORKFLOWS_DIR;
+      const previousChild = process.env.PI_WORKFLOWS_CHILD;
+      const previousAgent = process.env.PI_WORKFLOWS_CHILD_AGENT;
       process.env.PI_WORKFLOWS_DIR = directory;
+      delete process.env.PI_WORKFLOWS_CHILD;
+      delete process.env.PI_WORKFLOWS_CHILD_AGENT;
       await writeFile(
         join(directory, 'settings.yaml'),
         'version: 1\nstatusShortcut: ctrl+shift+y\n',
@@ -101,6 +114,11 @@ describe('when testing extension', () => {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;
         else process.env.PI_WORKFLOWS_DIR = previousDirectory;
+        if (previousChild === undefined) delete process.env.PI_WORKFLOWS_CHILD;
+        else process.env.PI_WORKFLOWS_CHILD = previousChild;
+        if (previousAgent === undefined)
+          delete process.env.PI_WORKFLOWS_CHILD_AGENT;
+        else process.env.PI_WORKFLOWS_CHILD_AGENT = previousAgent;
         await rm(directory, { recursive: true, force: true });
       }
     });
