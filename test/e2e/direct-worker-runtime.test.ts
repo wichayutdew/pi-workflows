@@ -31,6 +31,23 @@ const STATE_ENTRY_TYPE = 'pi-workflows-state-v1';
 const TEST_TIMEOUT_MS = 60_000;
 const POLL_TIMEOUT_MS = 45_000;
 
+type UsageTotals = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalCostUsd: number;
+};
+
+type UsageAggregate = {
+  readonly usage: UsageTotals;
+  readonly models: ReadonlyArray<{
+    readonly provider: string;
+    readonly model: string;
+    readonly usage: UsageTotals;
+  }>;
+};
+
 type WorkflowCheckpoint = {
   readonly status: string;
   readonly currentStepId: string;
@@ -39,6 +56,7 @@ type WorkflowCheckpoint = {
     readonly outcome: string;
     readonly summary: string;
     readonly workspaceCwd?: string;
+    readonly usage?: UsageAggregate;
   }>;
   readonly lastSummary: string;
   readonly pauseReason?: string;
@@ -294,6 +312,45 @@ describe('direct Pi workflow workers', () => {
           },
         ]);
         expect(checkpoint.lastSummary).toBe(E2E_FINAL_SUMMARY);
+
+        const historyUsage = checkpoint.history.map((entry) => {
+          if (!entry.usage) {
+            throw new Error(
+              `Missing usage for ${entry.stepId}/${entry.outcome}`,
+            );
+          }
+          return { stepId: entry.stepId, usage: entry.usage };
+        });
+        expect(historyUsage).toHaveLength(5);
+        for (const { usage } of historyUsage) {
+          expect(
+            usage.usage.inputTokens + usage.usage.outputTokens,
+          ).toBeGreaterThan(0);
+          expect(usage.usage.totalCostUsd).toBe(0);
+          expect(usage.models).toEqual([
+            {
+              provider: E2E_PROVIDER_ID,
+              model: E2E_MODEL_ID,
+              usage: usage.usage,
+            },
+          ]);
+        }
+        const implementUsage = historyUsage.filter(
+          (entry) => entry.stepId === 'implement',
+        );
+        expect(implementUsage).toHaveLength(2);
+        expect(
+          implementUsage.reduce(
+            (total, entry) =>
+              total +
+              entry.usage.usage.inputTokens +
+              entry.usage.usage.outputTokens +
+              entry.usage.usage.cacheReadTokens +
+              entry.usage.usage.cacheWriteTokens,
+            0,
+          ),
+        ).toBeGreaterThan(0);
+
         const observations = (await readFile(tracePath, 'utf8'))
           .trim()
           .split('\n')
