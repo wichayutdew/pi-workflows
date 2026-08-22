@@ -12,7 +12,7 @@ flowchart TD
 
   Steps --> Step[WorkflowStep]
   Step --> Prompt[inline prompt or prompt file]
-  Step --> Subagent[optional subagent delegation]
+  Step --> Agent[optional workflow role profile]
   Step --> Permissions[permissions]
   Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
@@ -221,22 +221,25 @@ This expands to three normalized rules. An empty inner alternative is rejected;
 omit both fields when deliberately allowing all safely tokenized arguments for
 that executable.
 
-## Subagent Options
+## Agent Profiles
 
-Omitting `subagent` runs the step in the main Pi agent. `subagent: {}` opts
-into pi-subagents with the defaults shown below. A name such as
-`subagent: worker` launches the actual Pi Subagents `worker` profile. Its
-profile prompt supplies the specialty, while the workflow prompt supplies the
-exact step contract. Use the object form for model, timeout, budget, or artifact
-overrides.
+Executable workflow steps name a workflow role profile with `agent`. A value
+such as `agent: worker` loads that workflow-owned profile from
+`~/.agents/agents/worker.md`, falling back to the bundled starter-kit profile in
+`examples/starter-kit/agents/worker.md`. The profile prompt supplies the
+specialty, while the workflow prompt supplies the exact step contract. If a
+launched step has no `agent`, the harness cannot create its delegation plan and
+pauses the workflow.
 
-Delegation requires pi-subagents 0.36.0 or newer. Requests disable any
-profile-default output file, provide the workflow result schema, and opt into
-agent contract v1. The upstream `structured_output` tool completes delegated
-steps; `workflow_complete_step` remains the main-agent completion tool. After
-capability verification, workflow permissions replace the profile's ordinary
-active-tool list. The selected profile still determines which extension
-providers are loaded, so an unavailable provider cannot be activated.
+An agent profile may begin with YAML frontmatter containing `model` and
+`thinking`. Those values apply to Pi workers launched for that profile. Without
+frontmatter, the profile is plain Markdown role guidance.
+
+Delegation requires pi-subagents 0.36.0 or newer. The upstream
+`structured_output` tool completes delegated steps; `workflow_complete_step`
+remains the main-agent completion tool. After capability verification, workflow
+permissions replace the active-tool list resolved in the child. Unavailable
+tools or extension providers fail closed.
 
 Each child receives the original workflow input plus the previous step's
 self-contained compact `summary`. Approved and rejected gate artifacts appear
@@ -280,17 +283,21 @@ restart begins with fresh visits, gate state, and step history.
 
 ```mermaid
 flowchart TD
-  Subagent[subagent] --> Profile[actual agent profile<br/>default pi-workflows.step]
-  Subagent --> Context[context<br/>fresh only]
-  Subagent --> Model[model override]
-  Subagent --> Timeout[timeoutMs<br/>1000 to 86400000]
-  Subagent --> TurnBudget[turnBudget<br/>maxTurns, graceTurns]
-  Subagent --> ToolBudget[toolBudget<br/>soft, hard, block]
-  Subagent --> Artifacts[artifacts boolean]
-  Subagent --> Retry[retryToolFailures<br/>broader Bash recovery opt-in]
+  Agent[agent] --> Profile[user profile<br/>~/.agents/agents/name.md]
+  Agent --> Fallback[bundled starter-kit profile]
+  Profile --> Prompt[role prompt]
+  Profile --> Model[optional model]
+  Profile --> Thinking[optional thinking level]
 ```
 
-## Starter `/mr-comment` Workflow
+## Starter Workflows
+
+The starter kit now provides six commands: `/work`, `/ticket`, `/jira`,
+`/investigate`, `/mr-review`, and `/mr-comment`. They share the role profiles
+`workspace-preparer`, `planner`, `worker`, `reviewer`, and `scout`; copy those
+profiles into `~/.agents/agents/` before customizing them.
+
+### Starter `/mr-comment` Workflow
 
 ```mermaid
 stateDiagram-v2

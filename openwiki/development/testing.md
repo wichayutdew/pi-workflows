@@ -27,12 +27,12 @@ flowchart TD
   Tests --> Engine[test/engine.test.ts<br/>state, transitions, gates]
   Tests --> Policy[test/policy.test.ts<br/>Bash, MCP, tool selection]
   Tests --> Doctor[test/workflow-doctor.test.ts<br/>graph liveness and deterministic diagnostics]
-  Tests --> Protocol[test/subagent-protocol.test.ts<br/>policy envelope, result validation]
-  Tests --> Client[test/subagent-client.test.ts<br/>events, timeout, cancellation]
+  Tests --> DirectClient[test/direct-worker-client.test.ts<br/>delegation events, timeout, cancellation]
   Tests --> Child[test/subagent-child-runtime.test.ts<br/>runtime enforcement]
-  Tests --> Harness[test/harness-subagent.test.ts<br/>main, delegation, pause/resume, gates]
-  Tests --> E2E[test/e2e/workflow-runtime.test.ts<br/>real Pi RPC revisit, captured cwd, and actual profiles]
-  Tests --> Misc[checkpoint, completion batch, immutable input, queue, examples, extension, preflight, Plannotator]
+  Tests --> Recovery[test/delegation-recovery.test.ts<br/>terminal evidence and replay safety]
+  Tests --> Harness[test/direct-worker-harness.test.ts<br/>main, delegation, pause/resume, gates]
+  Tests --> E2E[test/e2e/direct-worker-runtime.test.ts<br/>real Pi RPC revisit, captured cwd, and actual profiles]
+  Tests --> Misc[checkpoint, artifacts, completion batch, immutable input, queue, examples, extension, preflight, Plannotator]
 ```
 
 Harness tests verify that a run captures its starting absolute cwd and reuses it
@@ -45,10 +45,10 @@ and the exact executable/argument-prefix rules declared in YAML.
 ```mermaid
 flowchart TD
   Change[Change request] --> Kind{What changes?}
-  Kind -- workflow config field --> Config[schemas/workflow.schema.json<br/>src/config/types.ts<br/>src/config/validate.ts<br/>tests/config.test.ts]
+  Kind -- workflow config field --> Config[schemas/workflow.schema.json<br/>src/config/types.ts<br/>src/config/validation/*<br/>tests/config.test.ts]
   Kind -- run state or transition --> Engine[src/engine/*<br/>tests/engine.test.ts]
   Kind -- step permission --> Policy[src/policy/*<br/>main and child runtime tests]
-  Kind -- subagent transport --> Subagent[src/integrations/subagents/*<br/>src/harness.ts<br/>subagent tests]
+  Kind -- delegated worker transport --> Subagent[src/integrations/subagents/*<br/>src/harness/*delegation*<br/>direct-worker and child-runtime tests]
   Kind -- review provider --> Review[src/integrations/*<br/>src/harness.ts<br/>src/engine/*<br/>integration tests]
   Kind -- command surface --> Commands[src/commands.ts<br/>src/harness.ts<br/>extension or harness tests]
 ```

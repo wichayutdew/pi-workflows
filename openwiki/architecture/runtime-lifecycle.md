@@ -53,11 +53,7 @@ sequenceDiagram
   Harness->>Engine: createRun
   Harness->>Pi: append checkpoint
   Harness->>Pi: setActiveTools([])
-  alt subagent omitted
-    Harness->>Main: activate policy and send user message
-  else subagent configured
-    Harness->>Sub: configured profile delegation request
-  end
+  Harness->>Sub: configured profile delegation request
 ```
 
 Parent-mode orchestration starts in `src/harness.ts`, but the behavior is now
@@ -118,68 +114,47 @@ sequenceDiagram
   Harness->>Tmp: cleanup
 ```
 
-The workflow `subagent.agent` value selects the actual Pi Subagents profile.
-Each v1 request uses `output: false`, the workflow `outputSchema`, and agent
-contract v1. It starts in a clean context with the original workflow input and
-the previous step's compact result. Approved and rejected artifacts are
-available only when the prompt explicitly renders `{{reviewed.artifact}}` or
-`{{gate.artifact}}`; no accumulated parent or sibling transcript crosses the
-step boundary.
+The workflow `agent` value selects the workflow-owned role profile and is passed
+as the Pi Subagents profile name for delegated execution. The profile is loaded
+from `~/.agents/agents` with a bundled starter-kit fallback, and optional
+frontmatter supplies model/thinking overrides. The request carries the rendered
+role and step task, encoded policy envelope, cwd, request id, and a default
+900000 ms timeout. It starts in a clean context with the original workflow
+input and the previous step's compact result. Approved and rejected artifacts
+are available only when the prompt explicitly renders `{{reviewed.artifact}}`
+or `{{gate.artifact}}`; no accumulated parent or sibling transcript crosses
+the step boundary.
 
-Delegation planning and recovery decisions live in `src/harness/delegation-*.ts`
-and launch through `step-execution-actions.ts`. The parent-side subagent client
-surface remains `src/integrations/subagents/client.ts`; the correlated request,
-event handling, cancellation, late terminal handling, and timeout work is split
-across `client-delegation.ts`, `client-messages.ts`, and `client-types.ts`.
+Delegation planning lives in `src/harness/delegation-plan.ts`; response
+handling and recovery decisions live in `delegation-response-actions.ts`,
+`delegation-control-actions.ts`, and `delegation-recovery.ts`, then launch
+through `step-execution-actions.ts`. The parent-side subagent client surface is
+`src/integrations/subagents/client.ts`, which contains the correlated request,
+event handling, cancellation, late terminal handling, and timeout work.
 
 The child side is registered by `child-runtime.ts`. Its implementation modules
 parse the encoded policy envelope, validate child agent identity and private
 capability/result paths, narrow active tools, block interactive coordination
 tools, authorize Bash/MCP/tool calls through the shared policy core, validate
-structured completion, and write the bounded result file. Diagnostic modules
-under the same folder read replay audits, hidden Bash failures, and session
-transcripts so the harness can decide whether automatic recovery is safe.
+structured completion, and write the bounded result file. Diagnostics classify
+whether a missing-completion attempt is settled, complete, and read-only.
 
-### Failure Recovery Before Pause
+### Missing Completion Repair Before Pause
 
-A terminal error or nonzero exit code is evidence, not an unconditional stop.
-The harness first considers two bounded recovery paths:
+A child that settles without its required correlated result first receives one
+same-session completion-only repair follow-up. The repair removes work tools
+and keeps only `structured_output`, so the child can report the already-finished
+step without repeating work.
 
-1. If the trusted child transcript proves that `structured_output` completed
-   after the reported failure, the harness validates the terminal identity and
-   projection, reads the private correlated result, and requires the transcript
-   value and result file to match exactly. This also covers the narrowly
-   reproduced hidden Bash false-positive case.
-2. Otherwise, the harness may launch up to two fresh automatic recovery
-   attempts. Candidate statuses are `failed`, `structured_output_failed`,
-   `timed_out`, `turn_budget_exhausted`, and `tool_budget_exhausted`. Every
-   failed attempt needs a complete, correctly bound transcript whose actual
-   calls prove that no mutation can be repeated.
+If repair still produces no result, `delegation-recovery.ts` permits one fresh
+child retry only for the first subagent attempt and only when diagnostics prove
+the attempt was settled, untruncated, and used completed read-only calls:
+`read`, `ls`, `grep`, or `structured_output`. Missing diagnostics, truncated
+evidence, failed/started calls, Bash, edit/write, MCP, or any other tool class
+pause the workflow.
 
-Configured `edit` or `write` availability is not by itself a veto. An actual
-recorded `edit`, `write`, executed Bash, or other unknown-effect call makes the
-audit unsafe. Denied Bash needs no opt-in; `retryToolFailures` authorizes the
-same bounded sequence for allow-list or unrestricted Bash, but never bypasses
-the actual-call audit.
-
-Each recovery launches a fresh child with all previous bounded failure evidence.
-Failures receive a stable semantic fingerprint that excludes request IDs and
-session paths. If a fresh child repeats any previous fingerprint, recovery stops
-early instead of repeating the same approach.
-
-Cancellation, interruption, detached/stopped execution, inconsistent timeout
-projections, reported file mutation, protocol/setup failure, and unbound,
-incomplete, or malformed audit evidence are hard stops. A synchronous
-delegation startup exception is caught and routed through serialized failure
-handling instead of escaping the harness.
-
-`delegation-failure.ts` gathers evidence,
-`delegation-recovery-validation.ts` proves recovered completion consistency,
-`delegation-retry-policy.ts` makes the replay decision, and
-`delegation-response-actions.ts` plus `delegation-control-actions.ts` continue
-or retry the run. The workflow pauses only when recovery is ambiguous, unsafe,
-or exhausted. This reduces user intervention without automatically repeating a
-possibly successful external mutation.
+A synchronous delegation startup exception is caught and routed through
+serialized failure handling instead of escaping the harness.
 
 Temporary delegation workspace removal is best-effort housekeeping. Cleanup
 failures produce a bounded warning, but cannot interrupt an otherwise healthy

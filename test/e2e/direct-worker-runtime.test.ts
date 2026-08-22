@@ -223,10 +223,13 @@ describe('direct Pi workflow workers', () => {
           cliPath,
           cwd: launcherDirectory,
           env: {
+            HOME: root,
             PI_CODING_AGENT_DIR: agentDirectory,
             PI_CODING_AGENT_SESSION_DIR: sessionDirectory,
             PI_OFFLINE: '1',
             PI_SKIP_VERSION_CHECK: '1',
+            PI_WORKFLOWS_CHILD: '',
+            PI_WORKFLOWS_CHILD_AGENT: '',
             PI_WORKFLOWS_DIR: workflowDirectory,
             PI_WORKFLOWS_E2E_TRACE_PATH: tracePath,
             PI_WORKFLOWS_E2E_WORKSPACE_CWD: expectedWorkspaceDirectory,

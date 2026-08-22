@@ -57,48 +57,19 @@ flowchart TD
   MCP --> Extensions{extensions within ceiling?}
   Extensions --> Skills{skills within ceiling?}
   Skills --> Bash{Bash mode and rules within ceiling?}
-  Bash --> Delegated{subagent configured?}
-  Delegated -- no --> Accept[accept project step]
-  Delegated -- yes --> SubCeiling{subagent ceiling present?}
-  SubCeiling -- no --> Reject[reject project step]
-  SubCeiling -- yes --> Profile{agent profile allowed?}
-  Profile --> Context{fresh context allowed?}
-  Context --> Model{model absent or allowed?}
-  Model --> Timeout{timeout <= maxTimeoutMs?}
-  Timeout --> Turns{turnBudget present and within ceiling?}
-  Turns --> ToolBudget{toolBudget present, hard <= maxToolCalls, block = *?}
-  ToolBudget --> Artifacts{artifacts allowed?}
-  Artifacts --> Retry{broad automatic recovery allowed?}
-  Retry --> Accept
+  Bash --> Workspace{workspace binding absent?}
+  Workspace -- yes --> Accept[accept project step]
+  Workspace -- no --> Reject[reject project step]
 ```
 
 If any decision is false, the project workflow is diagnosed and skipped.
-Main-only project workflows do not need a `subagent` ceiling. Delegated project
-steps require that ceiling plus explicit turn and tool budgets. The ceiling's
-`agents` list contains the actual Pi Subagents profiles a project workflow may
-launch. Each delegated request still uses a fresh context. After its capability
-is verified, the workflow policy is the sole active-tool allow-list inside the
-child; the selected profile still determines which extension providers were
-loaded and therefore available to activate.
+The runtime settings validator accepts only tool, MCP, extension, skill, and
+Bash ceilings. Project workflow steps may name an `agent` role profile, but
+there is no project-level agent ceiling field.
 
 Project workflows cannot declare `workspace` binding. Workflows that create,
 choose, or bind a different execution directory must live in the user-owned
 workflow directory instead of `.pi/workflows`.
-
-`retryToolFailures` authorizes up to two fresh automatic recovery attempts in
-allow-list or unrestricted Bash mode. Denied Bash does not need the opt-in. In
-every mode, each candidate failure still needs a complete trusted child
-transcript, the original task and per-request binding, and an audit proving that
-every actual call used a known-safe non-Bash tool or was rejected before
-execution.
-
-A step may expose `edit` or `write` and still use automatic recovery when those
-tools were not called. Their availability alone is not a veto; a recorded
-`edit`, `write`, executed Bash, or unknown-effect call makes that attempt
-unsafe. Recovery also stops when a fresh attempt repeats a previous semantic
-failure fingerprint. Project workflows may enable Bash recovery only when the
-user ceiling also sets
-`subagent.retryToolFailures: true`.
 
 ## Duplicate And Command Conflict Rules
 

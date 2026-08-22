@@ -19,16 +19,13 @@ transitions, and parent-mode coordination.
 
 The public surfaces are `client.ts`, `protocol.ts`, `diagnostics.ts`, and
 `child-runtime.ts`. Their sibling modules isolate protocol, file, policy, and
-diagnostic concerns.
+completion-repair concerns.
 
 | Module                                                     | Responsibility                                                                                                                 |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `src/integrations/subagents/protocol-events.ts`            | Versioned parent-child event names and upstream request/update/response aliases.                                               |
 | `src/integrations/subagents/protocol.ts`                   | Stable protocol facade for child policies, delegated results, events, and public types.                                        |
-| `src/integrations/subagents/client-types.ts`               | Event-bus, request option, dependency, timer, and active-delegation controller types.                                          |
-| `src/integrations/subagents/client-messages.ts`            | Guards status/version/request fields and rejects malformed subagent updates or terminal responses.                             |
-| `src/integrations/subagents/client-delegation.ts`          | Creates one correlated delegation, subscribes to events, enforces timeout/cancellation, and releases listeners.                |
-| `src/integrations/subagents/client.ts`                     | Functional client factory plus compatibility class for one active delegation at a time.                                        |
+| `src/integrations/subagents/client.ts`                     | Functional client factory plus compatibility class for one active delegation at a time, including message validation, timeout, cancellation, and listener cleanup. |
 | `src/integrations/subagents/delegated-result.ts`           | Adds policy correlation fields and validates delegated structured results through the shared step-result parser.               |
 | `src/integrations/subagents/child-policy-types.ts`         | Child policy envelope and extracted-policy types.                                                                              |
 | `src/integrations/subagents/child-policy-envelope.ts`      | Encodes a policy into the child task and extracts one nonduplicated envelope.                                                  |
@@ -40,17 +37,9 @@ diagnostic concerns.
 | `src/integrations/subagents/child-runtime-policy.ts`       | Projects child policy into a workflow step and renders the child system policy.                                                |
 | `src/integrations/subagents/child-runtime-files.ts`        | Atomically verifies and consumes capabilities, then writes bounded correlated results.                                         |
 | `src/integrations/subagents/child-runtime-completion.ts`   | Defines `structured_output`, blocks coordination tools, and parses the child's completion call.                                |
+| `src/integrations/subagents/child-runtime-repair.ts`       | Issues the one same-session completion-only repair follow-up when a child settles without a validated result.                  |
 | `src/integrations/subagents/child-runtime.ts`              | Registers child hooks, activates allowed tools, enforces policy, and coordinates completion/result writing.                    |
-| `src/integrations/subagents/diagnostic-types.ts`           | Transcript, tool failure, replay audit, session identity, and filesystem diagnostic types.                                     |
-| `src/integrations/subagents/diagnostic-text.ts`            | Bounds and extracts comparable text, tool calls, and structured completion values from unknown transcript records.             |
-| `src/integrations/subagents/diagnostic-format.ts`          | Extracts failed tool names and renders concise failure evidence.                                                               |
-| `src/integrations/subagents/failure-transcript.ts`         | Parses calls, results, completions, messages, ordering, and proof completeness from a child JSONL transcript.                  |
-| `src/integrations/subagents/failure-correlation.ts`        | Correlates terminal errors to transcript failures or a proven hidden Bash false positive and detects completion after failure. |
-| `src/integrations/subagents/hidden-bash-failure.ts`        | Reproduces the narrow upstream Bash false-positive projection from successful transcript evidence.                             |
-| `src/integrations/subagents/replay-safety.ts`              | Classifies actual transcript calls as known-safe, rejected before execution, or unknown-effect before automatic recovery.      |
-| `src/integrations/subagents/replay-audit.ts`               | Verifies complete transcript structure, original task binding, tool counts, and mutation-safe actual calls.                    |
-| `src/integrations/subagents/session-diagnostics.ts`        | Constrains trusted session paths and reads bounded transcript tails for failure and replay analysis.                           |
-| `src/integrations/subagents/diagnostics.ts`                | Stable facade for diagnostic readers, parsers, formatters, and types.                                                          |
+| `src/integrations/subagents/diagnostics.ts`                | Constrains trusted session paths, reads bounded transcript tails, parses calls/results/completions, renders concise evidence, and audits replay safety. |
 
 ## Policy Core
 
@@ -92,6 +81,7 @@ the runtime modules.
 | `src/runtime/main-step-policy.ts`        | Registers tool-call hooks and enforces the active step policy.                                       |
 | `src/runtime/main-step-completion.ts`    | Registers the completion tool, validates request identity/result shape, and stores accepted results. |
 | `src/runtime/main-step-lifecycle.ts`     | Resolves or rejects pending completion when the Pi agent settles.                                    |
+| `src/runtime/main-step-trace.ts`         | Captures a redacted, size-bounded prefix of finalized main-agent assistant and tool events.          |
 | `src/runtime/main-step-runtime.ts`       | Composes the functional controller and preserves the compatibility `MainStepRuntime` class.          |
 | `src/runtime/serial-task-queue.ts`       | Serializes asynchronous state mutations; exposes a factory and compatibility class.                  |
 | `src/runtime/step-result.ts`             | Validates allowed outcome, summary/artifact bounds, and gate artifact requirements.                  |

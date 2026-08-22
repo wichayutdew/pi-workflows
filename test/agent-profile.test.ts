@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -58,11 +58,9 @@ describe('when loading workflow agent profiles', () => {
   });
 
   test('uses a user-owned profile before the bundled fallback', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-agents-'));
-    const agentsDirectory = join(directory, 'agents');
-    await mkdir(agentsDirectory);
+    const directory = await mkdtemp(join(tmpdir(), 'pi-agents-'));
     await writeFile(
-      join(agentsDirectory, 'worker.md'),
+      join(directory, 'worker.md'),
       '---\nmodel: provider/worker\nthinking: max\n---\n\nUser role prompt',
       'utf8',
     );

@@ -34,7 +34,7 @@ flowchart TD
   ChildRuntime --> ChildPolicy[src/integrations/subagents/child-policy-*]
   ChildRuntime --> ChildFiles[src/integrations/subagents/child-runtime-*]
   SubClient --> SubProtocol[src/integrations/subagents/protocol.ts]
-  SubClient --> SubDelegation[src/integrations/subagents/client-*]
+  SubClient --> SubDiagnostics[src/integrations/subagents/diagnostics.ts]
   StatusFacade --> StatusCore[src/workflow-status/*]
 ```
 
@@ -57,8 +57,9 @@ runtimes, and status rendering.
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/command-names.ts`                              | Reserved slash-command names owned by Pi and by the workflow extension. Config validation uses these names to prevent workflow command conflicts.                                                                                                                                                                                           |
 | `src/commands.ts`                                   | Declarative registration for `/workflow-list`, `/workflow-doctor`, `/workflow-start`, `/workflow-restart`, `/workflow-pause`, `/workflow-resume`, `/workflow-abort`, and `/workflow-reload`. It depends only on the `WorkflowCommandController` port.                                                                                       |
+| `src/agents/profile.ts`                             | Loads workflow role profiles from `~/.agents/agents` with bundled starter-kit fallbacks and optional `model`/`thinking` frontmatter.                                                                                                                                                                                                        |
 | `src/config/`                                       | Settings and workflow catalog loading. `load.ts`, `validate.ts`, and `types.ts` are compatibility/public facades; `catalog.ts`, `load-settings.ts`, `load-workflows.ts`, `yaml.ts`, `diagnostics.ts`, `ceiling.ts`, and `command-conflicts.ts` do the work.                                                                                 |
-| `src/config/validation/`                            | Schema-level validation split by concern: settings, workflow, step, subagent, shortcut, permissions, prompt, and shared result helpers. These modules normalize untrusted YAML before it reaches the runtime.                                                                                                                               |
+| `src/config/validation/`                            | Schema-level validation split by concern: settings, workflow, step, shortcut, permissions, prompt, and shared result helpers. These modules normalize untrusted YAML before it reaches the runtime.                                                                                                                                         |
 | `src/digest.ts`                                     | Stable hashing for workflow and step digests, used by catalog loading and run reconciliation.                                                                                                                                                                                                                                               |
 | `src/engine/`                                       | Pure workflow state core. `state.ts` and `transitions.ts` are facades; `state-types.ts`, `transition-types.ts`, `create-run.ts`, `run-advance.ts`, `run-lifecycle.ts`, `gate-transitions.ts`, `run-reconciliation.ts`, `reconciliation-history.ts`, `run-validation.ts`, and `transition-helpers.ts` implement immutable state transitions. |
 | `src/harness.ts` and `src/harness/`                 | Parent-mode orchestration. `harness.ts` preserves the `WorkflowHarness` class surface and wires action modules; `src/harness/*-actions.ts` handle start, restart, pause, resume, lifecycle, status, gate, prompt-review, Plannotator, main-step, and delegation flows.                                                                      |
@@ -80,7 +81,7 @@ flowchart TD
   Start[src/index.ts loaded by Pi]
   Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
   ChildEnv -- no --> Parent[Create WorkflowHarness]
-  ChildEnv -- yes --> NameOk{valid configured<br/>subagent profile name?}
+  ChildEnv -- yes --> NameOk{valid configured<br/>agent profile name?}
   NameOk -- yes --> Child[Register child runtime]
   NameOk -- no --> Noop[Return without registering workflow runtime]
 
