@@ -15,6 +15,7 @@ export type WorkflowStatusExecution =
       readonly agent: string;
       readonly requestId: string;
       readonly progress: string;
+      readonly model?: string;
       readonly activityLog?: ReadonlyArray<string>;
     };
 

@@ -11,6 +11,7 @@ export type ActiveDelegation = {
   policy: ChildStepPolicy;
   transcriptTask: string;
   agent: string;
+  model?: string;
   progress?: string;
   activityLog?: Array<string>;
   cancelling?: boolean;

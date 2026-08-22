@@ -27,13 +27,17 @@ export function formatWorkflowProgressStatus(
   );
   const activity =
     run.status === 'awaiting-gate' ? 'awaiting review' : 'working';
+  const workerModel =
+    snapshot.execution?.kind === 'subagent' && snapshot.execution.model
+      ? ` · model ${snapshot.execution.model}`
+      : '';
   const workerProgress =
     snapshot.execution?.kind === 'subagent'
       ? ` · ${snapshot.execution.progress}`
       : '';
   const usage = workflowUsage(run);
   const usageText = usage.models.length > 0 ? ` · ${formatUsage(usage)}` : '';
-  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity}${workerProgress}${usageText} · ${statusShortcutLabel}`;
+  return `${workflowStatusIcon(run, snapshot.now)} ${run.workflowId} · step ${currentStep} · ${activity}${workerModel}${workerProgress}${usageText} · ${statusShortcutLabel}`;
 }
 
 /** Format a plain-text workflow status suitable for fallback notifications. */

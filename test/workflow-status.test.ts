@@ -99,6 +99,26 @@ describe('when testing workflow status', () => {
       expect(
         formatWorkflowProgressStatus(
           {
+            run,
+            workflow,
+            execution: {
+              kind: 'subagent',
+              agent: 'worker',
+              requestId: 'request',
+              progress: 'tool bash, 1 calls',
+              model: 'gateway/gpt-5.6-terra',
+            },
+            now: 1_000,
+          },
+          'Ctrl+Alt+W',
+        ),
+      ).toBe(
+        '◐ example · step Implement the approved change (implement) · working · model gateway/gpt-5.6-terra · tool bash, 1 calls · Ctrl+Alt+W',
+      );
+
+      expect(
+        formatWorkflowProgressStatus(
+          {
             run: { ...run, status: 'awaiting-gate' },
             workflow,
             now: 1_000,

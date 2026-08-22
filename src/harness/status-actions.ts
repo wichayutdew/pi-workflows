@@ -64,6 +64,9 @@ function workflowStatusSnapshot(
       requestId: this.activeDelegation.requestId,
       progress: this.activeDelegation.progress ?? 'starting',
       activityLog: this.activeDelegation.activityLog ?? [],
+      ...(this.activeDelegation.model
+        ? { model: this.activeDelegation.model }
+        : {}),
     };
   } else if (this.mainSteps.activeStepId) {
     execution = { kind: 'main' };
