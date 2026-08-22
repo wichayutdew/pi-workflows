@@ -4,11 +4,17 @@ import type {
   SubagentDelegationRequest,
   SubagentDelegationResponse,
   SubagentDelegationUpdate,
+  SubagentModelUsage,
 } from './protocol-events.ts';
 import type {
   DelegationDiagnostic,
   DelegationDiagnosticCall,
 } from './diagnostics.ts';
+import {
+  emptyUsageAggregate,
+  mergeUsage,
+  modelUsageFromMessage,
+} from '../../engine/usage.ts';
 
 export type DelegateOptions = {
   readonly signal?: AbortSignal;
@@ -57,6 +63,7 @@ export function directWorkerResponse(
   signal: NodeJS.Signals | null,
   stderr: string,
   diagnostic?: DelegationDiagnostic,
+  usage: ReadonlyArray<SubagentModelUsage> = [],
 ): SubagentDelegationResponse {
   const status = code === 0 ? 'completed' : signal ? 'cancelled' : 'failed';
   return {
@@ -68,6 +75,7 @@ export function directWorkerResponse(
       ? { error: stderr.trim().slice(-4_000) }
       : {}),
     ...(diagnostic ? { diagnostic } : {}),
+    ...(usage.length > 0 ? { usage } : {}),
   };
 }
 
@@ -77,7 +85,12 @@ type WorkerJsonEvent = {
   readonly toolName?: unknown;
   readonly isError?: unknown;
   readonly args?: unknown;
-  readonly message?: { readonly role?: unknown };
+  readonly message?: {
+    readonly role?: unknown;
+    readonly provider?: unknown;
+    readonly model?: unknown;
+    readonly usage?: unknown;
+  };
   readonly assistantMessageEvent?: {
     readonly type?: unknown;
     readonly delta?: unknown;
@@ -92,6 +105,27 @@ type WorkerProgress = {
 
 const MAX_PROGRESS_DETAIL_CHARS = 480;
 const MAX_DIAGNOSTIC_CALLS = 64;
+
+/** Extracts usage only from finalized worker messages, never stream updates. */
+export function workerUsageFromJsonLine(
+  line: string,
+): ReadonlyArray<SubagentModelUsage> {
+  let event: WorkerJsonEvent;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (typeof parsed !== 'object' || parsed === null) return [];
+    event = parsed;
+  } catch {
+    return [];
+  }
+  if (event.type !== 'message_end' || !event.message) return [];
+  const role = event.message.role;
+  if (role !== 'assistant' && role !== 'toolResult' && role !== 'tool')
+    return [];
+  const usage = modelUsageFromMessage(event.message);
+  return usage ? [usage] : [];
+}
+
 const SECRET_KEY = /authorization|cookie|password|secret|token|api[-_]?key/i;
 
 function redactProgressValue(value: unknown, key = ''): unknown {
@@ -285,6 +319,7 @@ export function createSubagentDelegationClient(
       let toolCount = 0;
       let responseText = '';
       const diagnostic = createDiagnostic();
+      let usage = emptyUsageAggregate();
       const stdoutDecoder = new StringDecoder('utf8');
       const consumeWorkerLines = (): void => {
         while (true) {
@@ -293,6 +328,7 @@ export function createSubagentDelegationClient(
           const line = stdoutBuffer.slice(0, newline);
           stdoutBuffer = stdoutBuffer.slice(newline + 1);
           recordWorkerDiagnostic(line, diagnostic);
+          usage = mergeUsage(usage, workerUsageFromJsonLine(line));
           const progress = workerProgressFromJsonLine(
             line,
             request.requestId,
@@ -332,6 +368,7 @@ export function createSubagentDelegationClient(
             signal,
             stderr,
             diagnosticSnapshot(diagnostic),
+            usage.models,
           ),
         );
       });

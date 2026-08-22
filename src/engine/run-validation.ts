@@ -22,6 +22,12 @@ import {
   type WorkflowRunStatus,
 } from './state-types.ts';
 import { workflowTraceChars } from './step-trace.ts';
+import {
+  emptyUsageAggregate,
+  isUsageAggregate,
+  mergeUsage,
+  type UsageAggregate,
+} from './usage.ts';
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 
@@ -140,6 +146,7 @@ const isStepExecutionAttempt = (
     (value.taskTruncated === true) !==
       (typeof value.omittedTaskChars === 'number') ||
     typeof value.startedAt !== 'number' ||
+    (value.usage !== undefined && !isUsageAggregate(value.usage)) ||
     (value.result !== undefined && !isStepAttemptResult(value.result)) ||
     (value.gateDecision !== undefined &&
       !isStepGateDecision(value.gateDecision))
@@ -202,6 +209,20 @@ const isStepExecutionAttempts = (
       );
   });
 
+const usageMatchesAttempts = (
+  attempts: ReadonlyArray<StepExecutionAttempt> | undefined,
+  aggregate: UsageAggregate | undefined,
+  omittedAttempts: unknown,
+): boolean => {
+  if (!aggregate || omittedAttempts !== undefined) return true;
+  const fromAttempts = (attempts ?? []).reduce(
+    (total, attempt) =>
+      attempt.usage ? mergeUsage(total, attempt.usage.models) : total,
+    emptyUsageAggregate(),
+  );
+  return JSON.stringify(fromAttempts) === JSON.stringify(aggregate);
+};
+
 const isStepHistoryEntry = (value: unknown): value is StepHistoryEntry =>
   isRecord(value) &&
   typeof value.stepId === 'string' &&
@@ -215,8 +236,11 @@ const isStepHistoryEntry = (value: unknown): value is StepHistoryEntry =>
       value.artifact === value.approval.artifact)) &&
   (value.attempts === undefined || isStepExecutionAttempts(value.attempts)) &&
   (value.omittedAttempts === undefined ||
-    (Number.isSafeInteger(value.omittedAttempts) &&
-      (value.omittedAttempts as number) > 0)) &&
+    (typeof value.omittedAttempts === 'number' &&
+      Number.isSafeInteger(value.omittedAttempts) &&
+      value.omittedAttempts > 0)) &&
+  (value.usage === undefined || isUsageAggregate(value.usage)) &&
+  usageMatchesAttempts(value.attempts, value.usage, value.omittedAttempts) &&
   typeof value.completedAt === 'number';
 
 const isGateResolution = (value: unknown): value is GateResolution =>
@@ -336,6 +360,8 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
     (value.currentStepOmittedAttempts === undefined ||
       (Number.isSafeInteger(value.currentStepOmittedAttempts) &&
         (value.currentStepOmittedAttempts as number) > 0)) &&
+    (value.currentStepUsage === undefined ||
+      isUsageAggregate(value.currentStepUsage)) &&
     isVisitCounts(value.visits) &&
     typeof value.startedAt === 'number' &&
     typeof value.updatedAt === 'number' &&
@@ -361,6 +387,16 @@ export const isWorkflowRun = (value: unknown): value is WorkflowRun => {
       value.pausedFrom === 'running' ||
       value.pausedFrom === 'awaiting-gate');
   if (!hasValidOptionalFields) return false;
+
+  if (
+    !usageMatchesAttempts(
+      value.currentStepAttempts as
+        ReadonlyArray<StepExecutionAttempt> | undefined,
+      value.currentStepUsage as UsageAggregate | undefined,
+      value.currentStepOmittedAttempts,
+    )
+  )
+    return false;
 
   const pendingGate = value.pendingGate;
   if (pendingGate !== undefined && !isPendingGate(pendingGate)) return false;

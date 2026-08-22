@@ -6,7 +6,10 @@ import {
   beginMainStepAttempt,
   beginSubagentStepAttempt,
   recordCurrentStepResult,
+  recordCurrentStepUsage,
+  usageAggregateFromModels,
 } from '../engine/step-trace.ts';
+import type { ModelUsage } from '../engine/usage.ts';
 import { advanceRun, allowedOutcomes } from '../engine/transitions.ts';
 import { digest } from '../digest.ts';
 import type { SubagentDelegationResponse } from '../integrations/subagents/protocol.ts';
@@ -62,12 +65,14 @@ export type StepExecutionActions = {
     identity: MainStepIdentity,
     lines: ReadonlyArray<string>,
     context: ExtensionContext,
+    usage?: ReadonlyArray<ModelUsage>,
   ) => Promise<void>;
   recordMainStepLog: (
     this: HarnessActionContext,
     identity: MainStepIdentity,
     lines: ReadonlyArray<string>,
     context: ExtensionContext,
+    usage?: ReadonlyArray<ModelUsage>,
   ) => Promise<void>;
   queueMainStepResult: (
     this: HarnessActionContext,
@@ -236,8 +241,8 @@ function launchMainStep(
     summaryMaxChars: workflow.definition.summaryMaxChars,
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
-    onTrace: (lines, context) =>
-      this.queueMainStepLog(identity, lines, context),
+    onTrace: (lines, context, usage) =>
+      this.queueMainStepLog(identity, lines, context, usage),
     onSettled: (result, context) =>
       this.queueMainStepResult(identity, result, context),
   };
@@ -302,9 +307,10 @@ function queueMainStepLog(
   identity: MainStepIdentity,
   lines: ReadonlyArray<string>,
   context: ExtensionContext,
+  usage?: ReadonlyArray<ModelUsage>,
 ): Promise<void> {
   return this.mutationQueue
-    .run(() => this.recordMainStepLog(identity, lines, context))
+    .run(() => this.recordMainStepLog(identity, lines, context, usage))
     .catch(() => {
       // Status evidence is best-effort and must never pause step execution.
     });
@@ -315,6 +321,7 @@ async function recordMainStepLog(
   identity: MainStepIdentity,
   lines: ReadonlyArray<string>,
   context: ExtensionContext,
+  usage?: ReadonlyArray<ModelUsage>,
 ): Promise<void> {
   if (
     !hasCurrentMainStepIdentity(this, identity) ||
@@ -327,12 +334,20 @@ async function recordMainStepLog(
     return;
   }
   this.latestContext = context;
-  const traced = appendMainStepLog(
+  let traced = appendMainStepLog(
     this.run,
     identity.requestId,
     lines,
     this.dependencies.now(),
   );
+  if (usage && usage.length > 0) {
+    traced = recordCurrentStepUsage(
+      traced,
+      identity.requestId,
+      usageAggregateFromModels(usage),
+      this.dependencies.now(),
+    );
+  }
   if (traced === this.run) return;
   this.run = traced;
   this.persist();

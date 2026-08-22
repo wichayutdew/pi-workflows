@@ -1,5 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { WorkflowStep } from '../config/types.ts';
+import type { ModelUsage } from '../engine/usage.ts';
 import type { invalidCompletionCallIds } from '../policy/completion-batch.ts';
 import type { freezeToolInput } from '../policy/immutable-input.ts';
 import type { authorizeToolCall, resolveActiveTools } from '../policy/tools.ts';
@@ -24,6 +25,7 @@ export type MainStepExecution = StepResultPolicy & {
   readonly onTrace: (
     lines: ReadonlyArray<string>,
     context: ExtensionContext,
+    usage?: ReadonlyArray<ModelUsage>,
   ) => Promise<void> | void;
   /** Handles the captured result after Pi fully settles the agent run. */
   readonly onSettled: (

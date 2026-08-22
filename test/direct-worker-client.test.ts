@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
 import {
   createSubagentDelegationClient,
+  workerUsageFromJsonLine,
   type DirectWorkerSpawn,
 } from '../src/integrations/subagents/client.ts';
 
@@ -47,7 +48,7 @@ describe('when running a direct workflow worker', () => {
     child.stdout.emit(
       'data',
       Buffer.from(
-        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolCallId":"read-1","toolName":"read","args":{"path":"README.md"}}\n{"type":"tool_execution_end","toolCallId":"read-1","toolName":"read","isError":false}\n{"type":"agent_settled"}\n',
+        '{"type":"agent_start"}\n{"type":"tool_execution_start","toolCallId":"read-1","toolName":"read","args":{"path":"README.md"}}\n{"type":"tool_execution_end","toolCallId":"read-1","toolName":"read","isError":false}\n{"type":"message_end","message":{"role":"assistant","provider":"openai","model":"gpt-test","usage":{"input":3,"output":2,"cost":0.003}}}\n{"type":"agent_settled"}\n',
       ),
     );
     child.stderr.emit('data', Buffer.from('MCP startup notice'));
@@ -63,6 +64,24 @@ describe('when running a direct workflow worker', () => {
         truncated: false,
         calls: [{ id: 'read-1', name: 'read', state: 'completed' }],
       },
+      usage: [
+        {
+          provider: 'openai',
+          model: 'gpt-test',
+          usage: {
+            inputTokens: 3,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputCostUsd: 0,
+            outputCostUsd: 0,
+            cacheReadCostUsd: 0,
+            cacheWriteCostUsd: 0,
+            otherCostUsd: 0.003,
+            totalCostUsd: 0.003,
+          },
+        },
+      ],
     });
     expect(calls[0]?.slice(0, 2)).toEqual([
       'pi',
@@ -78,6 +97,58 @@ describe('when running a direct workflow worker', () => {
       },
     ]);
     expect(client.activeRequestId).toBeUndefined();
+  });
+
+  test('collects only terminal assistant and tool usage by model', () => {
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_update',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-test',
+            usage: { input: 999, output: 999, cost: 9 },
+          },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-test',
+            usage: {
+              input: 3,
+              output: 2,
+              inputCost: 0.001,
+              outputCost: 0.002,
+              cost: 0.003,
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-test',
+        usage: {
+          inputTokens: 3,
+          outputTokens: 2,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          inputCostUsd: 0.001,
+          outputCostUsd: 0.002,
+          cacheReadCostUsd: 0,
+          cacheWriteCostUsd: 0,
+          otherCostUsd: 0,
+          totalCostUsd: 0.003,
+        },
+      },
+    ]);
   });
 
   test('rejects spawn failures and waits for cancellation to close', async () => {

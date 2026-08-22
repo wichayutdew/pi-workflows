@@ -10,6 +10,7 @@ import {
   stepTitle,
 } from './formatting.ts';
 import { joinColumns, padAnsi } from './layout.ts';
+import { formatUsd } from './format-usage.ts';
 import type {
   PathEntry,
   WorkflowStatusSnapshot,
@@ -32,6 +33,7 @@ function historyPathEntry(
     status: 'completed',
     visit,
     outcome: entry.outcome,
+    ...(entry.usage ? { usage: entry.usage } : {}),
     isCurrent: false,
   };
 }
@@ -60,6 +62,7 @@ export function buildPathEntries(
           visits.get(run.currentStepId) ?? 0,
           run.visits[run.currentStepId] ?? 1,
         ),
+        ...(run.currentStepUsage ? { usage: run.currentStepUsage } : {}),
         isCurrent: true,
       },
     ];
@@ -76,6 +79,7 @@ export function buildPathEntries(
         title: stepTitle(workflow, run.currentStepId),
         status: 'completed',
         visit: Math.max(1, run.visits[run.currentStepId] ?? 1),
+        ...(run.currentStepUsage ? { usage: run.currentStepUsage } : {}),
         isCurrent: true,
       },
     ];
@@ -124,9 +128,12 @@ export function renderPathLines(
         entry.isCurrent ? 'text' : 'muted',
         entry.title,
       )}${visit}`;
+      const cost = entry.usage?.models.length
+        ? ` · ${formatUsd(entry.usage.usage.totalCostUsd)}`
+        : '';
       const right = entry.outcome
-        ? `${statusLabel(entry.status)} · ${inline(entry.outcome)}`
-        : statusLabel(entry.status);
+        ? `${statusLabel(entry.status)} · ${inline(entry.outcome)}${cost}`
+        : `${statusLabel(entry.status)}${cost}`;
       const row = joinColumns(
         left,
         theme.fg(statusColor(entry.status), right),

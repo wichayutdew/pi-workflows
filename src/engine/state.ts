@@ -11,6 +11,15 @@ export {
   MAX_WORKFLOW_TRACE_CHARS,
   RUN_STATE_VERSION,
 } from './state-types.ts';
+export {
+  addUsage,
+  emptyUsage,
+  emptyUsageAggregate,
+  isUsageAggregate,
+  isUsageTotals,
+  mergeUsage,
+  normalizeUsage,
+} from './usage.ts';
 export type {
   GateApproval,
   GateResolution,
@@ -23,3 +32,4 @@ export type {
   WorkflowRun,
   WorkflowRunStatus,
 } from './state-types.ts';
+export type { ModelUsage, UsageAggregate, UsageTotals } from './usage.ts';
