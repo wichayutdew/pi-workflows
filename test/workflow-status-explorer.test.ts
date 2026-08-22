@@ -661,6 +661,60 @@ describe('when exploring workflow step evidence', () => {
     expect(renders.length).toBeGreaterThan(0);
   });
 
+  test('live worker tool-call page scrolls half a page with Ctrl+D and Ctrl+U', () => {
+    const workflow = loadedWorkflow();
+    let run = createRun(workflow, '', [], 'live-scroll', 1);
+    run = beginSubagentStepAttempt(
+      run,
+      'live-request',
+      'worker',
+      'perform a long sequence of tool calls',
+      2,
+    );
+    const snapshot: WorkflowStatusSnapshot = {
+      run,
+      workflow,
+      execution: {
+        kind: 'subagent' as const,
+        agent: 'worker',
+        requestId: 'live-request',
+        progress: 'calling tools',
+        activityLog: Array.from(
+          { length: 30 },
+          (_, index) => `call tool-${index} {"arg":${index}}`,
+        ),
+      },
+      now: 2,
+    };
+    let closed = 0;
+    const view = new WorkflowStatusView(
+      () => snapshot,
+      { requestRender: () => {}, terminal: { rows: 20 } },
+      plainTheme,
+      () => {
+        closed += 1;
+      },
+    );
+
+    view.handleInput('l');
+    expect(view.render(100).join('\n')).toContain('Step Explorer');
+    view.handleInput('\t');
+    const livePage = view.render(100);
+    const live = livePage.join('\n');
+    expect(live).toContain('Live Worker Session');
+    const initialHint = livePage.at(-1) ?? '';
+    expect(initialHint).toMatch(/rows 1-\d+\//);
+
+    view.handleInput('\u0004');
+    expect(closed).toBe(0);
+    const halfPageDown = view.render(100);
+    expect(halfPageDown.at(-1)).toMatch(/rows 10-27\//);
+
+    view.handleInput('\u0015');
+    const halfPageUp = view.render(100);
+    expect(halfPageUp.at(-1)).toBe(initialHint);
+  });
+
   test('the detail view loads and caches one trusted child transcript', async () => {
     const workflow = loadedWorkflow();
     let run = createRun(workflow, '', [], 'trace-async-view', 1);
