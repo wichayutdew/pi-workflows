@@ -14,6 +14,10 @@ import {
 } from './child-runtime-completion.ts';
 import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from './child-runtime-dependencies.ts';
 import {
+  COMPLETION_REPAIR_PROMPT,
+  needsCompletionRepair,
+} from './child-runtime-repair.ts';
+import {
   verifyChildCapability,
   verifyChildWorkingDirectory,
   writeChildResult,
@@ -39,6 +43,7 @@ type ChildRuntimeState = {
   readonly policyError: string | undefined;
   readonly invalidCompletionCalls: ReadonlySet<string>;
   readonly effectiveTools: ReadonlySet<string>;
+  readonly repairRequested: boolean;
 };
 
 const INITIAL_STATE: ChildRuntimeState = {
@@ -46,6 +51,7 @@ const INITIAL_STATE: ChildRuntimeState = {
   policyError: undefined,
   invalidCompletionCalls: new Set(),
   effectiveTools: new Set(),
+  repairRequested: false,
 };
 
 const errorMessage = (error: unknown): string =>
@@ -142,6 +148,7 @@ export const registerSubagentChildRuntime = (
         activePolicy: extracted.policy,
         policyError: undefined,
         effectiveTools,
+        repairRequested: false,
       };
     } catch (error) {
       const policyError = errorMessage(error);
@@ -173,6 +180,24 @@ export const registerSubagentChildRuntime = (
 
   pi.on('turn_start', () => {
     state = { ...state, invalidCompletionCalls: new Set() };
+  });
+
+  pi.on('agent_settled', () => {
+    const policy = state.activePolicy;
+    if (
+      !policy ||
+      state.repairRequested ||
+      !needsCompletionRepair({ policy, dependencies })
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      repairRequested: true,
+      effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+    };
+    pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+    pi.sendUserMessage(COMPLETION_REPAIR_PROMPT, { deliverAs: 'followUp' });
   });
 
   pi.on('message_end', (event) => {
