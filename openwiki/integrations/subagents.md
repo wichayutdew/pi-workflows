@@ -136,6 +136,20 @@ validates `structured_output` and returns one correlated terminal event.
 under contract v1 avoids a second gate because Pi Workflows owns declared
 outcomes and optional human-review gates.
 
+## Same-Child Completion Repair
+
+A child that settles without writing its validated correlated result receives one
+same-session repair follow-up. The repair removes every work tool, retains only
+`structured_output`, and instructs the child not to repeat completed work. This
+covers omissions for every delegated workflow step without replaying a push,
+write, edit, Bash command, or remote publication.
+
+The parent still accepts only `result.json` after policy-digest and step-result
+validation; it never infers an outcome from prose. If repair also produces no
+result, complete bounded terminal evidence can permit one fresh retry only
+when all completed calls were read-only. Any Bash, edit, write, MCP, unknown,
+failed, malformed, or truncated evidence pauses the workflow with diagnostics.
+
 ## Result Path
 
 ```mermaid

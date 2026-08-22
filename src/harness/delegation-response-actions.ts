@@ -9,6 +9,7 @@ import type { WorkflowStepResult } from '../runtime/step-result.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import type { ActiveDelegation } from './types.ts';
 import { resolveStepEffects } from './step-effects.ts';
+import { shouldRetryMissingCompletion } from './delegation-recovery.ts';
 
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
@@ -19,6 +20,7 @@ type HarnessActionContext = Pick<
   | 'finishDelegation'
   | 'isSessionActive'
   | 'latestContext'
+  | 'launchCurrentStep'
   | 'mutationQueue'
   | 'pauseForDelegationFailure'
   | 'releaseMainAfterCancellation'
@@ -174,8 +176,26 @@ async function finishDelegation(
       serializedResult = await this.dependencies.readDelegatedResult(active);
     } catch (error) {
       if (hasErrorCode(error, 'ENOENT')) {
+        const subagentAttemptCount =
+          this.run.currentStepAttempts?.filter(
+            (attempt) => attempt.kind === 'subagent',
+          ).length ?? 0;
+        if (
+          shouldRetryMissingCompletion(
+            response.diagnostic,
+            subagentAttemptCount,
+          )
+        ) {
+          cleanupAttempted = true;
+          await this.cleanupDelegation(active);
+          this.launchCurrentStep(workflow);
+          return;
+        }
+        const diagnosticState = response.diagnostic
+          ? `settled=${response.diagnostic.settled}, truncated=${response.diagnostic.truncated}, calls=${response.diagnostic.calls.length}`
+          : 'unavailable';
         throw new Error(
-          `Subagent "${active.agent}" completed without producing the required correlated structured_output result`,
+          `Subagent "${active.agent}" completed without producing the required correlated structured_output result (request ${active.requestId}; diagnostic ${diagnosticState})`,
           { cause: error },
         );
       }

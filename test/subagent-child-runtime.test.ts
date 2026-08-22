@@ -62,6 +62,10 @@ describe('when testing subagent child runtime', () => {
     const activeTools: string[][] = [];
     let currentActiveTools = [...profileTools];
     const registeredTools: unknown[] = [];
+    const sentUserMessages: Array<{
+      readonly content: string;
+      readonly options: unknown;
+    }> = [];
     const inventory = [
       { name: 'read', sourceInfo: { source: 'builtin' } },
       { name: 'edit', sourceInfo: { source: 'builtin' } },
@@ -113,6 +117,9 @@ describe('when testing subagent child runtime', () => {
         currentActiveTools = [...tools];
         activeTools.push(tools);
       },
+      sendUserMessage(content: string, options: unknown) {
+        sentUserMessages.push({ content, options });
+      },
     } as unknown as ExtensionAPI;
     registerSubagentChildRuntime(pi, {
       ...(childAgent ? { childAgent } : {}),
@@ -122,6 +129,7 @@ describe('when testing subagent child runtime', () => {
       handlers,
       activeTools,
       registeredTools,
+      sentUserMessages,
     };
   }
 
@@ -446,6 +454,65 @@ describe('when testing subagent child runtime', () => {
           block: true,
           reason: 'child received more than one workflow policy',
         });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('repairs one missing completion in the same child without re-enabling work tools', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory);
+      const rig = runtime(policy.agent);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const settled = rig.handlers.get('agent_settled')?.[0];
+        expectTruthy(input);
+        expectTruthy(settled);
+        input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
+
+        settled({});
+        settled({});
+
+        expect(rig.sentUserMessages).toHaveLength(1);
+        expect(rig.sentUserMessages[0]?.content).toMatch(
+          /do not execute work tools/i,
+        );
+        expect(rig.sentUserMessages[0]?.options).toEqual({
+          deliverAs: 'followUp',
+        });
+        expect(rig.activeTools.at(-1)).toEqual([CHILD_COMPLETION_TOOL]);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    test('does not repair after writing a valid correlated completion', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory);
+      const rig = runtime(policy.agent);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        const settled = rig.handlers.get('agent_settled')?.[0];
+        expectTruthy(input);
+        expectTruthy(toolCall);
+        expectTruthy(settled);
+        input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
+        expect(
+          toolCall({
+            toolCallId: 'complete-before-settled',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: { value: { outcome: 'ready', summary: 'Done' } },
+          }),
+        ).toBe(undefined);
+
+        settled({});
+
+        expect(rig.sentUserMessages).toEqual([]);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
