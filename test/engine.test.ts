@@ -1707,6 +1707,55 @@ describe('when testing engine', () => {
       expect(recordCurrentStepUsage(run, 'unknown', aggregate, 4)).toBe(run);
     });
 
+    test('reconciliation retains prior attempt usage for a changed step retry', () => {
+      const original = loadedWorkflow();
+      const oldUsage = usageAggregateFromModels([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage({
+            input: 3,
+            output: 2,
+            cost: { input: 0.001, output: 0.002, total: 0.003 },
+          }) as UsageTotals,
+        },
+      ]);
+      const retryUsage = usageAggregateFromModels([
+        {
+          provider: 'anthropic',
+          model: 'claude-3',
+          usage: normalizeUsage({
+            input: 5,
+            output: 4,
+            cost: { input: 0.004, output: 0.005, total: 0.009 },
+          }) as UsageTotals,
+        },
+      ]);
+      let run = createRun(original, '', [], 'reconciled-usage', 1);
+      run = beginMainStepAttempt(run, 'old-request', 'old task', 2);
+      run = recordCurrentStepUsage(run, 'old-request', oldUsage, 3);
+      run = advanceRun(original, run, 'ready', 'Inspected', 4);
+
+      const changedRaw = baseWorkflow();
+      const changedSteps = changedRaw.steps as Record<
+        string,
+        Record<string, unknown>
+      >;
+      changedSteps.inspect = {
+        ...changedSteps.inspect,
+        prompt: 'Changed inspection prompt',
+      };
+      const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 5);
+      if (!reconciled.run) throw new Error('reconciliation should restart');
+      run = beginMainStepAttempt(reconciled.run, 'retry-request', 'retry task', 6);
+      run = recordCurrentStepUsage(run, 'retry-request', retryUsage, 7);
+
+      expect(run.currentStepUsage).toEqual(
+        usageAggregateFromModels([...oldUsage.models, ...retryUsage.models]),
+      );
+      expect(isWorkflowRun(structuredClone(run))).toBe(true);
+    });
+
     test('durable current-step usage survives attempt eviction', () => {
       const workflow = loadedWorkflow();
       const base = createRun(workflow, '', [], 'run-compact', 1);

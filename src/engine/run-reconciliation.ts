@@ -100,6 +100,7 @@ export const reconcileRun = (
           history: retainedHistory,
           currentStepAttempts: changedEntry.attempts,
           currentStepOmittedAttempts: changedEntry.omittedAttempts,
+          currentStepUsage: changedEntry.usage,
           visits: rebuildVisits(retainedHistory, restartedStep),
           cwd: retainedWorkspaceCwd(reconciledRun, retainedHistory),
           reviewedArtifact: reviewedApproval?.artifact ?? '',
