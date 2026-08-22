@@ -175,12 +175,12 @@ never renders a below-editor task board. Completed steps, failures, pauses,
 reviews, attempt logs, and full history live in the overlay; its rendering
 clamps long reasons to the available terminal width without altering the full
 persisted reason. Arrow keys or `j`/`k` select a path entry; `Enter`, right, or
-`l` opens its persisted attempt evidence. Detail scroll uses arrows or `j`/`k`,
-with `Ctrl+D`/`Ctrl+U` moving down/up by half a page, `gg`/`G` jumping to the
-top/bottom, and left, `h`, or `Esc` returning. Attempt tasks, results, and gate
-decisions are globally bounded in the checkpoint. Confined child transcript
-references are read on demand through stable no-follow reads; displayed
-controls and common credentials are removed.
+`l` opens its persisted attempt evidence. Detail and live-worker pages scroll
+with arrows or `j`/`k`, `Ctrl+D`/`Ctrl+U` moving down/up by half a page,
+`gg`/`G` jumping to the top/bottom, and left, `h`, or `Esc` returning. Attempt
+tasks, results, and gate decisions are globally bounded in the checkpoint.
+Confined child transcript references are read on demand through stable
+no-follow reads; displayed controls and common credentials are removed.
 New main-agent attempts arm trace capture only when Pi finalizes the exact
 workflow task, then persist
 a redacted, size-bounded prefix of finalized assistant and tool events in
