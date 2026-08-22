@@ -205,6 +205,7 @@ export function createDelegationPlan(
     policy,
     transcriptTask: task,
     agent,
+    ...(agentProfile.model ? { model: agentProfile.model } : {}),
   };
   const request: SubagentDelegationRequest = {
     version: 1,

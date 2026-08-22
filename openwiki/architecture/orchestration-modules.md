@@ -77,14 +77,15 @@ timer, or subagent effects.
 | `src/engine/run-advance.ts`             | Validates an ordinary outcome, appends step history, and moves to the next, completed, or paused state.                   |
 | `src/engine/run-lifecycle.ts`           | Computes allowed outcomes and immutable pause, failure, resume, and abort transitions.                                    |
 | `src/engine/run-reconciliation.ts`      | Reconciles a checkpoint with changed workflow digests and rewinds to the earliest affected step when required.            |
-| `src/engine/run-validation.ts`          | Runtime type guard for persisted, untrusted workflow checkpoint values.                                                   |
+| `src/engine/run-validation.ts`          | Runtime type guard for persisted, untrusted workflow checkpoint values, including attempt and step usage aggregates.      |
 | `src/engine/run-workflow-validation.ts` | Validates persisted control-flow, approvals, workspace binding, visits, and pending gates against the active workflow.    |
 | `src/engine/state-types.ts`             | Versioned run, history, gate, status, workspace, and step-trace types.                                                    |
 | `src/engine/state.ts`                   | Compatibility facade for state creation, validation, constants, and types.                                                |
-| `src/engine/step-trace.ts`              | Records and compacts bounded attempt tasks, results, gate decisions, main logs, and child transcript references.          |
+| `src/engine/step-trace.ts`              | Records and compacts bounded attempt tasks, results, gate decisions, main logs, usage, and child transcript references.   |
 | `src/engine/transition-helpers.ts`      | Looks up the current step and applies timestamped run patches without mutation.                                           |
 | `src/engine/transition-types.ts`        | Result type for configuration reconciliation.                                                                             |
 | `src/engine/transitions.ts`             | Compatibility facade for run, gate, lifecycle, and reconciliation transitions.                                            |
+| `src/engine/usage.ts`                   | Normalizes Pi usage payloads, rejects malformed totals, and merges provider/model usage into durable aggregates.          |
 
 ## Parent Harness
 

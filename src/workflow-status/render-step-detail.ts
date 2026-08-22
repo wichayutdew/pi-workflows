@@ -311,6 +311,9 @@ function renderLiveWorkerSession(
       width,
       'accent',
     ),
+    ...(snapshot.execution.model
+      ? keyValueLines(theme, 'model', snapshot.execution.model, width, 'muted')
+      : []),
     ...keyValueLines(
       theme,
       'state',

@@ -447,6 +447,22 @@ describe('when exploring workflow step evidence', () => {
     expect(
       renderStepDetail(plainTheme, snapshot, 0, new Map(), 180).join('\n'),
     ).not.toContain('Live Worker Session');
+
+    const modelSnapshot = {
+      ...snapshot,
+      execution: {
+        ...snapshot.execution,
+        model: 'gateway/gpt-5.6-terra',
+      },
+    };
+    const modelOutput = renderLiveWorkerActivity(
+      plainTheme,
+      modelSnapshot,
+      0,
+      180,
+    ).join('\n');
+    expect(modelOutput).toContain('model');
+    expect(modelOutput).toContain('gateway/gpt-5.6-terra');
   });
 
   test('failed and resumed child attempts retain only confined transcript references', () => {

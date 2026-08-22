@@ -81,7 +81,7 @@ the runtime modules.
 | `src/runtime/main-step-policy.ts`        | Registers tool-call hooks and enforces the active step policy.                                       |
 | `src/runtime/main-step-completion.ts`    | Registers the completion tool, validates request identity/result shape, and stores accepted results. |
 | `src/runtime/main-step-lifecycle.ts`     | Resolves or rejects pending completion when the Pi agent settles.                                    |
-| `src/runtime/main-step-trace.ts`         | Captures a redacted, size-bounded prefix of finalized main-agent assistant and tool events.          |
+| `src/runtime/main-step-trace.ts`         | Captures a redacted, size-bounded prefix of finalized main-agent assistant/tool events and usage.    |
 | `src/runtime/main-step-runtime.ts`       | Composes the functional controller and preserves the compatibility `MainStepRuntime` class.          |
 | `src/runtime/serial-task-queue.ts`       | Serializes asynchronous state mutations; exposes a factory and compatibility class.                  |
 | `src/runtime/step-result.ts`             | Validates allowed outcome, summary/artifact bounds, and gate artifact requirements.                  |
@@ -91,12 +91,13 @@ the runtime modules.
 | Module                                      | Responsibility                                                                                              |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `src/workflow-status/types.ts`              | Snapshot, execution, theme, path, and view port types.                                                      |
+| `src/workflow-status/format-usage.ts`       | Aggregates workflow usage and formats cost and token totals.                                                |
 | `src/workflow-status/formatting.ts`         | Status glyphs, colors, labels, titles, timestamps, elapsed time, and inline text helpers.                   |
 | `src/workflow-status/layout.ts`             | ANSI-aware row clamping, boxes, panels, columns, and padding.                                               |
-| `src/workflow-status/render-path.ts`        | Converts run history/current state into path entries and rendered path lines.                               |
-| `src/workflow-status/render-summary.ts`     | Renders header and detailed summary lines from a status snapshot.                                           |
+| `src/workflow-status/render-path.ts`        | Converts run history/current state into path entries and rendered path lines with per-step costs.           |
+| `src/workflow-status/render-summary.ts`     | Renders header and detailed summary lines, including workflow-level usage, from a status snapshot.          |
 | `src/workflow-status/render-board.ts`       | Chooses wide/narrow layouts and renders populated or empty boards.                                          |
-| `src/workflow-status/render-step-detail.ts` | Resolves a selected path entry and renders persisted tasks, results, gate decisions, and transcript events. |
+| `src/workflow-status/render-step-detail.ts` | Resolves a selected path entry and renders persisted tasks, usage, results, gate decisions, and transcript events. |
 | `src/workflow-status/transcript-reader.ts`  | Confines, stably reads, bounds, sanitizes, and redacts common credential forms in child events on demand.   |
-| `src/workflow-status/format-status.ts`      | Public text/board formatting entry points.                                                                  |
+| `src/workflow-status/format-status.ts`      | Public text/board formatting entry points for progress, status text, and usage.                            |
 | `src/workflow-status/view.ts`               | Interactive board/detail/live navigation, transcript loading/cache, refresh scheduling, and overlay boundary. |
