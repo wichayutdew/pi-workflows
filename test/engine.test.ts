@@ -6,6 +6,17 @@ import {
   MAX_RESUME_INPUT_CHARS,
 } from '../src/engine/state.ts';
 import {
+  beginMainStepAttempt,
+  recordCurrentStepUsage,
+  usageAggregateFromModels,
+} from '../src/engine/step-trace.ts';
+import {
+  addUsage,
+  normalizeUsage,
+  isUsageAggregate,
+  type UsageTotals,
+} from '../src/engine/usage.ts';
+import {
   advanceRun,
   abortRun,
   attachGateReviewId,
@@ -1607,6 +1618,117 @@ describe('when testing engine', () => {
         'Review ready',
       );
       expect(isWorkflowRun(awaiting)).toBe(true);
+    });
+  });
+
+  describe('usage accounting', () => {
+    test('normalizes real Pi usage with a nested cost object', () => {
+      const native = {
+        input: 10,
+        output: 5,
+        cacheRead: 2,
+        cacheWrite: 1,
+        totalTokens: 18,
+        cost: {
+          input: 0.001,
+          output: 0.002,
+          cacheRead: 0.0005,
+          cacheWrite: 0.0001,
+          total: 0.0036,
+        },
+      };
+      expect(normalizeUsage(native)).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+        inputCostUsd: 0.001,
+        outputCostUsd: 0.002,
+        cacheReadCostUsd: 0.0005,
+        cacheWriteCostUsd: 0.0001,
+        otherCostUsd: 0,
+        totalCostUsd: 0.0036,
+      });
+    });
+
+    test('rejects malformed, negative, NaN, and inconsistent usage', () => {
+      expect(normalizeUsage(null)).toBeUndefined();
+      expect(normalizeUsage({ input: -1 })).toBeUndefined();
+      expect(normalizeUsage({ input: NaN })).toBeUndefined();
+      expect(normalizeUsage({ input: Infinity })).toBeUndefined();
+      expect(normalizeUsage({ cost: { total: -0.1 } })).toBeUndefined();
+      expect(normalizeUsage({ cost: { total: NaN } })).toBeUndefined();
+      expect(
+        normalizeUsage({ inputCost: 0.01, outputCost: 0.02, cost: 0.02 }),
+      ).toBeUndefined();
+    });
+
+    test('validates usage aggregates and rejects duplicate model keys', () => {
+      const modelUsage = {
+        provider: 'openai',
+        model: 'gpt-4',
+        usage: normalizeUsage({
+          input: 1,
+          output: 1,
+          cost: { input: 0.001, output: 0.002, total: 0.003 },
+        }) as UsageTotals,
+      };
+      const aggregate = {
+        usage: modelUsage.usage,
+        models: [modelUsage] as const,
+      };
+      expect(isUsageAggregate(aggregate)).toBe(true);
+      expect(
+        isUsageAggregate({
+          usage: addUsage(modelUsage.usage, modelUsage.usage),
+          models: [modelUsage, modelUsage],
+        }),
+      ).toBe(false);
+    });
+
+    test('records finalized usage on the exact attempt and durable aggregate', () => {
+      const workflow = loadedWorkflow();
+      let run = createRun(workflow, '', [], 'run-usage', 1);
+      run = beginMainStepAttempt(run, 'req-1', 'task', 2);
+      const aggregate = usageAggregateFromModels([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage({
+            input: 3,
+            output: 2,
+            cost: { input: 0.001, output: 0.002, total: 0.003 },
+          }) as UsageTotals,
+        },
+      ]);
+      run = recordCurrentStepUsage(run, 'req-1', aggregate, 3);
+      expect(run.currentStepUsage).toEqual(aggregate);
+      expect(run.currentStepAttempts?.[0]?.usage).toEqual(aggregate);
+      expect(recordCurrentStepUsage(run, 'unknown', aggregate, 4)).toBe(run);
+    });
+
+    test('durable current-step usage survives attempt eviction', () => {
+      const workflow = loadedWorkflow();
+      const base = createRun(workflow, '', [], 'run-compact', 1);
+      const aggregate = usageAggregateFromModels([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage({
+            input: 100,
+            output: 50,
+            cost: { input: 0.01, output: 0.02, total: 0.03 },
+          }) as UsageTotals,
+        },
+      ]);
+      const run = {
+        ...base,
+        currentStepAttempts: [],
+        currentStepOmittedAttempts: 1,
+        currentStepUsage: aggregate,
+      };
+      expect(isWorkflowRun(run)).toBe(true);
+      expect(run.currentStepUsage?.usage.totalCostUsd).toBe(0.03);
     });
   });
 });

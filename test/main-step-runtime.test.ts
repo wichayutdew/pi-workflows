@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  normalizeUsage,
+  type ModelUsage,
+  type UsageTotals,
+} from '../src/engine/usage.ts';
+import { mainTurnUsage } from '../src/runtime/main-step-trace.ts';
 import { MainStepRuntime } from '../src/runtime/main-step-runtime.ts';
 import { WORKFLOW_COMPLETION_TOOL } from '../src/runtime/completion-tool.ts';
 
@@ -151,6 +157,49 @@ describe('when testing main step runtime', () => {
       expect(runtime.activeStepId).toBe(undefined);
     });
 
+    test('mainTurnUsage attributes assistant and tool-result usage to the assistant model', () => {
+      const assistantUsage = {
+        input: 4,
+        output: 2,
+        cost: { input: 0.001, output: 0.002, total: 0.003 },
+      };
+      const toolUsage = {
+        input: 1,
+        output: 0,
+        cost: { input: 0.0005, total: 0.0005 },
+      };
+      const usage = mainTurnUsage({
+        message: {
+          role: 'assistant',
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: assistantUsage,
+        },
+        toolResults: [
+          {
+            role: 'toolResult',
+            toolCallId: 'read-1',
+            toolName: 'read',
+            isError: false,
+            content: [],
+            usage: toolUsage,
+          },
+        ],
+      });
+      expect(usage).toEqual([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage(assistantUsage) as UsageTotals,
+        },
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage(toolUsage) as UsageTotals,
+        },
+      ]);
+    });
+
     test('main step trace arms on its exact task, captures ordered safe turns, and closes after completion', async () => {
       const handlers = new Map<string, Handler>();
       let completion:
@@ -180,6 +229,7 @@ describe('when testing main step runtime', () => {
         setActiveTools() {},
       } as unknown as ExtensionAPI;
       const turns: Array<ReadonlyArray<string>> = [];
+      const usages: Array<ReadonlyArray<ModelUsage>> = [];
       const runtime = new MainStepRuntime(pi);
       runtime.activate({
         workflowId: 'workflow',
@@ -203,8 +253,9 @@ describe('when testing main step runtime', () => {
           requires: { tools: [], extensions: [], skills: [] },
           transitions: { done: '$done' },
         },
-        onTrace: (lines) => {
+        onTrace: (lines, _context, usage) => {
           turns.push(lines);
+          if (usage && usage.length > 0) usages.push(usage);
           if (
             lines.some((line) =>
               line.startsWith(`tool call · ${WORKFLOW_COMPLETION_TOOL}`),
@@ -247,10 +298,23 @@ describe('when testing main step runtime', () => {
           content: [{ type: 'text', text: 'Exact workflow task' }],
         },
       });
+      const assistantUsage = {
+        input: 3,
+        output: 2,
+        cost: { input: 0.001, output: 0.002, total: 0.003 },
+      };
+      const toolUsage = {
+        input: 1,
+        output: 0,
+        cost: { input: 0.0005, total: 0.0005 },
+      };
       await handlers.get('turn_end')!(
         {
           message: {
             role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4',
+            usage: assistantUsage,
             content: [
               { type: 'thinking', thinking: 'private reasoning' },
               {
@@ -274,6 +338,7 @@ describe('when testing main step runtime', () => {
               toolCallId: 'read-1',
               toolName: 'read',
               isError: true,
+              usage: toolUsage,
               content: [
                 {
                   type: 'text',
@@ -340,6 +405,19 @@ describe('when testing main step runtime', () => {
       );
 
       expect(turns).toHaveLength(3);
+      expect(usages).toHaveLength(1);
+      expect(usages[0]).toEqual([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage(assistantUsage) as UsageTotals,
+        },
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage(toolUsage) as UsageTotals,
+        },
+      ]);
       expect(turns[0]?.map((line) => line.split('\n')[0])).toEqual([
         'assistant',
         'tool call · read',

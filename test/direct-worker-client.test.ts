@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
+import { normalizeUsage, type UsageTotals } from '../src/engine/usage.ts';
 import {
   createSubagentDelegationClient,
   workerUsageFromJsonLine,
@@ -147,6 +148,72 @@ describe('when running a direct workflow worker', () => {
           otherCostUsd: 0,
           totalCostUsd: 0.003,
         },
+      },
+    ]);
+  });
+
+  test('collects terminal assistant usage with the real Pi nested cost shape', () => {
+    const assistantUsage = {
+      input: 4,
+      output: 2,
+      cacheRead: 1,
+      cacheWrite: 0,
+      totalTokens: 7,
+      cost: {
+        input: 0.001,
+        output: 0.002,
+        cacheRead: 0.0005,
+        cacheWrite: 0,
+        total: 0.0035,
+      },
+    };
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4',
+            usage: assistantUsage,
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-4',
+        usage: normalizeUsage(assistantUsage) as UsageTotals,
+      },
+    ]);
+  });
+
+  test('attributes terminal tool-result usage to the last assistant model', () => {
+    const toolUsage = {
+      input: 2,
+      output: 0,
+      cost: { input: 0.0002, total: 0.0002 },
+    };
+    expect(
+      workerUsageFromJsonLine(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'read-1',
+            toolName: 'read',
+            isError: false,
+            usage: toolUsage,
+          },
+        }),
+        'openai',
+        'gpt-4',
+      ),
+    ).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-4',
+        usage: normalizeUsage(toolUsage) as UsageTotals,
       },
     ]);
   });

@@ -1,8 +1,19 @@
 import { describe, expect, jest, test } from 'bun:test';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { beginGate, failRun, pauseRun } from '../src/engine/transitions.ts';
+import {
+  advanceRun,
+  beginGate,
+  failRun,
+  pauseRun,
+} from '../src/engine/transitions.ts';
 import { createRun } from '../src/engine/state.ts';
+import {
+  beginMainStepAttempt,
+  recordCurrentStepUsage,
+  usageAggregateFromModels,
+} from '../src/engine/step-trace.ts';
+import { normalizeUsage, type UsageTotals } from '../src/engine/usage.ts';
 import {
   formatWorkflowProgressStatus,
   formatWorkflowStatusBoard,
@@ -607,6 +618,51 @@ describe('when testing workflow status', () => {
         view.dispose();
         jest.useRealTimers();
       }
+    });
+
+    test('usage summary shows USD, tokens, and per-model breakdown', () => {
+      const workflow = loadedWorkflow();
+      let run = createRun(
+        workflow,
+        'inspect',
+        ['read'],
+        'run-usage-status',
+        1_000,
+      );
+      run = beginMainStepAttempt(run, 'req-usage', 'task', 2);
+      const aggregate = usageAggregateFromModels([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage({
+            input: 3,
+            output: 2,
+            cost: { input: 0.01, output: 0.02, total: 0.03 },
+          }) as UsageTotals,
+        },
+      ]);
+      run = recordCurrentStepUsage(run, 'req-usage', aggregate, 3);
+      run = advanceRun(workflow, run, 'ready', 'Summary', 4);
+
+      const progress = formatWorkflowProgressStatus(
+        { run, workflow, now: 5_000 },
+        'Ctrl+Alt+W',
+      );
+      expect(progress).toMatch(/\$0\.03/);
+
+      const board = formatWorkflowStatusBoard({
+        run,
+        workflow,
+        now: 5_000,
+      }).join('\n');
+      expect(board).toMatch(/\$0\.03/);
+      expect(board).toMatch(/openai\/gpt-4/);
+      expect(board).toMatch(/3 in/);
+      expect(board).toMatch(/2 out/);
+
+      expect(formatWorkflowStatusText({ run, workflow, now: 5_000 })).toMatch(
+        /\$0\.03/,
+      );
     });
   });
 });

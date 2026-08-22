@@ -5,8 +5,18 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { readLatestCheckpoint } from '../src/engine/checkpoint.ts';
-import { createRun } from '../src/engine/state.ts';
+import { createRun, isWorkflowRun } from '../src/engine/state.ts';
+import {
+  beginMainStepAttempt,
+  recordCurrentStepUsage,
+  usageAggregateFromModels,
+} from '../src/engine/step-trace.ts';
 import { advanceRun } from '../src/engine/transitions.ts';
+import {
+  emptyUsage,
+  normalizeUsage,
+  type UsageTotals,
+} from '../src/engine/usage.ts';
 import { flushUnwrittenSession } from '../src/harness/session-persistence.ts';
 import { loadedWorkflow } from './helpers.ts';
 
@@ -108,5 +118,81 @@ describe('when persisting a workflow-only Pi session', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test('persists per-step usage aggregates across session reload', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-workflows-session-'));
+    const sessionDirectory = join(root, 'sessions');
+    await mkdir(sessionDirectory);
+
+    try {
+      const manager = SessionManager.create(root, sessionDirectory);
+      const workflow = loadedWorkflow();
+      let run = createRun(
+        workflow,
+        'continue after reopen',
+        ['read'],
+        'run-usage-persist',
+        1,
+        root,
+      );
+      run = beginMainStepAttempt(run, 'req-usage', 'task', 2);
+      const aggregate = usageAggregateFromModels([
+        {
+          provider: 'openai',
+          model: 'gpt-4',
+          usage: normalizeUsage({
+            input: 5,
+            output: 3,
+            cacheRead: 1,
+            cacheWrite: 0,
+            totalTokens: 9,
+            cost: {
+              input: 0.001,
+              output: 0.002,
+              cacheRead: 0.0003,
+              cacheWrite: 0,
+              total: 0.0033,
+            },
+          }) as UsageTotals,
+        },
+      ]);
+      run = recordCurrentStepUsage(run, 'req-usage', aggregate, 3);
+      run = advanceRun(workflow, run, 'ready', 'Inspected the repository', 4);
+      manager.appendCustomEntry(STATE_ENTRY_TYPE, run);
+      expect(flushUnwrittenSession(manager)).toBe(true);
+
+      const reopened = SessionManager.open(manager.getSessionFile() as string);
+      const latest = readLatestCheckpoint(
+        reopened.getBranch(),
+        STATE_ENTRY_TYPE,
+      );
+      expect(latest.status).toBe('valid');
+      if (latest.status !== 'valid') {
+        throw new Error('checkpoint should be valid');
+      }
+      expect(latest.run.history[0]?.usage).toEqual(aggregate);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects persisted checkpoints with malformed usage aggregates', () => {
+    const workflow = loadedWorkflow();
+    const run = advanceRun(
+      workflow,
+      createRun(workflow, '', ['read'], 'run-bad-usage', 1),
+      'ready',
+      'Summary',
+      2,
+    );
+    const badHistoryEntry = {
+      ...run.history[0],
+      usage: {
+        usage: { ...emptyUsage(), totalCostUsd: -1 },
+        models: [],
+      },
+    };
+    expect(isWorkflowRun({ ...run, history: [badHistoryEntry] })).toBe(false);
   });
 });

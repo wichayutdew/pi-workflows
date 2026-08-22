@@ -75,20 +75,92 @@ function numberAt(
   return 0;
 }
 
+function costNumber(
+  value: UnknownRecord,
+  costObj: UnknownRecord | undefined,
+  flatKeys: ReadonlyArray<string>,
+  nestedKey: string,
+): number {
+  for (const key of flatKeys) {
+    const candidate = finiteNonNegative(value[key]);
+    if (candidate !== undefined) return candidate;
+  }
+  if (costObj) {
+    const candidate = finiteNonNegative(costObj[nestedKey]);
+    if (candidate !== undefined) return candidate;
+  }
+  return 0;
+}
+
+function hasMalformedNumber(value: UnknownRecord): boolean {
+  for (const candidate of Object.values(value)) {
+    if (
+      typeof candidate === 'number' &&
+      (!Number.isFinite(candidate) || candidate < 0)
+    ) {
+      return true;
+    }
+    if (isRecord(candidate)) {
+      for (const nested of Object.values(candidate)) {
+        if (
+          typeof nested === 'number' &&
+          (!Number.isFinite(nested) || nested < 0)
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /** Normalizes Pi usage shapes while rejecting malformed or inconsistent totals. */
 export function normalizeUsage(value: unknown): UsageTotals | undefined {
   if (!isRecord(value)) return undefined;
+  if (hasMalformedNumber(value)) return undefined;
+
+  const costObj = isRecord(value.cost) ? value.cost : undefined;
+  const flatTotal =
+    finiteNonNegative(value.totalCostUsd) ??
+    (typeof value.cost === 'number'
+      ? finiteNonNegative(value.cost)
+      : undefined) ??
+    finiteNonNegative(value.costUsd);
+  const nestedTotal = costObj ? finiteNonNegative(costObj.total) : undefined;
+  const hasTotal = flatTotal !== undefined || nestedTotal !== undefined;
+  const totalCostUsd = flatTotal ?? nestedTotal ?? 0;
+
   let usage: UsageTotals = {
     inputTokens: numberAt(value, 'inputTokens', 'input'),
     outputTokens: numberAt(value, 'outputTokens', 'output'),
     cacheReadTokens: numberAt(value, 'cacheReadTokens', 'cacheRead'),
     cacheWriteTokens: numberAt(value, 'cacheWriteTokens', 'cacheWrite'),
-    inputCostUsd: numberAt(value, 'inputCostUsd', 'inputCost'),
-    outputCostUsd: numberAt(value, 'outputCostUsd', 'outputCost'),
-    cacheReadCostUsd: numberAt(value, 'cacheReadCostUsd', 'cacheReadCost'),
-    cacheWriteCostUsd: numberAt(value, 'cacheWriteCostUsd', 'cacheWriteCost'),
+    inputCostUsd: costNumber(
+      value,
+      costObj,
+      ['inputCostUsd', 'inputCost'],
+      'input',
+    ),
+    outputCostUsd: costNumber(
+      value,
+      costObj,
+      ['outputCostUsd', 'outputCost'],
+      'output',
+    ),
+    cacheReadCostUsd: costNumber(
+      value,
+      costObj,
+      ['cacheReadCostUsd', 'cacheReadCost'],
+      'cacheRead',
+    ),
+    cacheWriteCostUsd: costNumber(
+      value,
+      costObj,
+      ['cacheWriteCostUsd', 'cacheWriteCost'],
+      'cacheWrite',
+    ),
     otherCostUsd: 0,
-    totalCostUsd: numberAt(value, 'totalCostUsd', 'cost', 'costUsd'),
+    totalCostUsd,
   };
   const recognized = [
     'inputTokens',
@@ -112,23 +184,16 @@ export function normalizeUsage(value: unknown): UsageTotals | undefined {
     'costUsd',
   ].some((key) => key in value);
   if (!recognized) return undefined;
-  if (
-    Object.values(value).some(
-      (candidate) =>
-        typeof candidate === 'number' && !Number.isFinite(candidate),
-    )
-  )
-    return undefined;
   const componentCost =
     usage.inputCostUsd +
     usage.outputCostUsd +
     usage.cacheReadCostUsd +
     usage.cacheWriteCostUsd;
-  if ('totalCostUsd' in value || 'cost' in value || 'costUsd' in value) {
+  if (hasTotal) {
     if (componentCost > usage.totalCostUsd + 1e-9) return undefined;
     usage = { ...usage, otherCostUsd: usage.totalCostUsd - componentCost };
   } else {
-    return { ...usage, totalCostUsd: componentCost };
+    usage = { ...usage, totalCostUsd: componentCost };
   }
   return usage;
 }
@@ -233,11 +298,15 @@ export function isUsageAggregate(value: unknown): value is UsageAggregate {
 }
 
 /** Extracts one model-keyed usage record from a Pi message-like payload. */
-export function modelUsageFromMessage(value: unknown): ModelUsage | undefined {
+export function modelUsageFromMessage(
+  value: unknown,
+  fallbackProvider?: string,
+  fallbackModel?: string,
+): ModelUsage | undefined {
   if (!isRecord(value)) return undefined;
   const usage = normalizeUsage(value.usage);
   const provider =
-    typeof value.provider === 'string' ? value.provider : undefined;
-  const model = typeof value.model === 'string' ? value.model : undefined;
+    typeof value.provider === 'string' ? value.provider : fallbackProvider;
+  const model = typeof value.model === 'string' ? value.model : fallbackModel;
   return usage && provider && model ? { provider, model, usage } : undefined;
 }

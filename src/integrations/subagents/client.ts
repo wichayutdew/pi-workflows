@@ -109,6 +109,8 @@ const MAX_DIAGNOSTIC_CALLS = 64;
 /** Extracts usage only from finalized worker messages, never stream updates. */
 export function workerUsageFromJsonLine(
   line: string,
+  fallbackProvider?: string,
+  fallbackModel?: string,
 ): ReadonlyArray<SubagentModelUsage> {
   let event: WorkerJsonEvent;
   try {
@@ -122,7 +124,11 @@ export function workerUsageFromJsonLine(
   const role = event.message.role;
   if (role !== 'assistant' && role !== 'toolResult' && role !== 'tool')
     return [];
-  const usage = modelUsageFromMessage(event.message);
+  const usage = modelUsageFromMessage(
+    event.message,
+    fallbackProvider,
+    fallbackModel,
+  );
   return usage ? [usage] : [];
 }
 
@@ -319,8 +325,30 @@ export function createSubagentDelegationClient(
       let toolCount = 0;
       let responseText = '';
       const diagnostic = createDiagnostic();
+      let lastProvider: string | undefined;
+      let lastModel: string | undefined;
       let usage = emptyUsageAggregate();
       const stdoutDecoder = new StringDecoder('utf8');
+      const updateLastModel = (line: string): void => {
+        let event: WorkerJsonEvent;
+        try {
+          const parsed: unknown = JSON.parse(line);
+          if (typeof parsed !== 'object' || parsed === null) return;
+          event = parsed;
+        } catch {
+          return;
+        }
+        if (
+          event.type === 'message_end' &&
+          event.message &&
+          event.message.role === 'assistant'
+        ) {
+          if (typeof event.message.provider === 'string')
+            lastProvider = event.message.provider;
+          if (typeof event.message.model === 'string')
+            lastModel = event.message.model;
+        }
+      };
       const consumeWorkerLines = (): void => {
         while (true) {
           const newline = stdoutBuffer.indexOf('\n');
@@ -328,7 +356,20 @@ export function createSubagentDelegationClient(
           const line = stdoutBuffer.slice(0, newline);
           stdoutBuffer = stdoutBuffer.slice(newline + 1);
           recordWorkerDiagnostic(line, diagnostic);
-          usage = mergeUsage(usage, workerUsageFromJsonLine(line));
+          updateLastModel(line);
+          const lineUsage = workerUsageFromJsonLine(
+            line,
+            lastProvider,
+            lastModel,
+          );
+          if (lineUsage.length > 0) {
+            usage = mergeUsage(usage, lineUsage);
+            const latest = lineUsage[lineUsage.length - 1];
+            if (latest) {
+              lastProvider = latest.provider;
+              lastModel = latest.model;
+            }
+          }
           const progress = workerProgressFromJsonLine(
             line,
             request.requestId,

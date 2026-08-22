@@ -3,6 +3,10 @@ import { stepLogLinesFromTurn, textOnlyUserMessage } from '../step-log.ts';
 import { modelUsageFromMessage, type ModelUsage } from '../engine/usage.ts';
 import type { MainStepRuntimeState } from './main-step-runtime-types.ts';
 
+type UnknownRecord = Readonly<Record<string, unknown>>;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 type RegisterMainStepTraceOptions = {
   readonly pi: ExtensionAPI;
   readonly state: MainStepRuntimeState;
@@ -13,9 +17,27 @@ export function mainTurnUsage(event: {
   readonly message?: unknown;
   readonly toolResults?: ReadonlyArray<unknown>;
 }): ReadonlyArray<ModelUsage> {
-  return [event.message, ...(event.toolResults ?? [])]
-    .map(modelUsageFromMessage)
-    .filter((usage): usage is ModelUsage => usage !== undefined);
+  const messageUsage = modelUsageFromMessage(event.message);
+  const fallbackProvider =
+    messageUsage?.provider ??
+    (isRecord(event.message) && typeof event.message.provider === 'string'
+      ? event.message.provider
+      : undefined);
+  const fallbackModel =
+    messageUsage?.model ??
+    (isRecord(event.message) && typeof event.message.model === 'string'
+      ? event.message.model
+      : undefined);
+  const entries: Array<ModelUsage> = messageUsage ? [messageUsage] : [];
+  for (const toolResult of event.toolResults ?? []) {
+    const toolUsage = modelUsageFromMessage(
+      toolResult,
+      fallbackProvider,
+      fallbackModel,
+    );
+    if (toolUsage) entries.push(toolUsage);
+  }
+  return entries;
 }
 
 /** Arms a trace only after Pi finalizes the exact extension-supplied task. */
