@@ -118,13 +118,13 @@ flowchart TD
   Capture --> Terminate
 ```
 
-For a delegated step, pi-subagents 0.36 creates `structured_output` from the
-request's workflow result schema and agent contract v1. For a main-agent step,
-the harness registers `workflow_complete_step`. Both paths feed the same
-outcome, summary, artifact, sole-call, and policy-digest validation. The
-workflow step permissions become the sole active-tool allow-list after the
-child capability is verified. The selected subagent profile still controls
-which extension providers are loaded; unavailable providers fail closed.
+For a delegated step, pi-subagents 0.36 supplies `structured_output`; for a
+main-agent step, the harness registers `workflow_complete_step`. Both paths
+feed the same outcome, summary, artifact, sole-call, and policy-digest
+validation. The workflow step permissions become the sole active-tool
+allow-list after the child capability is verified. The selected workflow
+`agent` profile supplies role instructions plus optional model/thinking
+overrides; unavailable tools or extension providers fail closed.
 
 The harness captures the working directory when a run starts. A configured
 delegated step may bind one canonical existing directory under a YAML-authorized

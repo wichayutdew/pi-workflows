@@ -62,7 +62,6 @@ flowchart TD
   Root[pi-workflows]
   Root --> Src[src]
   Root --> Schemas[schemas]
-  Root --> Agents[agents]
   Root --> Examples[examples]
   Root --> Tests[test]
 
@@ -77,7 +76,8 @@ flowchart TD
 
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
-  Agents --> StepAgent[step.md<br/>default profile and child guidance]
-  Examples --> Starter[starter-kit<br/>work, ticket, mr-review, mr-comment]
+  Src --> Agents[agents/profile.ts<br/>workflow role prompts]
+  Examples --> Starter[starter-kit<br/>work, ticket, jira, investigate, mr-review, mr-comment]
+  Starter --> RolePrompts[agents<br/>planner, reviewer, scout, worker, workspace-preparer]
   Tests --> TestSuite[Bun test suite]
 ```
