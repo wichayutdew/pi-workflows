@@ -99,4 +99,4 @@ the runtime modules.
 | `src/workflow-status/render-step-detail.ts` | Resolves a selected path entry and renders persisted tasks, results, gate decisions, and transcript events. |
 | `src/workflow-status/transcript-reader.ts`  | Confines, stably reads, bounds, sanitizes, and redacts common credential forms in child events on demand.   |
 | `src/workflow-status/format-status.ts`      | Public text/board formatting entry points.                                                                  |
-| `src/workflow-status/view.ts`               | Interactive board/detail navigation, transcript loading/cache, refresh scheduling, and overlay boundary.    |
+| `src/workflow-status/view.ts`               | Interactive board/detail/live navigation, transcript loading/cache, refresh scheduling, and overlay boundary. |

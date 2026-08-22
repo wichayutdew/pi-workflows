@@ -182,15 +182,11 @@ export class WorkflowStatusView implements Component {
 
   /** Handle close and scrolling key input. */
   handleInput(data: string): void {
-    const isDetailHalfPageDown =
-      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('d'));
-    const isDetailHalfPageUp =
-      this.state.mode === 'detail' && matchesKey(data, Key.ctrl('u'));
     if (
       data === 'q' ||
       data === 'Q' ||
       matchesKey(data, 'ctrl+c') ||
-      (this.state.mode !== 'detail' && matchesKey(data, 'ctrl+d')) ||
+      (this.state.mode === 'board' && matchesKey(data, 'ctrl+d')) ||
       matchesKey(data, this.statusShortcut)
     ) {
       this.close();
@@ -234,9 +230,9 @@ export class WorkflowStatusView implements Component {
         this.setScrollOffset(this.state.scrollOffset + 1);
       } else if (matchesKey(data, Key.up) || data === 'k') {
         this.setScrollOffset(this.state.scrollOffset - 1);
-      } else if (isDetailHalfPageDown) {
+      } else if (matchesKey(data, Key.ctrl('d'))) {
         this.setScrollOffset(this.state.scrollOffset + halfPageSize);
-      } else if (isDetailHalfPageUp) {
+      } else if (matchesKey(data, Key.ctrl('u'))) {
         this.setScrollOffset(this.state.scrollOffset - halfPageSize);
       } else if (matchesKey(data, Key.pageDown)) {
         this.setScrollOffset(this.state.scrollOffset + pageSize);
