@@ -170,23 +170,29 @@ flowchart LR
 ```
 
 The footer cycles through `◐`, `◓`, `◑`, and `◒` and identifies the workflow
-and current step only while work runs; it is cleared when execution stops. It
-never renders a below-editor task board. Completed steps, failures, pauses,
-reviews, attempt logs, and full history live in the overlay; its rendering
-clamps long reasons to the available terminal width without altering the full
-persisted reason. Arrow keys or `j`/`k` select a path entry; `Enter`, right, or
-`l` opens its persisted attempt evidence. Detail and live-worker pages scroll
-with arrows or `j`/`k`, `Ctrl+D`/`Ctrl+U` moving down/up by half a page,
-`gg`/`G` jumping to the top/bottom, and left, `h`, or `Esc` returning. Attempt
-tasks, results, and gate decisions are globally bounded in the checkpoint.
+and current step only while work runs; it is cleared when execution stops. For
+delegated steps it also shows the active profile model when one came from
+profile frontmatter. Once Pi reports finalized usage, the footer, fallback
+status text, path rows, summary, and step detail include aggregated cost and
+input/output/cache token totals by provider/model. The footer never renders a
+below-editor task board. Completed steps, failures, pauses, reviews, attempt
+logs, usage, and full history live in the overlay; its rendering clamps long
+reasons to the available terminal width without altering the full persisted
+reason. Arrow keys or `j`/`k` select a path entry; `Enter`, right, or `l` opens
+its persisted attempt evidence. Detail and live-worker pages scroll with arrows
+or `j`/`k`, `Ctrl+D`/`Ctrl+U` moving down/up by half a page, `gg`/`G` jumping to
+the top/bottom, and left, `h`, or `Esc` returning. Attempt tasks, results, gate
+decisions, and usage aggregates are globally bounded in the checkpoint.
 Confined child transcript references are read on demand through stable
 no-follow reads; displayed controls and common credentials are removed.
 New main-agent attempts arm trace capture only when Pi finalizes the exact
-workflow task, then persist
-a redacted, size-bounded prefix of finalized assistant and tool events in
-source order. These events remain part of the parent session, but the explorer
-does not read unrelated parent-session traffic; legacy attempts without a log
-still display their bounded task and result.
+workflow task, then persist a redacted, size-bounded prefix of finalized
+assistant and tool events plus any finalized usage in source order. Delegated
+usage is accepted only from terminal worker messages and is merged into the
+same per-attempt, per-step, and workflow aggregates. These events remain part
+of the parent session, but the explorer does not read unrelated parent-session
+traffic; legacy attempts without a log still display their bounded task and
+result.
 
 After a transition is durably checkpointed, the harness posts one visible
 `workflow-step-summary` message without triggering another model turn.

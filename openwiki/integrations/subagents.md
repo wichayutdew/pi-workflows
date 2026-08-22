@@ -82,11 +82,13 @@ does not depend on a profile exposing the main-agent-only
 
 The request carries the rendered role and step task, encoded policy envelope,
 cwd, request id, default timeout, and optional model/thinking values from
-profile frontmatter. The step prompt supplies its exact instructions, and the
-previous step's self-contained compact summary supplies the cross-step handoff.
-Approved and rejected gate artifacts are persisted separately and are available
-only through the explicit `{{reviewed.artifact}}` and `{{gate.artifact}}`
-template values. Parent and sibling transcripts are never inherited.
+profile frontmatter. The active status line and live worker detail page show
+that model while the delegation is running. The step prompt supplies its exact
+instructions, and the previous step's self-contained compact summary supplies
+the cross-step handoff. Approved and rejected gate artifacts are persisted
+separately and are available only through the explicit `{{reviewed.artifact}}`
+and `{{gate.artifact}}` template values. Parent and sibling transcripts are
+never inherited.
 
 Ordinary tool failures remain inside the same child whenever its runtime can
 continue. The base delegated completion contract only requires the child to
@@ -112,6 +114,9 @@ Pi Subagents validates `structured_output` and returns one correlated terminal
 event. Pi Workflows owns declared outcomes and optional human-review gates, and
 the child result is accepted only after the private capability, policy digest,
 outcome, summary, artifact, and optional workspace fields validate.
+Finalized worker message usage is normalized by provider/model and stored with
+the exact attempt, the step aggregate, and the workflow status totals; streaming
+progress does not contribute usage.
 
 ## Same-Child Completion Repair
 
