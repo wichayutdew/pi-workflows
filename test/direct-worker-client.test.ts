@@ -88,6 +88,10 @@ describe('when running a direct workflow worker', () => {
       'pi',
       ['--no-session', '--mode', 'json', '--print', request.task],
     ]);
+    expect(
+      (calls[0]?.[2] as { env: NodeJS.ProcessEnv }).env
+        .PI_WORKFLOWS_CHILD_RUNTIME,
+    ).toBe('1');
     expect(updates).toEqual([
       { requestId: request.requestId, activity: 'thinking', toolCount: 0 },
       {

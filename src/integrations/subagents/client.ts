@@ -315,6 +315,7 @@ export function createSubagentDelegationClient(
         env: {
           ...process.env,
           PI_WORKFLOWS_CHILD: '1',
+          PI_WORKFLOWS_CHILD_RUNTIME: '1',
           PI_WORKFLOWS_CHILD_AGENT: request.agent,
         },
         stdio: ['ignore', 'pipe', 'pipe'],

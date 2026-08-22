@@ -1747,7 +1747,12 @@ describe('when testing engine', () => {
       };
       const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 5);
       if (!reconciled.run) throw new Error('reconciliation should restart');
-      run = beginMainStepAttempt(reconciled.run, 'retry-request', 'retry task', 6);
+      run = beginMainStepAttempt(
+        reconciled.run,
+        'retry-request',
+        'retry task',
+        6,
+      );
       run = recordCurrentStepUsage(run, 'retry-request', retryUsage, 7);
 
       expect(run.currentStepUsage).toEqual(

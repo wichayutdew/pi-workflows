@@ -32,7 +32,9 @@ const DEFAULT_DEPENDENCIES = {
   loadSettings,
   userWorkflowDirectory: defaultUserWorkflowDirectory,
   runtimeEnvironment: (): PiWorkflowsRuntimeEnvironment => ({
-    isSubagentChild: process.env.PI_WORKFLOWS_CHILD === '1',
+    isSubagentChild:
+      process.env.PI_WORKFLOWS_CHILD === '1' &&
+      process.env.PI_WORKFLOWS_CHILD_RUNTIME === '1',
     childAgent: process.env.PI_WORKFLOWS_CHILD_AGENT?.trim(),
   }),
   registerChildRuntime: (pi, childAgent): void => {
