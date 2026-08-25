@@ -1,5 +1,4 @@
 ---
-model: gateway/grok-4.6
 thinking: high
 ---
 
