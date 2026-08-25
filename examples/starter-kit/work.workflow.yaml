@@ -1,7 +1,7 @@
 version: 1
 id: work
 command: work
-description: "Plan, implement, verify, and publish Pull Request"
+description: 'Plan, implement, verify, and publish Pull Request'
 start: intake
 maxStepVisits: 20
 summaryMaxChars: 30000
@@ -43,15 +43,15 @@ steps:
       artifactContract:
         maxChars: 10000
         requiredSubstrings:
-          - "## Goal/Acceptance Criteria"
-          - "## Non Goal"
-          - "## Implementation Steps and Tests"
-          - "## Validation"
-          - "## Risks/Decisions Needed"
-          - "## Publications Contract/Metadata"
-          - "## Execution appendix (machine-readable)"
+          - '## Goal/Acceptance Criteria'
+          - '## Non Goal'
+          - '## Implementation Steps and Tests'
+          - '## Validation'
+          - '## Risks/Decisions Needed'
+          - '## Publications Contract/Metadata'
+          - '## Execution appendix (machine-readable)'
         forbiddenSubstrings:
-          - "The complete gate artifact is the exact Markdown saved at"
+          - 'The complete gate artifact is the exact Markdown saved at'
         onValidationFailure: retry
     transitions:
       approved: prepare-workspace
