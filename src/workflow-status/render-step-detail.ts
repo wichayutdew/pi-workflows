@@ -79,10 +79,7 @@ function summaryLines(
   value: string,
   width: number,
 ): Array<string> {
-  return [
-    theme.fg('muted', 'summary'),
-    ...wrapPlain(value, width, theme),
-  ];
+  return [theme.fg('muted', 'summary'), ...wrapPlain(value, width, theme)];
 }
 
 function boundedArtifact(value: string): {

@@ -362,7 +362,9 @@ describe('when testing prompt', () => {
         '- submit: submit the artifact to plannotator; include the full artifact argument',
       );
       expect(mainGatedTask).not.toMatch(/decision-ready/i);
-      expect(mainGatedTask).toContain('gate artifacts, Markdown plans, reports, comments, and replies');
+      expect(mainGatedTask).toContain(
+        'gate artifacts, Markdown plans, reports, comments, and replies',
+      );
       expect(mainGatedTask).toContain('one `field`: `value` per row');
       expect(mainGatedTask).toContain('## Machine-readable handoff');
 
