@@ -17,6 +17,7 @@ Latest ledger:
 1. **Workspace Integrity**: Operate strictly in `repositories[0].cwd`. Never switch branches, create workspaces, or touch unrelated files.
 2. **Execution Authority**: Run only commands listed in `worker` array. No unapproved commands or external pushes.
 3. **Resumable State**: If pre-existing dirty files were recorded in preparation, leave them intact; do not commit or stash them.
+4. **No External Writes**: Never push, create or update reviews, or mutate Jira from this stage.
 4. **Outcomes**:
    - `ready`: Implementation complete, RED/GREEN evidence logged, commit created. Pass unchanged `json` contract to reviewer.
    - `retry`: Recoverable transient tool/environment issue.

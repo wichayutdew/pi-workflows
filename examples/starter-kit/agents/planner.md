@@ -1,4 +1,5 @@
 ---
+model: gateway/gpt-5.6-terra
 thinking: high
 ---
 

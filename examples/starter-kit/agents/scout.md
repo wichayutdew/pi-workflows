@@ -1,4 +1,5 @@
 ---
+model: gateway/gemini-3.7-flash
 thinking: medium
 ---
 
