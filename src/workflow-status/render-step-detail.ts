@@ -74,6 +74,14 @@ function wrapPlain(
   return wrapped.length > 0 ? wrapped : [theme.fg(color, ' ')];
 }
 
+function summaryLines(
+  theme: WorkflowStatusTheme,
+  value: string,
+  width: number,
+): Array<string> {
+  return [theme.fg('muted', 'summary'), ...wrapPlain(value, width, theme)];
+}
+
 function boundedArtifact(value: string): {
   readonly value: string;
   readonly truncated: boolean;
@@ -101,10 +109,9 @@ function renderResult(
     '',
     theme.bold(theme.fg('accent', 'Submitted result')),
     ...keyValueLines(theme, 'outcome', result.outcome, width, 'success'),
-    ...keyValueLines(
+    ...summaryLines(
       theme,
-      'summary',
-      `${result.summary}${result.summaryTruncated ? ' … [trace truncated]' : ''}`,
+      `${result.summary}${result.summaryTruncated ? '\n… [trace truncated]' : ''}`,
       width,
     ),
     ...(result.workspaceCwd
@@ -439,7 +446,7 @@ export function renderStepDetail(
     ...(history
       ? [
           ...keyValueLines(theme, 'outcome', history.outcome, width, 'success'),
-          ...keyValueLines(theme, 'summary', history.summary, width),
+          ...summaryLines(theme, history.summary, width),
         ]
       : []),
     ...(currentReason

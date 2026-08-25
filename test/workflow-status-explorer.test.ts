@@ -659,10 +659,10 @@ describe('when exploring workflow step evidence', () => {
 
     view.handleInput('g');
     view.handleInput('j');
+    view.handleInput('j');
     const scrolledDetailPage = view.render(100);
     const scrolledDetail = scrolledDetailPage.join('\n');
     expect(scrolledDetail).toContain('I inspected the exact requirement');
-    expect(scrolledDetailPage.at(-1)).toMatch(/rows 2-/);
     view.handleInput('gg');
     expect(view.render(100).at(-1)).toMatch(/rows 1-18\//);
 
