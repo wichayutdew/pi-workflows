@@ -270,9 +270,9 @@ receive the same bound cwd.
 The prompt owns directory preparation and domain meaning. Pi Workflows neither
 creates worktrees nor knows Git, package managers, languages, frameworks, or
 command syntax. Summaries and gate artifacts cannot select a workspace. A
-workflow may define a separate bounded transition back to its binding step for
-domain-specific refresh work, such as the starter kit's guarded clean-branch
-rebase; that policy remains user-authored prompt data.
+workflow may define a separate bounded transition after its binding step for
+domain-specific refresh work, such as the starter kit's return to planning when
+the source checkout has advanced; that policy remains user-authored prompt data.
 
 After a completed run, `/workflow-restart [input]` starts a new iteration with
 the same stable run identity and source directory. If the completed iteration
@@ -292,32 +292,39 @@ flowchart TD
 
 ## Starter Workflows
 
-The starter kit now provides six commands: `/work`, `/ticket`, `/jira`,
-`/investigate`, `/mr-review`, and `/mr-comment`. They share the role profiles
+The starter kit now provides one command: `/work`. It uses the role profiles
 `workspace-preparer`, `planner`, `worker`, `reviewer`, and `scout`; copy those
 profiles into `~/.agents/agents/` before customizing them.
 
-### Starter `/mr-comment` Workflow
+### Starter `/work` Workflow
 
 ```mermaid
 stateDiagram-v2
-  [*] --> fetch
-  fetch --> plan: ready
-  fetch --> paused: blocked
-  plan --> implement: approved
+  [*] --> intake
+  intake --> plan: ready
+  intake --> intake: retry
+  intake --> paused: blocked
+  plan --> prepare-workspace: approved
   plan --> paused: changes-requested
+  plan --> plan: retry
   plan --> paused: blocked
+  prepare-workspace --> implement: ready
+  prepare-workspace --> plan: workspace-refresh
+  prepare-workspace --> prepare-workspace: retry
+  prepare-workspace --> paused: blocked
   implement --> verify: ready
+  implement --> implement: retry
   implement --> paused: blocked
-  verify --> publish: ready
-  verify --> completed: no-actions
+  verify --> publish: passed
   verify --> implement: failed
-  verify --> paused: blocked
+  verify --> verify: retry
+  verify --> verify: blocked
   publish --> completed: published
-  publish --> completed: no-actions
+  publish --> publish: retry
   publish --> paused: blocked
 ```
 
-Business intent: fetch hosted review comments, create and approve a complete
-fix plan, implement and independently verify it on the current checkout, then
-push and reply through a configured MCP, CLI, or cURL route.
+Business intent: normalize a requirement or optional Jira key, create and
+approve a publication-aware plan, prepare the approved branch and worktree,
+implement and independently verify the change, then publish the verified branch
+and open review.

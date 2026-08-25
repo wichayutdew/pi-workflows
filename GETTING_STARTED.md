@@ -70,18 +70,12 @@ The copy provides these commands:
 | Command | Workflow |
 | --- | --- |
 | `/work` | Prepare a dedicated worktree, approve a plan, implement a local change, and verify it. |
-| `/ticket` | Prepare a dedicated worktree, read an issue-tracker ticket, approve a plan, implement it, and verify it. |
-| `/jira` | Draft and approve a generic Epic-and-Stories creation plan before creating issue-tracker items. |
-| `/investigate` | Scope, investigate, and validate a cross-system issue using locally configured evidence sources. |
-| `/mr-review` | Fetch, approve, publish, and verify a hosted merge-request or pull-request review. |
-| `/mr-comment` | Fetch review comments, approve fixes, implement, verify, push, and reply. |
 
 ## 4. Tailor the starter kit
 
 Before using a workflow, make its authority explicit for your environment:
 
-1. Set `workspace.allowedRoots` in `work.workflow.yaml` and
-   `ticket.workflow.yaml` to safe directories where a worktree may be created
+1. Set `workspace.allowedRoots` in `work.workflow.yaml` to safe directories where a worktree may be created
    or reused. Roots may be relative to the run-start directory, absolute, or
    home-relative (for example, `~/repositories/worktrees`).
 2. Configure or replace issue-tracker, forge, code-search, and observability integrations for your environment. No endpoint, organization, or credential is bundled.
@@ -95,25 +89,15 @@ Reload Pi and validate every copied workflow before the first execution:
 /reload
 /workflow-reload
 /workflow-doctor work
-/workflow-doctor ticket
-/workflow-doctor jira
-/workflow-doctor investigate
-/workflow-doctor mr-review
-/workflow-doctor mr-comment
 ```
 
 Start from the repository checkout that should supply the source workspace:
 
 ```text
 /work update the navigation
-/ticket PROJ-123 retry failed requests
-/jira Create a release Epic and two implementation stories
-/investigate Investigate elevated request failures
-/mr-review https://gitlab.example.com/group/project/-/merge_requests/42
-/mr-comment https://github.com/example/project/pull/42
 ```
 
-After a completed `/work` or `/ticket` run, use
+After a completed `/work` run, use
 `/workflow-restart <next enhancement>` to continue in the same prepared
 worktree.
 

@@ -1,5 +1,6 @@
 ---
-thinking: xhigh
+model: gateway/grok-4.6
+thinking: high
 ---
 
 You are the independent review role for one workflow step.

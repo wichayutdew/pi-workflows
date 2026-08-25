@@ -1,43 +1,37 @@
 version: 1
 id: work
 command: work
-description: 'Prepare a dedicated workspace, plan, implement, and verify local work. Example: /work Add rate limiting to user registration endpoint'
-start: prepare-workspace
+description: "Plan, implement, verify, and publish Pull Request"
+start: intake
 maxStepVisits: 20
 summaryMaxChars: 30000
 steps:
-  prepare-workspace:
-    title: Prepare dedicated branch and worktree
+  intake:
+    title: Normalize requirement and optional Jira evidence
     prompt:
-      file: steps/shared/prepare-workspace.md
-    agent: workspace-preparer
-    workspace:
-      bindOn:
-        - ready
-      allowedRoots:
-        - ~/repositories/worktrees
+      file: steps/work/intake.md
+    agent: planner
     permissions:
-      tools: [read, ls, bash]
+      tools: [read, ls, bash, mcp]
       mcp: []
       extensions: [/]
-      skills: [using-git-worktrees, caveman]
+      skills: []
       bash:
         mode: unrestricted
     transitions:
       ready: plan
-      retry: prepare-workspace
+      retry: intake
       blocked: $pause
   plan:
-    title: Explore and plan local work
+    title: Explore and approve local work
     prompt:
       file: steps/work/plan.md
     agent: planner
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: [context7, sourcegraph, glean, gh_grep]
+      mcp: []
       extensions: [/]
-      skills:
-        [coding-standards, writing-plans, search-code-sourcegraph, caveman]
+      skills: []
       bash:
         mode: unrestricted
     gate:
@@ -47,34 +41,53 @@ steps:
       rejectedOutcome: changes-requested
       timeoutMs: 30000
       artifactContract:
-        maxChars: 8000
+        maxChars: 10000
         requiredSubstrings:
-          - '## Review summary'
-          - '## Review focus'
-          - '## Proposed approach'
-          - '## Validation'
-          - '## Risks'
-          - '## Execution appendix (machine-readable)'
+          - "## Goal/Acceptance Criteria"
+          - "## Non Goal"
+          - "## Implementation Steps and Tests"
+          - "## Validation"
+          - "## Risks/Decisions Needed"
+          - "## Publications Contract/Metadata"
+          - "## Execution appendix (machine-readable)"
         forbiddenSubstrings:
-          - 'The complete gate artifact is the exact Markdown saved at'
+          - "The complete gate artifact is the exact Markdown saved at"
         onValidationFailure: retry
     transitions:
-      approved: implement
+      approved: prepare-workspace
       changes-requested: plan
-      workspace-refresh: prepare-workspace
       retry: plan
       blocked: $pause
+  prepare-workspace:
+    title: Prepare approved branch and worktree
+    prompt:
+      file: steps/work/prepare-workspace.md
+    agent: workspace-preparer
+    workspace:
+      bindOn: [ready]
+      allowedRoots: [~/repositories/worktrees]
+    permissions:
+      tools: [read, ls, bash]
+      mcp: []
+      extensions: [/]
+      skills: []
+      bash:
+        mode: unrestricted
+    transitions:
+      ready: implement
+      workspace-refresh: plan
+      retry: prepare-workspace
+      blocked: $pause
   implement:
-    title: Implement the approved local plan
+    title: Implement approved work
     prompt:
       file: steps/work/implement.md
     agent: worker
     permissions:
       tools: [read, ls, bash, edit, write, mcp]
-      mcp: [context7]
+      mcp: []
       extensions: [/]
-      skills:
-        [coding-standards, test-driven-development, lint-commands, caveman]
+      skills: []
       bash:
         mode: unrestricted
     transitions:
@@ -90,12 +103,27 @@ steps:
       tools: [read, ls, bash]
       mcp: []
       extensions: [/]
-      skills:
-        [verification-before-completion, lint-commands, commit-format, caveman]
+      skills: []
       bash:
         mode: unrestricted
     transitions:
-      passed: $done
+      passed: publish
       failed: implement
       retry: verify
       blocked: verify
+  publish:
+    title: Publish verified branch and open review
+    prompt:
+      file: steps/work/publish-remote.md
+    agent: worker
+    permissions:
+      tools: [read, ls, bash, mcp]
+      mcp: []
+      extensions: [/]
+      skills: []
+      bash:
+        mode: unrestricted
+    transitions:
+      published: $done
+      retry: publish
+      blocked: $pause
