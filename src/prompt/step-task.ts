@@ -151,6 +151,8 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     ...contract.workspaceLines,
     '',
     'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    'Format all human-facing output—including summaries, gate artifacts, Markdown plans, reports, comments, and replies—for scanning: short headings, then one distinct fact, action, or metadata value per bullet or paragraph. Never pack unrelated values into one line or dense prose.',
+    'When a schema needs several related fields, use a bullet list with one `field`: `value` per row; use JSON only for machine-readable data under `## Machine-readable handoff` in a fenced valid `json` block. Keep prose outside that block.',
     ...buildNonSuccessSummaryInstructions(contract.outcomes),
     ...(isDelegated ? buildDelegatedCompletionInstructions() : []),
     'Do not call the completion tool alongside other tool calls.',

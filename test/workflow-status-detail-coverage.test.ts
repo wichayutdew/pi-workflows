@@ -127,7 +127,7 @@ describe('when rendering less common workflow step evidence', () => {
         },
         result: {
           outcome: 'submit',
-          summary: 'Result summary',
+          summary: '## Result\n- `branch`: `feat/example`\n- `commit`: `abc123`',
           summaryTruncated: true,
           artifact: 'result artifact',
           artifactTruncated: true,
@@ -170,7 +170,7 @@ describe('when rendering less common workflow step evidence', () => {
           stepId: 'inspect',
           stepDigest: workflow.stepDigests.inspect ?? '',
           outcome: 'ready',
-          summary: 'Completed summary',
+          summary: '## Completed\n- `status`: clean\n- `review`: passed',
           workspaceCwd: '/tmp/detail-worktree',
           artifact: `${'F'.repeat(20_001)}TAIL`,
           attempts,
@@ -193,6 +193,9 @@ describe('when rendering less common workflow step evidence', () => {
     expect(output).toContain('1 later event omitted');
     expect(output).toContain('3 later events omitted');
     expect(output).toContain('Submitted result');
+    expect(output).toMatch(/summary[^\n]*\n│ ## Result[^\n]*\n│ - `branch`: `feat\/example`[^\n]*\n│ - `commit`: `abc123`/);
+    expect(output).toMatch(/summary[^\n]*\n│ ## Completed[^\n]*\n│ - `status`: clean[^\n]*\n│ - `review`: passed/);
+    expect(output).not.toContain('summary ## Result - `branch`');
     expect(output).toContain('trace truncated');
     expect(output).toContain('artifact truncated in status trace');
     expect(output).toContain('/tmp/detail-worktree');
