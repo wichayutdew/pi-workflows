@@ -77,7 +77,7 @@ flowchart TD
   Schemas --> WorkflowSchema[workflow.schema.json]
   Schemas --> SettingsSchema[settings.schema.json]
   Src --> Agents[agents/profile.ts<br/>workflow role prompts]
-  Examples --> Starter[starter-kit<br/>work, ticket, jira, investigate, mr-review, mr-comment]
+  Examples --> Starter[starter-kit<br/>work]
   Starter --> RolePrompts[agents<br/>planner, reviewer, scout, worker, workspace-preparer]
   Tests --> TestSuite[Bun test suite]
 ```

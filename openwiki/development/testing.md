@@ -79,7 +79,7 @@ flowchart TD
   Install --> Reload["/reload"]
   Reload --> WorkflowReload["/workflow-reload"]
   WorkflowReload --> List["/workflow-list"]
-  List --> Start["/workflow-start mr-comment input"]
+  List --> Start["/workflow-start work input"]
   Start --> Doctor{delegated step cannot start?}
   Doctor -- yes --> SubDoctor["/subagents-doctor"]
   Doctor -- no --> Done[workflow running]
