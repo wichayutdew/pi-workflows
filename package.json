@@ -61,11 +61,12 @@
     "@eslint/js": "^10.0.1",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
     "prettier": "^3.9.5",
     "typebox": "^1.1.38",
-    "typescript": "^5.9.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.64.0"
   },
   "packageManager": "bun@1.4.0",
