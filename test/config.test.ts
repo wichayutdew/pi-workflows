@@ -49,6 +49,31 @@ describe('when testing config', () => {
       expect(result.value?.steps.inspect?.agent).toEqual({ name: 'scout' });
     });
 
+    test('preserves valid per-step tool budgets and rejects invalid values', () => {
+      const valid = baseWorkflow();
+      const validStep = (valid.steps as Record<string, Record<string, unknown>>)
+        .inspect!;
+      validStep.maxToolCalls = 10;
+
+      const validResult = validateWorkflow(valid);
+      expect(validResult.errors).toEqual([]);
+      expect(validResult.value?.steps.inspect?.maxToolCalls).toBe(10);
+
+      const invalidValues: unknown[] = [0, -1, 1.5, '10'];
+      const errors = invalidValues.flatMap((maxToolCalls) => {
+        const invalid = baseWorkflow();
+        const step = (invalid.steps as Record<string, Record<string, unknown>>)
+          .inspect!;
+        step.maxToolCalls = maxToolCalls;
+        return validateWorkflow(invalid).errors;
+      });
+
+      expect(errors).toHaveLength(4);
+      expect(errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect\.maxToolCalls: expected an integer from 1 to 100000/,
+      );
+    });
+
     test('parses gate artifact contracts and rejects malformed contracts', () => {
       const raw = baseWorkflow();
       const inspect = (raw.steps as Record<string, Record<string, unknown>>)
@@ -855,6 +880,7 @@ describe('when testing config', () => {
           '  inspect:',
           '    prompt: Inspect safely',
           '    agent: reviewer',
+          '    maxToolCalls: 10',
           '    permissions:',
           '      tools: [bash]',
           '      bash:',
@@ -922,6 +948,10 @@ describe('when testing config', () => {
         ).toEqual({
           name: 'reviewer',
         });
+        expect(
+          catalog.workflows.get('compact')?.definition.steps.inspect
+            ?.maxToolCalls,
+        ).toBe(10);
         expect(catalog.diagnostics.length).toBe(1);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(/unique/i);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(

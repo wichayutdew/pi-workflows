@@ -7,6 +7,7 @@ import { createRun } from '../src/engine/state.ts';
 import { advanceRun } from '../src/engine/transitions.ts';
 import type { HarnessActionContext } from '../src/harness/action-context.ts';
 import { createStartActions } from '../src/harness/start-actions.ts';
+import { createDelegationPlan } from '../src/harness/delegation-plan.ts';
 import type { WorkflowStartContext } from '../src/harness/types.ts';
 import { baseWorkflow, loadedWorkflow } from './helpers.ts';
 
@@ -443,6 +444,55 @@ describe('when testing start actions', () => {
     expect(command.notices.at(-1)?.message).toContain(
       'reachable step trap cannot reach $done',
     );
+  });
+
+  test('carries a configured tool budget into the signed child policy', () => {
+    const raw = baseWorkflow();
+    const inspect = (raw.steps as Record<string, Record<string, unknown>>)
+      .inspect!;
+    inspect.maxToolCalls = 10;
+    const workflow = loadedWorkflow(raw);
+    const run = createRun(
+      workflow,
+      'Inspect the repository',
+      [],
+      'budgeted-run',
+      1,
+      '/workspace/run',
+    );
+    const step = workflow.definition.steps.inspect;
+    if (!step) throw new Error('inspect step is missing');
+
+    const plan = createDelegationPlan(
+      {
+        workflow,
+        run,
+        step,
+        sessionEpoch: 1,
+        latestContext: { cwd: '/workspace/run' } as ExtensionContext,
+      },
+      {
+        createRequestId: () => 'budgeted-child',
+        createDelegationWorkspace: () => ({
+          resultDirectory: '/tmp/pi-workflows-budgeted-child',
+          capabilityPath: '/tmp/pi-workflows-budgeted-child/capability',
+          capabilityToken: 'a'.repeat(64),
+          resultPath: '/tmp/pi-workflows-budgeted-child/result.json',
+        }),
+        resolveWorkspaceDirectory: ({ candidateCwd }) => candidateCwd,
+      },
+    );
+
+    expect(plan).toMatchObject({
+      kind: 'ready',
+      active: {
+        policy: {
+          maxToolCalls: 10,
+          handoffReserve: 2,
+          totalToolCalls: 12,
+        },
+      },
+    });
   });
 
   test('creates a trimmed run and launches its first step', async () => {

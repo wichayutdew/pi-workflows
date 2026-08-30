@@ -13,6 +13,8 @@ import { buildDelegatedStepTask } from '../prompt.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
 import type { ActiveDelegation } from './types.ts';
 
+const HANDOFF_RESERVE = 2;
+
 type DelegationPlanInput = {
   workflow: LoadedWorkflow;
   run: WorkflowRun;
@@ -156,6 +158,14 @@ export function createDelegationPlan(
   const workspace = dependencies.createDelegationWorkspace();
   const outcomes = allowedOutcomes(workflow, run);
   const outcomeSet = new Set(outcomes);
+  const toolBudget =
+    step.maxToolCalls === undefined
+      ? {}
+      : {
+          maxToolCalls: step.maxToolCalls,
+          handoffReserve: HANDOFF_RESERVE,
+          totalToolCalls: step.maxToolCalls + HANDOFF_RESERVE,
+        };
   const policyDigest = digest({
     version: 1,
     requestId,
@@ -168,6 +178,7 @@ export function createDelegationPlan(
     resultPath: workspace.resultPath,
     permissions: step.permissions,
     outcomes,
+    ...toolBudget,
     ...(step.workspace ? { workspace: step.workspace } : {}),
   });
   const policy: ChildStepPolicy = {
@@ -191,6 +202,7 @@ export function createDelegationPlan(
       )
       .map(([outcome]) => outcome),
     summaryMaxChars: workflow.definition.summaryMaxChars,
+    ...toolBudget,
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
   };

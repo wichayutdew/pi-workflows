@@ -669,6 +669,11 @@
         "agent": {
           "$ref": "#/$defs/subagentRuntimeName"
         },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
         "permissions": {
           "$ref": "#/$defs/permissions"
         },

@@ -87,6 +87,7 @@ export type WorkflowStep = {
   readonly prompt: PromptSpec;
   /** Optional workflow-owned role prompt for this main-agent step. */
   readonly agent?: StepAgent;
+  readonly maxToolCalls?: number;
   readonly permissions: StepPermissions;
   readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;

@@ -358,6 +358,7 @@ export function parseWorkflowStep(
       'title',
       'prompt',
       'agent',
+      'maxToolCalls',
       'permissions',
       'requires',
       'transitions',
@@ -382,6 +383,13 @@ export function parseWorkflowStep(
   const agent: StepAgent | undefined = agentName
     ? { name: agentName }
     : undefined;
+  const maxToolCalls =
+    value.maxToolCalls === undefined
+      ? undefined
+      : readInteger(value.maxToolCalls, 1, `${path}.maxToolCalls`, errors, {
+          min: 1,
+          max: 100_000,
+        });
   const permissions = parsePermissions(
     value.permissions,
     `${path}.permissions`,
@@ -445,6 +453,7 @@ export function parseWorkflowStep(
     title,
     prompt,
     ...(agent ? { agent } : {}),
+    ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
     permissions,
     requires,
     transitions,
