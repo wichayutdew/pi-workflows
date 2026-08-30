@@ -223,6 +223,7 @@ async function finishDelegation(
             `- Original request: ${this.run.input || '(none recorded)'}`,
             `- Previous checkpoint: ${this.run.stepHandoff || '(none recorded)'}`,
             `- Observed state: ${diagnosticState}.`,
+            `- Repository state: ${this.dependencies.inspectRepositoryState(this.run.cwd ?? this.run.startCwd ?? '')}.`,
             `- Blocker: ${active.agent} did not produce its required structured result.`,
             '**Next:** Reconcile the worktree, then implement the next unconfirmed plan-backed feature.',
           ].join('\n');
