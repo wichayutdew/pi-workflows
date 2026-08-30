@@ -22,6 +22,12 @@ export type ChildStepPolicy = {
   /** Outcomes that pause instead of advancing to another workflow step. */
   readonly pauseOutcomes: ReadonlyArray<string>;
   readonly summaryMaxChars: number;
+  /** Productive calls available before the mandatory handoff reserve. */
+  readonly maxToolCalls?: number;
+  /** Calls reserved for the child to hand off after productive work. */
+  readonly handoffReserve?: number;
+  /** Productive calls plus the mandatory handoff reserve. */
+  readonly totalToolCalls?: number;
   readonly gateSubmitOutcome?: string;
   readonly workspace?: StepWorkspaceBinding;
 };

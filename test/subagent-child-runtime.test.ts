@@ -11,9 +11,11 @@ import {
 import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from '../src/integrations/subagents/child-runtime-dependencies.ts';
 import {
   encodeChildPolicy,
+  extractChildPolicy,
   parseDelegatedStepResult,
   type ChildStepPolicy,
 } from '../src/integrations/subagents/protocol.ts';
+import { childSystemPrompt } from '../src/integrations/subagents/child-runtime-policy.ts';
 import { expectTruthy } from './helpers.ts';
 
 describe('when testing subagent child runtime', () => {
@@ -134,6 +136,75 @@ describe('when testing subagent child runtime', () => {
   }
 
   describe('should satisfy its behavioral contract', () => {
+    test('round-trips signed tool budgets and describes their handoff contract', () => {
+      const policy = childPolicy(join(tmpdir(), 'pi-workflows-step-budgeted'), {
+        maxToolCalls: 10,
+        handoffReserve: 2,
+        totalToolCalls: 12,
+      });
+
+      const extracted = extractChildPolicy(
+        `${encodeChildPolicy(policy)}\n\nInspect now.`,
+      );
+      expectTruthy(extracted);
+      expect(extracted.policy).toMatchObject({
+        maxToolCalls: 10,
+        handoffReserve: 2,
+        totalToolCalls: 12,
+      });
+      const prompt = childSystemPrompt(extracted.policy);
+      expect(prompt).toContain('Productive tool-call budget: 10 calls.');
+      expect(prompt).toContain('Handoff reserve: 2 calls.');
+      expect(prompt).toContain(
+        'At 2 productive calls remaining, begin handoff.',
+      );
+      expect(prompt).toContain(
+        'Work tools are locked when the productive budget is exhausted.',
+      );
+      expect(prompt).toContain(
+        'Continue with `handoff` using the reserved calls.',
+      );
+    });
+
+    test('omits tool-budget fields and notice for unbudgeted policies', () => {
+      const policy = childPolicy(
+        join(tmpdir(), 'pi-workflows-step-unbudgeted'),
+      );
+
+      const extracted = extractChildPolicy(
+        `${encodeChildPolicy(policy)}\n\nInspect now.`,
+      );
+      expectTruthy(extracted);
+      expect(extracted.policy).not.toHaveProperty('maxToolCalls');
+      expect(extracted.policy).not.toHaveProperty('handoffReserve');
+      expect(extracted.policy).not.toHaveProperty('totalToolCalls');
+      expect(childSystemPrompt(extracted.policy)).not.toMatch(
+        /tool-call budget/i,
+      );
+    });
+
+    test('rejects malformed or inconsistent tool budgets before activation', () => {
+      const policy = childPolicy(join(tmpdir(), 'pi-workflows-step-budgeted'), {
+        maxToolCalls: 10,
+        handoffReserve: 2,
+        totalToolCalls: 12,
+      });
+      const invalidPolicies: Array<[unknown, RegExp]> = [
+        [{ ...policy, maxToolCalls: '10' }, /maxToolCalls/],
+        [{ ...policy, handoffReserve: 1 }, /handoffReserve/],
+        [{ ...policy, totalToolCalls: 11 }, /totalToolCalls/],
+        [{ ...policy, totalToolCalls: undefined }, /provided together/],
+      ];
+
+      for (const [invalidPolicy, error] of invalidPolicies) {
+        expect(() =>
+          extractChildPolicy(
+            `${encodeChildPolicy(invalidPolicy as ChildStepPolicy)}\n\nInspect now.`,
+          ),
+        ).toThrow(error);
+      }
+    });
+
     test('child runtime narrows tools, enforces Bash, and writes a correlated result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));

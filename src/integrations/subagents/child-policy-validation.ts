@@ -28,6 +28,9 @@ const POLICY_KEYS: ReadonlySet<string> = new Set([
   'outcomes',
   'pauseOutcomes',
   'summaryMaxChars',
+  'maxToolCalls',
+  'handoffReserve',
+  'totalToolCalls',
   'gateSubmitOutcome',
   'workspace',
 ]);
@@ -73,6 +76,48 @@ const rejectUnknownProperties = (
   if (unknownKey) {
     throw new Error(`child policy has unknown property "${unknownKey}"`);
   }
+};
+
+type ToolBudget = Pick<
+  ChildStepPolicy,
+  'maxToolCalls' | 'handoffReserve' | 'totalToolCalls'
+>;
+
+const parseToolBudget = (
+  value: Readonly<Record<string, unknown>>,
+): ToolBudget => {
+  const fields = [
+    value.maxToolCalls,
+    value.handoffReserve,
+    value.totalToolCalls,
+  ];
+  if (fields.every((field) => field === undefined)) return {};
+  if (fields.some((field) => field === undefined)) {
+    throw new Error(
+      'child policy tool budget fields must be provided together',
+    );
+  }
+
+  const [maxToolCalls, handoffReserve, totalToolCalls] = fields;
+  if (
+    typeof maxToolCalls !== 'number' ||
+    !Number.isInteger(maxToolCalls) ||
+    maxToolCalls < 1 ||
+    maxToolCalls > 100_000
+  ) {
+    throw new Error('child policy maxToolCalls is invalid');
+  }
+  if (handoffReserve !== 2) {
+    throw new Error('child policy handoffReserve is invalid');
+  }
+  if (
+    typeof totalToolCalls !== 'number' ||
+    !Number.isInteger(totalToolCalls) ||
+    totalToolCalls !== maxToolCalls + handoffReserve
+  ) {
+    throw new Error('child policy totalToolCalls is invalid');
+  }
+  return { maxToolCalls, handoffReserve, totalToolCalls };
 };
 
 type IdentityAndPaths = Pick<
@@ -164,5 +209,6 @@ export const parseChildPolicy = (
   return {
     ...parseIdentityAndPaths(value, environment),
     ...parseChildPolicySections(value),
+    ...parseToolBudget(value),
   };
 };

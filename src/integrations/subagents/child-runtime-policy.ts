@@ -34,6 +34,18 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
+    ...(policy.maxToolCalls === undefined
+      ? []
+      : [
+          '',
+          '## Tool-call budget',
+          `Productive tool-call budget: ${policy.maxToolCalls} calls.`,
+          `Handoff reserve: ${policy.handoffReserve} calls.`,
+          `Total tool-call budget: ${policy.totalToolCalls} calls.`,
+          'At 2 productive calls remaining, begin handoff.',
+          'Work tools are locked when the productive budget is exhausted.',
+          'Continue with `handoff` using the reserved calls.',
+        ]),
     ...(policy.gateSubmitOutcome
       ? [
           `Outcome "${policy.gateSubmitOutcome}" requires the complete gate artifact.`,
