@@ -12,6 +12,7 @@ const RESULT_KEYS = new Set([
   'summary',
   'artifact',
   'workspace',
+  'progress',
 ]);
 
 /**
@@ -29,6 +30,14 @@ export type WorkflowResultWorkspace = {
   readonly cwd: string;
 };
 
+export type WorkflowCheckpointProgress = {
+  readonly feature: string;
+  readonly commit: string;
+  readonly changedFiles: ReadonlyArray<string>;
+  readonly verification: ReadonlyArray<string>;
+  readonly remaining: ReadonlyArray<string>;
+};
+
 /**
  * Validated result handed back to the workflow engine.
  */
@@ -39,6 +48,7 @@ export type WorkflowStepResult = {
   readonly summary: string;
   readonly artifact?: string;
   readonly workspace?: WorkflowResultWorkspace;
+  readonly progress?: WorkflowCheckpointProgress;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
@@ -74,6 +84,39 @@ function validateNonSuccessSummary(outcome: string, summary: string): void {
       );
     }
   }
+}
+
+function parseCheckpointProgress(
+  value: unknown,
+  outcome: string,
+): WorkflowCheckpointProgress | undefined {
+  if (outcome !== 'checkpoint') return undefined;
+  if (!isObject(value)) throw new Error('checkpoint outcome requires progress');
+  const { feature, commit, changedFiles, verification, remaining } = value;
+  if (
+    typeof feature !== 'string' ||
+    !feature.trim() ||
+    typeof commit !== 'string' ||
+    !commit.trim() ||
+    !Array.isArray(changedFiles) ||
+    changedFiles.length === 0 ||
+    !changedFiles.every((item) => typeof item === 'string' && item) ||
+    !Array.isArray(verification) ||
+    verification.length === 0 ||
+    !verification.every((item) => typeof item === 'string' && item) ||
+    !Array.isArray(remaining) ||
+    !remaining.every((item) => typeof item === 'string' && item)
+  )
+    throw new Error(
+      'checkpoint progress must identify feature, commit, changed files, verification, and remaining work',
+    );
+  return {
+    feature: feature.trim(),
+    commit: commit.trim(),
+    changedFiles,
+    verification,
+    remaining,
+  };
 }
 
 function parseResultWorkspace(
@@ -184,6 +227,7 @@ export function parseWorkflowStepResult(
     value.outcome,
     policy,
   );
+  const progress = parseCheckpointProgress(value.progress, value.outcome);
   return {
     version: 1,
     policyDigest: policy.policyDigest,
@@ -191,5 +235,6 @@ export function parseWorkflowStepResult(
     summary,
     ...(artifact !== undefined ? { artifact } : {}),
     ...(workspace ? { workspace } : {}),
+    ...(progress ? { progress } : {}),
   };
 }

@@ -86,6 +86,42 @@ describe('when testing step result', () => {
       ).toMatchObject({ outcome: 'blocked' });
     });
 
+    test('requires semantic progress for checkpoint outcomes', () => {
+      const checkpointPolicy = {
+        policyDigest: 'policy-1',
+        outcomes: ['checkpoint'],
+        summaryMaxChars: 1_000,
+      };
+      const result = parseWorkflowStepResult(
+        {
+          version: 1,
+          policyDigest: 'policy-1',
+          outcome: 'checkpoint',
+          summary: '# Checkpoint: auth feature complete',
+          progress: {
+            feature: 'auth feature',
+            commit: 'abcdef1 implement auth feature',
+            changedFiles: ['src/auth.ts'],
+            verification: ['npm test auth: passed'],
+            remaining: ['implement profile feature'],
+          },
+        },
+        checkpointPolicy,
+      );
+      expect(result.progress?.feature).toBe('auth feature');
+      expect(() =>
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'checkpoint',
+            summary: '# Checkpoint: incomplete',
+          },
+          checkpointPolicy,
+        ),
+      ).toThrow(/checkpoint outcome requires progress/);
+    });
+
     test('requires workspace cwd exactly on configured binding outcomes', () => {
       expect(
         parseWorkflowStepResult(

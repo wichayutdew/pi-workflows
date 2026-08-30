@@ -64,11 +64,21 @@ const renderStepPrompt = ({
   const hidesRepeatedLastSummary =
     execution === 'delegated' &&
     /\{\{\s*last\.summary\s*\}\}/.test(promptTemplate);
+  const hidesRepeatedReviewedArtifact =
+    execution === 'delegated' &&
+    Boolean(run.reviewedArtifact) &&
+    /\{\{\s*reviewed\.artifact\s*\}\}/.test(promptTemplate);
   const handoffReference =
     '(Provided once in the Previous step handoff section below.)';
   const values = {
     ...templateValues,
     ...(hidesRepeatedLastSummary ? { 'last.summary': handoffReference } : {}),
+    ...(hidesRepeatedReviewedArtifact
+      ? {
+          'reviewed.artifact':
+            '(Provided once in the Approved plan section below.)',
+        }
+      : {}),
   };
 
   return renderTemplate(promptTemplate, values);
@@ -137,6 +147,9 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
       : []),
     prompt,
     '',
+    ...(run.reviewedArtifact
+      ? ['## Approved plan', '', run.reviewedArtifact, '']
+      : []),
     ...(showWorkflowInput
       ? ['## Original workflow request', '', run.input || '(none supplied)', '']
       : []),

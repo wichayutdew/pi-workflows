@@ -287,7 +287,17 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
             ? { outcome: 'planned', summary: E2E_PLAN_HANDOFF }
             : observation.step === 'implement'
               ? observation.visit === 1
-                ? { outcome: 'retry', summary: E2E_RETRY_HANDOFF }
+                ? {
+                    outcome: 'checkpoint',
+                    summary: E2E_RETRY_HANDOFF,
+                    progress: {
+                      feature: 'feature A',
+                      commit: 'abcdef1 implement feature A',
+                      changedFiles: ['src/feature-a.ts'],
+                      verification: ['bun test feature-a: passed'],
+                      remaining: ['feature B'],
+                    },
+                  }
                 : { outcome: 'implemented', summary: E2E_IMPLEMENT_HANDOFF }
               : { outcome: 'done', summary: E2E_FINAL_SUMMARY };
       return fauxAssistantMessage(

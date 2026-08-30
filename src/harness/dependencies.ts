@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { constants, mkdtempSync, writeFileSync } from 'node:fs';
 import { lstat, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -41,6 +42,7 @@ export type DelegationWorkspace = {
 
 export type WorkflowHarnessDependencies = {
   readonly now: () => number;
+  readonly inspectRepositoryState: (cwd: string) => string;
   readonly createRequestId: () => string;
   readonly createAbortController: () => AbortController;
   readonly createDelegationWorkspace: () => DelegationWorkspace;
@@ -129,6 +131,15 @@ async function readDelegatedResult(active: ActiveDelegation): Promise<string> {
 
 const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   now: () => Date.now(),
+  inspectRepositoryState: (cwd) => {
+    const head = execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    const dirty = execFileSync('git', ['-C', cwd, 'status', '--short'], {
+      encoding: 'utf8',
+    }).trim();
+    return `HEAD: ${head}\nDirty state: ${dirty || '(clean)'}`;
+  },
   createRequestId: randomUUID,
   createAbortController: () => new AbortController(),
   createDelegationWorkspace,

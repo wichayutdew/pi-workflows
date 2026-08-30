@@ -84,6 +84,29 @@ describe('when testing engine', () => {
       expect(setResumeInput(paused, '', 6).resumeInput).toBeUndefined();
     });
 
+    test('same-step handoff preserves confirmed checkpoint context', () => {
+      const raw = baseWorkflow();
+      const steps = raw.steps as Record<string, Record<string, unknown>>;
+      steps.inspect!.transitions = { handoff: 'inspect' };
+      const workflow = loadedWorkflow(raw);
+      const run = advanceRun(
+        workflow,
+        {
+          ...createRun(workflow, 'request', [], 'run-handoff-history', 1),
+          stepHandoff: '# Checkpoint: feature one committed',
+          lastSummary: '# Checkpoint: feature one committed',
+        },
+        'handoff',
+        '# Handoff: worker settled without a result',
+        2,
+      );
+
+      expect(run.stepHandoff).toContain('# Checkpoint: feature one committed');
+      expect(run.stepHandoff).toContain(
+        '# Handoff: worker settled without a result',
+      );
+    });
+
     test('paused attempts preserve the incoming step handoff for resume', () => {
       // given
       const raw = baseWorkflow();

@@ -214,6 +214,39 @@ async function finishDelegation(
         const diagnosticState = response.diagnostic
           ? `settled=${response.diagnostic.settled}, truncated=${response.diagnostic.truncated}, calls=${response.diagnostic.calls.length}`
           : 'unavailable';
+        if (step.transitions.handoff) {
+          const summary = [
+            '# Handoff: Delegated child ended without a confirmed result.',
+            '',
+            '- Completed work: No new feature is confirmed complete.',
+            `- Approved plan: ${this.run.reviewedArtifact || '(none recorded)'}`,
+            `- Original request: ${this.run.input || '(none recorded)'}`,
+            `- Previous checkpoint: ${this.run.stepHandoff || '(none recorded)'}`,
+            `- Observed state: ${diagnosticState}.`,
+            `- Repository state: ${this.dependencies.inspectRepositoryState(this.run.cwd ?? this.run.startCwd ?? '')}.`,
+            `- Blocker: ${active.agent} did not produce its required structured result.`,
+            '**Next:** Reconcile the worktree, then implement the next unconfirmed plan-backed feature.',
+          ].join('\n');
+          const fallback = {
+            version: 1 as const,
+            policyDigest: active.policy.policyDigest,
+            outcome: 'handoff',
+            summary,
+          };
+          this.run = advanceRun(
+            workflow,
+            recordCurrentStepResult(this.run, fallback, terminalAt),
+            'handoff',
+            summary,
+            this.dependencies.now(),
+          );
+          this.settleAfterTransition(workflow, {
+            stepId: active.stepId,
+            outcome: 'handoff',
+            summary,
+          });
+          return;
+        }
         throw new Error(
           `Subagent "${active.agent}" completed without producing the required correlated structured_output result (request ${active.requestId}; diagnostic ${diagnosticState})`,
           { cause: error },
