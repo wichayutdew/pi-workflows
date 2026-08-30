@@ -28,6 +28,8 @@ export type ChildStepPolicy = {
   readonly handoffReserve?: number;
   /** Productive calls plus the mandatory handoff reserve. */
   readonly totalToolCalls?: number;
+  /** Extension-owned outcome persisted when an exhausted child settles without a result. */
+  readonly handoffOutcome?: string;
   readonly gateSubmitOutcome?: string;
   readonly workspace?: StepWorkspaceBinding;
 };

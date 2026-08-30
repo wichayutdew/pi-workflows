@@ -29,6 +29,10 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     '',
     'The parent workflow harness owns orchestration and state transitions.',
     'Perform only this delegated step. Its child-side tool policy is enforced.',
+    'Do not launch subagents while executing this declarative workflow step.',
+    'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
+    'Use `retry` only for a transient failure that can be retried without new user input.',
+    'Do not open a skill unless this step YAML lists that skill.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
     'Pass the workflow result as its `value`: outcome, summary, optional artifact, and workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
@@ -42,9 +46,9 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
           `Productive tool-call budget: ${policy.maxToolCalls} calls.`,
           `Handoff reserve: ${policy.handoffReserve} calls.`,
           `Total tool-call budget: ${policy.totalToolCalls} calls.`,
-          'At 2 productive calls remaining, begin handoff.',
+          'At 2 productive calls remaining, prepare a concise handoff with completed work, current state, remaining work, and any blocker.',
           'Work tools are locked when the productive budget is exhausted.',
-          'Continue with `handoff` using the reserved calls.',
+          'If the child settles without a result after exhaustion, the extension writes the configured `handoff` structured result.',
         ]),
     ...(policy.gateSubmitOutcome
       ? [

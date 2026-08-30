@@ -97,11 +97,18 @@ describe('when testing prompt', () => {
       steps.inspect = {
         ...steps.inspect,
         agent: 'scout',
-        prompt: 'Use this handoff: {{last.summary}}',
+        prompt:
+          'Original request: {{workflow.input}}\nUse this handoff: {{last.summary}}',
       };
       const delegatedWorkflow = loadedWorkflow(delegatedRaw);
       const delegatedRun = {
-        ...createRun(delegatedWorkflow, '', [], 'run-2', 1),
+        ...createRun(
+          delegatedWorkflow,
+          'original workflow request',
+          [],
+          'run-2',
+          1,
+        ),
         reviewedArtifact: 'immutable approved plan',
         reviewedFeedback: 'ship it',
         stepHandoff: 'compact previous-step result',
@@ -113,7 +120,8 @@ describe('when testing prompt', () => {
         'policy envelope',
       );
       expect(delegatedTask).toMatch(/Agent profile: scout/);
-      expect(delegatedTask).toMatch(/Agent profile: scout/);
+      expect(delegatedTask).toContain('## Original workflow request');
+      expect(delegatedTask).toContain('original workflow request');
       expect(delegatedTask).toContain(
         'Bash allow rules: [{"executable":"git","argsPrefix":["status"]}]',
       );

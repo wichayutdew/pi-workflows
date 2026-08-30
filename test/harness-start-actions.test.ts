@@ -451,6 +451,10 @@ describe('when testing start actions', () => {
     const inspect = (raw.steps as Record<string, Record<string, unknown>>)
       .inspect!;
     inspect.maxToolCalls = 10;
+    inspect.transitions = {
+      ...(inspect.transitions as Record<string, string>),
+      handoff: 'inspect',
+    };
     const workflow = loadedWorkflow(raw);
     const run = createRun(
       workflow,
@@ -490,6 +494,7 @@ describe('when testing start actions', () => {
           maxToolCalls: 10,
           handoffReserve: 2,
           totalToolCalls: 12,
+          handoffOutcome: 'handoff',
         },
       },
     });

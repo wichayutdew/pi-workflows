@@ -38,6 +38,54 @@ describe('when testing step result', () => {
       });
     });
 
+    test('rejects non-actionable blocked and retry summaries', () => {
+      const nonSuccessPolicy = {
+        policyDigest: 'policy-1',
+        outcomes: ['done', 'blocked', 'retry'],
+        summaryMaxChars: 1_000,
+      };
+
+      const invalid: Array<[string, string, RegExp]> = [
+        [
+          'blocked',
+          'error',
+          /blocked summary must identify the missing user prerequisite and next action/,
+        ],
+        [
+          'blocked',
+          '# Blocked: Need input\n**Next:** resume.',
+          /blocked summary must identify the missing user prerequisite and next action/,
+        ],
+        [
+          'retry',
+          '# Retry: Need requirements\n**Next:** provide details.',
+          /retry summary must identify a transient failure and safe retry condition/,
+        ],
+      ];
+
+      for (const [outcome, summary, message] of invalid) {
+        expect(() =>
+          parseWorkflowStepResult(
+            { version: 1, policyDigest: 'policy-1', outcome, summary },
+            nonSuccessPolicy,
+          ),
+        ).toThrow(message);
+      }
+
+      expect(
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'blocked',
+            summary:
+              '# Blocked: Missing authorization matrix.\n1. **Authorization policy** — no role matrix was supplied.\n   **Action:** Product owner must provide the endpoint authorization matrix.\n**Next:** Provide the authorization matrix and run `/workflow-resume`.',
+          },
+          nonSuccessPolicy,
+        ),
+      ).toMatchObject({ outcome: 'blocked' });
+    });
+
     test('requires workspace cwd exactly on configured binding outcomes', () => {
       expect(
         parseWorkflowStepResult(

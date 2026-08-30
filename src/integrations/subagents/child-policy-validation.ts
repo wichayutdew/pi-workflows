@@ -31,6 +31,7 @@ const POLICY_KEYS: ReadonlySet<string> = new Set([
   'maxToolCalls',
   'handoffReserve',
   'totalToolCalls',
+  'handoffOutcome',
   'gateSubmitOutcome',
   'workspace',
 ]);
@@ -206,9 +207,27 @@ export const parseChildPolicy = (
   if (!isRecord(value)) throw new Error('child policy must be an object');
 
   rejectUnknownProperties(value);
+  const sections = parseChildPolicySections(value);
+  const toolBudget = parseToolBudget(value);
+  const handoffOutcome = value.handoffOutcome;
+  if (handoffOutcome !== undefined) {
+    if (typeof handoffOutcome !== 'string' || handoffOutcome !== 'handoff') {
+      throw new Error('child policy handoffOutcome is invalid');
+    }
+    if (toolBudget.maxToolCalls === undefined) {
+      throw new Error('child policy handoffOutcome requires a tool budget');
+    }
+    if (!sections.outcomes.includes(handoffOutcome)) {
+      throw new Error('child policy handoffOutcome must be an allowed outcome');
+    }
+  }
+  if (toolBudget.maxToolCalls !== undefined && handoffOutcome === undefined) {
+    throw new Error('child policy tool budget requires handoffOutcome');
+  }
   return {
     ...parseIdentityAndPaths(value, environment),
-    ...parseChildPolicySections(value),
-    ...parseToolBudget(value),
+    ...sections,
+    ...toolBudget,
+    ...(handoffOutcome ? { handoffOutcome } : {}),
   };
 };

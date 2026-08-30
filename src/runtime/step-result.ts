@@ -45,6 +45,37 @@ const isObject = (value: unknown): value is Record<string, unknown> => {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 };
 
+function validateNonSuccessSummary(outcome: string, summary: string): void {
+  if (outcome === 'blocked') {
+    const isActionable =
+      /^# Blocked:\s+.+/m.test(summary) &&
+      /^\s*\*\*Action:\*\*\s+.+/m.test(summary) &&
+      /^\s*\*\*Next:\*\*\s+.+/m.test(summary);
+    if (!isActionable) {
+      throw new Error(
+        'blocked summary must identify the missing user prerequisite and next action',
+      );
+    }
+  }
+  if (outcome === 'retry') {
+    const describesTransientFailure = /\btransient\b/i.test(summary);
+    const hasSafeRetryCondition =
+      /\b(safe (retry|to retry)|retry (when|after|once))\b/i.test(summary);
+    const requestsUserInput =
+      /\b(provide|confirm|choose|approve|decide)\b/i.test(summary);
+    if (
+      !/^# Retry:\s+.+/m.test(summary) ||
+      !describesTransientFailure ||
+      !hasSafeRetryCondition ||
+      requestsUserInput
+    ) {
+      throw new Error(
+        'retry summary must identify a transient failure and safe retry condition',
+      );
+    }
+  }
+}
+
 function parseResultWorkspace(
   value: unknown,
   outcome: string,
@@ -131,6 +162,7 @@ export function parseWorkflowStepResult(
       `workflow step summary exceeds ${policy.summaryMaxChars} characters`,
     );
   }
+  validateNonSuccessSummary(value.outcome, summary);
   if (value.artifact !== undefined && typeof value.artifact !== 'string') {
     throw new Error('workflow step artifact must be a string');
   }
