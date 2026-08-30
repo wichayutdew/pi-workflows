@@ -4,6 +4,7 @@ import type {
   InputEventResult,
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { redactStepDetailText } from '../../step-log.ts';
 import { invalidCompletionCallIds } from '../../policy/completion-batch.ts';
 import { freezeToolInput } from '../../policy/immutable-input.ts';
 import { authorizeToolCall, resolveActiveTools } from '../../policy/tools.ts';
@@ -47,6 +48,11 @@ type ChildRuntimeState = {
   readonly invalidCompletionCalls: ReadonlySet<string>;
   readonly effectiveTools: ReadonlySet<string>;
   readonly productiveToolCallIds: ReadonlySet<string>;
+  readonly productiveToolInputs: ReadonlyMap<
+    string,
+    { readonly toolName: string; readonly input: unknown }
+  >;
+  readonly productiveToolLedger: ReadonlyMap<string, string>;
   readonly repairRequested: boolean;
   readonly runtimeMode: 'working' | 'handoff';
 };
@@ -57,12 +63,33 @@ const INITIAL_STATE: ChildRuntimeState = {
   invalidCompletionCalls: new Set(),
   effectiveTools: new Set(),
   productiveToolCallIds: new Set(),
+  productiveToolInputs: new Map(),
+  productiveToolLedger: new Map(),
   repairRequested: false,
   runtimeMode: 'working',
 };
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const toolLedgerEntry = (
+  toolName: string,
+  input: unknown,
+  isError: boolean,
+): string => {
+  const args =
+    input !== null && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  const target =
+    typeof args.path === 'string'
+      ? args.path
+      : typeof args.command === 'string'
+        ? args.command
+        : '';
+  const detail = target ? ` ${redactStepDetailText(target).slice(0, 200)}` : '';
+  return `${toolName}${detail}${isError ? ' (failed)' : ''}`;
+};
 
 const invalidPolicyInput = (
   pi: ExtensionAPI,
@@ -156,6 +183,8 @@ export const registerSubagentChildRuntime = (
         policyError: undefined,
         effectiveTools,
         productiveToolCallIds: new Set(),
+        productiveToolInputs: new Map(),
+        productiveToolLedger: new Map(),
         repairRequested: false,
         runtimeMode: 'working',
       };
@@ -207,18 +236,27 @@ export const registerSubagentChildRuntime = (
 
     const productiveToolCallIds = new Set(state.productiveToolCallIds);
     productiveToolCallIds.add(event.toolCallId);
+    const productiveToolLedger = new Map(state.productiveToolLedger);
+    const pendingTool = state.productiveToolInputs.get(event.toolCallId);
+    productiveToolLedger.set(
+      event.toolCallId,
+      toolLedgerEntry(event.toolName, pendingTool?.input, event.isError),
+    );
     const productiveCalls = productiveToolCallIds.size;
     if (productiveCalls >= policy.maxToolCalls) {
       state = {
         ...state,
         effectiveTools: new Set(),
         productiveToolCallIds,
+        productiveToolLedger,
         runtimeMode: 'handoff',
       };
       try {
         writeChildResult({
           policy,
-          result: toolBudgetHandoffResult(policy, productiveCalls),
+          result: toolBudgetHandoffResult(policy, productiveCalls, [
+            ...productiveToolLedger.values(),
+          ]),
           dependencies,
         });
         pi.setActiveTools([]);
@@ -235,7 +273,7 @@ export const registerSubagentChildRuntime = (
       return;
     }
 
-    state = { ...state, productiveToolCallIds };
+    state = { ...state, productiveToolCallIds, productiveToolLedger };
     const productiveRemaining = policy.maxToolCalls - productiveCalls;
     if (productiveRemaining <= handoffReserve) {
       pi.sendUserMessage(
@@ -262,6 +300,7 @@ export const registerSubagentChildRuntime = (
           result: toolBudgetHandoffResult(
             policy,
             state.productiveToolCallIds.size,
+            [...state.productiveToolLedger.values()],
           ),
           dependencies,
         });
@@ -272,6 +311,24 @@ export const registerSubagentChildRuntime = (
       }
     }
     if (!needsCompletionRepair({ policy, dependencies })) return;
+    if (policy.handoffOutcome === 'handoff') {
+      try {
+        writeChildResult({
+          policy,
+          result: toolBudgetHandoffResult(
+            policy,
+            state.productiveToolCallIds.size,
+            [...state.productiveToolLedger.values()],
+            true,
+          ),
+          dependencies,
+        });
+        pi.setActiveTools([]);
+        return;
+      } catch {
+        // Retain the single completion-repair prompt when fallback persistence fails.
+      }
+    }
     state = {
       ...state,
       repairRequested: true,
@@ -368,6 +425,12 @@ export const registerSubagentChildRuntime = (
       };
     }
 
+    const productiveToolInputs = new Map(state.productiveToolInputs);
+    productiveToolInputs.set(event.toolCallId, {
+      toolName: event.toolName,
+      input,
+    });
+    state = { ...state, productiveToolInputs };
     freezeToolInput(event.input);
   });
 };

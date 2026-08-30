@@ -36,6 +36,8 @@ export const TOOL_BUDGET_HANDOFF_PROMPT = [
 export const toolBudgetHandoffResult = (
   policy: ChildStepPolicy,
   productiveCalls: number,
+  toolLedger: ReadonlyArray<string> = [],
+  settledEarly = false,
 ): WorkflowStepResult => {
   if (policy.handoffOutcome !== 'handoff') {
     throw new Error(
@@ -47,12 +49,21 @@ export const toolBudgetHandoffResult = (
     policyDigest: policy.policyDigest,
     outcome: policy.handoffOutcome,
     summary: [
-      '# Handoff: Productive tool-call budget exhausted.',
+      settledEarly
+        ? '# Handoff: Delegated child settled without a result.'
+        : '# Handoff: Productive tool-call budget exhausted.',
       '',
       `- Completed work: Productive calls completed: ${productiveCalls}.`,
-      '- Current state: Work tools are locked; no further productive tool calls ran.',
+      ...(toolLedger.length > 0
+        ? [`- Tool ledger: ${toolLedger.join('; ')}`]
+        : ['- Tool ledger: No productive tool completed before handoff.']),
+      settledEarly
+        ? '- Current state: The delegated child settled before submitting a result.'
+        : '- Current state: Work tools are locked; no further productive tool calls ran.',
       '- Remaining work: A fresh child must inspect the previous handoff and continue this same step.',
-      '- Blocker: The configured productive tool-call budget is exhausted.',
+      settledEarly
+        ? '- Blocker: The delegated child ended without its required structured result.'
+        : '- Blocker: The configured productive tool-call budget is exhausted.',
       '**Next:** Start a fresh delegated attempt for this step using the persisted handoff.',
     ].join('\n'),
   };

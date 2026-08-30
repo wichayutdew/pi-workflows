@@ -324,6 +324,61 @@ describe('when testing subagent child runtime', () => {
       }
     });
 
+    test('persists a ledger handoff when a budgeted child settles early', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, {
+        outcomes: ['ready', 'blocked', 'handoff'],
+        maxToolCalls: 24,
+        handoffReserve: 2,
+        totalToolCalls: 26,
+        handoffOutcome: 'handoff',
+      });
+      const rig = runtime(policy.agent);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        const toolExecutionEnd = rig.handlers.get('tool_execution_end')?.[0];
+        const settled = rig.handlers.get('agent_settled')?.[0];
+        expectTruthy(input);
+        expectTruthy(toolCall);
+        expectTruthy(toolExecutionEnd);
+        expectTruthy(settled);
+        input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
+        expect(
+          toolCall({
+            toolCallId: 'early-read',
+            toolName: 'read',
+            input: { path: 'README.md' },
+          }),
+        ).toBe(undefined);
+        toolExecutionEnd({
+          toolCallId: 'early-read',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          result: {},
+          isError: false,
+        });
+
+        settled({});
+
+        expect(
+          JSON.parse(await readFile(policy.resultPath, 'utf8')),
+        ).toMatchObject({
+          outcome: 'handoff',
+          summary: expect.stringContaining(
+            '# Handoff: Delegated child settled without a result.',
+          ),
+        });
+        expect(
+          JSON.parse(await readFile(policy.resultPath, 'utf8')).summary,
+        ).toContain('Tool ledger: read README.md');
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     test('child runtime narrows tools, enforces Bash, and writes a correlated result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
