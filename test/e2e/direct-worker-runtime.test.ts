@@ -192,7 +192,7 @@ describe('direct Pi workflow workers', () => {
             agent: 'worker',
             prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
             transitions: {
-              retry: 'implement',
+              checkpoint: 'implement',
               implemented: 'verify',
               blocked: '$pause',
             },
@@ -294,7 +294,7 @@ describe('direct Pi workflow workers', () => {
           },
           {
             stepId: 'implement',
-            outcome: 'retry',
+            outcome: 'checkpoint',
             summary: E2E_RETRY_HANDOFF,
             workspaceCwd: undefined,
           },
