@@ -438,6 +438,17 @@ export function parseWorkflowStep(
       );
     }
   }
+  if (agent && maxToolCalls !== undefined) {
+    if (!Object.hasOwn(transitions, 'handoff')) {
+      errors.push(
+        `${path}.transitions: maxToolCalls requires a "handoff" transition`,
+      );
+    } else if (transitions.handoff !== stepId) {
+      errors.push(
+        `${path}.transitions: handoff transition must target "${stepId}"`,
+      );
+    }
+  }
   if (workspace) {
     workspace.bindOn.forEach((outcome) => {
       if (!Object.hasOwn(transitions, outcome)) {

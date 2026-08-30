@@ -17,6 +17,7 @@ import {
   COMPLETION_REPAIR_PROMPT,
   needsCompletionRepair,
   TOOL_BUDGET_HANDOFF_PROMPT,
+  toolBudgetHandoffResult,
   toolBudgetWarningPrompt,
 } from './child-runtime-repair.ts';
 import {
@@ -210,14 +211,27 @@ export const registerSubagentChildRuntime = (
     if (productiveCalls >= policy.maxToolCalls) {
       state = {
         ...state,
-        effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+        effectiveTools: new Set(),
         productiveToolCallIds,
         runtimeMode: 'handoff',
       };
-      pi.setActiveTools([CHILD_COMPLETION_TOOL]);
-      pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
-        deliverAs: 'followUp',
-      });
+      try {
+        writeChildResult({
+          policy,
+          result: toolBudgetHandoffResult(policy, productiveCalls),
+          dependencies,
+        });
+        pi.setActiveTools([]);
+      } catch {
+        state = {
+          ...state,
+          effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+        };
+        pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+        pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
+          deliverAs: 'followUp',
+        });
+      }
       return;
     }
 
@@ -237,13 +251,27 @@ export const registerSubagentChildRuntime = (
 
   pi.on('agent_settled', () => {
     const policy = state.activePolicy;
+    if (!policy || state.repairRequested) return;
     if (
-      !policy ||
-      state.repairRequested ||
-      !needsCompletionRepair({ policy, dependencies })
+      state.runtimeMode === 'handoff' &&
+      needsCompletionRepair({ policy, dependencies })
     ) {
-      return;
+      try {
+        writeChildResult({
+          policy,
+          result: toolBudgetHandoffResult(
+            policy,
+            state.productiveToolCallIds.size,
+          ),
+          dependencies,
+        });
+        return;
+      } catch {
+        // Preserve the normal completion-repair path so the parent gets the
+        // correlated result failure if the protected write cannot be made.
+      }
     }
+    if (!needsCompletionRepair({ policy, dependencies })) return;
     state = {
       ...state,
       repairRequested: true,
@@ -309,7 +337,7 @@ export const registerSubagentChildRuntime = (
       return {
         block: true,
         reason:
-          'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+          'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
       };
     }
     if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {

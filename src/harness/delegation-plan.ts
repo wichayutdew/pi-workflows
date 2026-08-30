@@ -165,6 +165,7 @@ export function createDelegationPlan(
           maxToolCalls: step.maxToolCalls,
           handoffReserve: HANDOFF_RESERVE,
           totalToolCalls: step.maxToolCalls + HANDOFF_RESERVE,
+          handoffOutcome: 'handoff',
         };
   const policyDigest = digest({
     version: 1,
@@ -203,6 +204,7 @@ export function createDelegationPlan(
       .map(([outcome]) => outcome),
     summaryMaxChars: workflow.definition.summaryMaxChars,
     ...toolBudget,
+    ...(step.maxToolCalls === undefined ? {} : { handoffOutcome: 'handoff' }),
     ...(step.gate ? { gateSubmitOutcome: step.gate.submitOutcome } : {}),
     ...(step.workspace ? { workspace: structuredClone(step.workspace) } : {}),
   };

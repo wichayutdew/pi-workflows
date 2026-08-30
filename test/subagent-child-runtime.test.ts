@@ -138,9 +138,11 @@ describe('when testing subagent child runtime', () => {
   describe('should satisfy its behavioral contract', () => {
     test('round-trips signed tool budgets and describes their handoff contract', () => {
       const policy = childPolicy(join(tmpdir(), 'pi-workflows-step-budgeted'), {
+        outcomes: ['ready', 'blocked', 'handoff'],
         maxToolCalls: 10,
         handoffReserve: 2,
         totalToolCalls: 12,
+        handoffOutcome: 'handoff',
       });
 
       const extracted = extractChildPolicy(
@@ -151,18 +153,28 @@ describe('when testing subagent child runtime', () => {
         maxToolCalls: 10,
         handoffReserve: 2,
         totalToolCalls: 12,
+        handoffOutcome: 'handoff',
       });
       const prompt = childSystemPrompt(extracted.policy);
       expect(prompt).toContain('Productive tool-call budget: 10 calls.');
       expect(prompt).toContain('Handoff reserve: 2 calls.');
       expect(prompt).toContain(
-        'At 2 productive calls remaining, begin handoff.',
+        'At 2 productive calls remaining, prepare a concise handoff',
       );
       expect(prompt).toContain(
         'Work tools are locked when the productive budget is exhausted.',
       );
       expect(prompt).toContain(
-        'Continue with `handoff` using the reserved calls.',
+        'the extension writes the configured `handoff` structured result',
+      );
+      expect(prompt).toContain(
+        'Do not launch subagents while executing this declarative workflow step.',
+      );
+      expect(prompt).toContain(
+        'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
+      );
+      expect(prompt).toContain(
+        'Use `retry` only for a transient failure that can be retried without new user input.',
       );
     });
 
@@ -185,9 +197,11 @@ describe('when testing subagent child runtime', () => {
 
     test('rejects malformed or inconsistent tool budgets before activation', () => {
       const policy = childPolicy(join(tmpdir(), 'pi-workflows-step-budgeted'), {
+        outcomes: ['ready', 'blocked', 'handoff'],
         maxToolCalls: 10,
         handoffReserve: 2,
         totalToolCalls: 12,
+        handoffOutcome: 'handoff',
       });
       const invalidPolicies: Array<[unknown, RegExp]> = [
         [{ ...policy, maxToolCalls: '10' }, /maxToolCalls/],
@@ -210,9 +224,11 @@ describe('when testing subagent child runtime', () => {
       // budget does not transition the child from working to handoff mode.
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, {
+        outcomes: ['ready', 'blocked', 'handoff'],
         maxToolCalls: 10,
         handoffReserve: 2,
         totalToolCalls: 12,
+        handoffOutcome: 'handoff',
       });
       const rig = runtime(policy.agent);
 
@@ -256,10 +272,16 @@ describe('when testing subagent child runtime', () => {
           }
         }
 
-        expect(rig.activeTools.at(-1)).toEqual([CHILD_COMPLETION_TOOL]);
-        expect(rig.sentUserMessages.at(-1)?.content).toMatch(
-          /compact handoff/i,
-        );
+        expect(rig.activeTools.at(-1)).toEqual([]);
+        expect(
+          JSON.parse(await readFile(policy.resultPath, 'utf8')),
+        ).toMatchObject({
+          version: 1,
+          policyDigest: policy.policyDigest,
+          outcome: 'handoff',
+          summary: expect.stringContaining('# Handoff:'),
+        });
+        expect(rig.sentUserMessages).toHaveLength(2);
         expect(
           toolCall({
             toolCallId: 'late-read',
@@ -269,7 +291,7 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+            'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
         });
         expect(
           toolCall({
@@ -280,22 +302,23 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+            'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
         });
 
         settled({});
 
-        expect(rig.sentUserMessages).toHaveLength(4);
-        expect(rig.sentUserMessages.at(-1)?.content).toMatch(
-          /required correlated result/i,
-        );
+        expect(rig.sentUserMessages).toHaveLength(2);
         expect(
-          toolCall({
-            toolCallId: 'handoff-completion',
-            toolName: CHILD_COMPLETION_TOOL,
-            input: { value: { outcome: 'ready', summary: 'Compact handoff' } },
-          }),
-        ).toBe(undefined);
+          JSON.parse(await readFile(policy.resultPath, 'utf8')),
+        ).toMatchObject({
+          version: 1,
+          policyDigest: policy.policyDigest,
+          outcome: 'handoff',
+          summary: expect.stringContaining('# Handoff:'),
+        });
+        expect(
+          JSON.parse(await readFile(policy.resultPath, 'utf8')).summary,
+        ).toContain('Productive calls completed: 10.');
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

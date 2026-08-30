@@ -54,6 +54,10 @@ describe('when testing config', () => {
       const validStep = (valid.steps as Record<string, Record<string, unknown>>)
         .inspect!;
       validStep.maxToolCalls = 10;
+      validStep.transitions = {
+        ...(validStep.transitions as Record<string, string>),
+        handoff: 'inspect',
+      };
 
       const validResult = validateWorkflow(valid);
       expect(validResult.errors).toEqual([]);
@@ -65,12 +69,32 @@ describe('when testing config', () => {
         const step = (invalid.steps as Record<string, Record<string, unknown>>)
           .inspect!;
         step.maxToolCalls = maxToolCalls;
+        step.transitions = {
+          ...(step.transitions as Record<string, string>),
+          handoff: 'inspect',
+        };
         return validateWorkflow(invalid).errors;
       });
 
       expect(errors).toHaveLength(4);
       expect(errors.join('\n')).toMatch(
         /workflow\.steps\.inspect\.maxToolCalls: expected an integer from 1 to 100000/,
+      );
+
+      const missingHandoff = baseWorkflow();
+      (
+        missingHandoff.steps as Record<string, Record<string, unknown>>
+      ).inspect!.maxToolCalls = 10;
+      expect(validateWorkflow(missingHandoff).errors.join('\n')).toMatch(
+        /maxToolCalls requires a "handoff" transition/,
+      );
+
+      const crossStepHandoff = structuredClone(valid);
+      (
+        crossStepHandoff.steps as Record<string, Record<string, unknown>>
+      ).inspect!.transitions = { ready: 'implement', handoff: 'implement' };
+      expect(validateWorkflow(crossStepHandoff).errors.join('\n')).toMatch(
+        /handoff transition must target "inspect"/,
       );
     });
 
@@ -890,6 +914,7 @@ describe('when testing config', () => {
           '            argsPrefixes: [[status], [diff, --stat]]',
           '    transitions:',
           '      done: $done',
+          '      handoff: inspect',
         ].join('\n'),
         'utf8',
       );

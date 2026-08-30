@@ -51,6 +51,7 @@ type RenderStepPromptOptions = {
 };
 
 const RESUME_INPUT_PLACEHOLDER = /\{\{\s*resume\.input\s*\}\}/;
+const WORKFLOW_INPUT_PLACEHOLDER = /\{\{\s*workflow\.input\s*\}\}/;
 
 const renderStepPrompt = ({
   workflow,
@@ -110,6 +111,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
   const isDelegated = execution === 'delegated';
   const promptTemplate = workflow.prompts[run.currentStepId] ?? '';
   const prompt = renderStepPrompt({ workflow, run, step, execution });
+  const showWorkflowInput = WORKFLOW_INPUT_PLACEHOLDER.test(promptTemplate);
   const handoff = currentStepHandoff(run);
   const contract = createStepContract({ workflow, run, step });
   const completionTool = isDelegated
@@ -135,6 +137,9 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
       : []),
     prompt,
     '',
+    ...(showWorkflowInput
+      ? ['## Original workflow request', '', run.input || '(none supplied)', '']
+      : []),
     ...(isDelegated ? buildDelegatedHandoffSection(handoff) : []),
     ...buildRestartWorkspaceSection(run.restartWorkspaceCwd),
     ...buildResumeInputSection(
