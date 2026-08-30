@@ -149,6 +149,15 @@ export const advanceRun = (
   const preservesGateRevisionContext =
     target === run.currentStepId &&
     (options.sameStepHumanGateRevision || Boolean(run.gateArtifact));
+  const preservesHandoffContext =
+    target === run.currentStepId &&
+    outcome === 'handoff' &&
+    Boolean(run.stepHandoff);
+  const nextStepHandoff = preservesGateRevisionContext
+    ? run.stepHandoff
+    : preservesHandoffContext
+      ? `${run.stepHandoff}\n\nLatest handoff:\n${summary}`
+      : summary;
   const nextVisitCount = (run.visits[target] ?? 0) + 1;
   const isOverVisitLimit =
     !options.sameStepHumanGateRevision &&
@@ -180,7 +189,7 @@ export const advanceRun = (
       currentStepUsage: undefined,
       ...(cwd ? { cwd } : {}),
       ...(effects.workspaceCwd ? { restartWorkspaceCwd: undefined } : {}),
-      stepHandoff: preservesGateRevisionContext ? run.stepHandoff : summary,
+      stepHandoff: nextStepHandoff,
       lastSummary: summary,
       gateArtifact: preservesGateRevisionContext ? run.gateArtifact : '',
       gateFeedback: preservesGateRevisionContext ? run.gateFeedback : '',

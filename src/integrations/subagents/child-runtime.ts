@@ -243,33 +243,18 @@ export const registerSubagentChildRuntime = (
       toolLedgerEntry(event.toolName, pendingTool?.input, event.isError),
     );
     const productiveCalls = productiveToolCallIds.size;
-    if (productiveCalls >= policy.maxToolCalls) {
+    if (productiveCalls >= policy.maxToolCalls - handoffReserve) {
       state = {
         ...state,
-        effectiveTools: new Set(),
+        effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
         productiveToolCallIds,
         productiveToolLedger,
         runtimeMode: 'handoff',
       };
-      try {
-        writeChildResult({
-          policy,
-          result: toolBudgetHandoffResult(policy, productiveCalls, [
-            ...productiveToolLedger.values(),
-          ]),
-          dependencies,
-        });
-        pi.setActiveTools([]);
-      } catch {
-        state = {
-          ...state,
-          effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
-        };
-        pi.setActiveTools([CHILD_COMPLETION_TOOL]);
-        pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
-          deliverAs: 'followUp',
-        });
-      }
+      pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+      pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
+        deliverAs: 'followUp',
+      });
       return;
     }
 
@@ -394,7 +379,7 @@ export const registerSubagentChildRuntime = (
       return {
         block: true,
         reason:
-          'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
+          'Productive tool-call budget reserve is reached; only structured_output is available for checkpoint handoff',
       };
     }
     if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {

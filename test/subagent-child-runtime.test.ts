@@ -244,7 +244,7 @@ describe('when testing subagent child runtime', () => {
         expectTruthy(settled);
         input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
 
-        for (let call = 1; call <= 10; call += 1) {
+        for (let call = 1; call <= 8; call += 1) {
           expect(
             toolCall({
               toolCallId: `productive-${call}`,
@@ -258,30 +258,12 @@ describe('when testing subagent child runtime', () => {
             result: {},
             isError: false,
           });
-
-          if (call === 8 || call === 9) {
-            const warning = rig.sentUserMessages.at(-1);
-            expect(warning?.content).toContain(
-              `Productive calls used: ${call}.`,
-            );
-            expect(warning?.content).toContain(
-              `Productive calls remaining: ${10 - call}.`,
-            );
-            expect(warning?.content).toContain('Handoff reserve: 2 calls.');
-            expect(warning?.options).toEqual({ deliverAs: 'followUp' });
-          }
         }
 
-        expect(rig.activeTools.at(-1)).toEqual([]);
-        expect(
-          JSON.parse(await readFile(policy.resultPath, 'utf8')),
-        ).toMatchObject({
-          version: 1,
-          policyDigest: policy.policyDigest,
-          outcome: 'handoff',
-          summary: expect.stringContaining('# Handoff:'),
-        });
-        expect(rig.sentUserMessages).toHaveLength(2);
+        expect(rig.activeTools.at(-1)).toEqual([CHILD_COMPLETION_TOOL]);
+        expect(rig.sentUserMessages.at(-1)?.content).toContain(
+          'Call `structured_output` exactly once',
+        );
         expect(
           toolCall({
             toolCallId: 'late-read',
@@ -291,7 +273,7 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
+            'Productive tool-call budget reserve is reached; only structured_output is available for checkpoint handoff',
         });
         expect(
           toolCall({
@@ -302,12 +284,12 @@ describe('when testing subagent child runtime', () => {
         ).toEqual({
           block: true,
           reason:
-            'Productive tool-call budget is exhausted; the extension-owned handoff is already persisted',
+            'Productive tool-call budget reserve is reached; only structured_output is available for checkpoint handoff',
         });
 
         settled({});
 
-        expect(rig.sentUserMessages).toHaveLength(2);
+        expect(rig.sentUserMessages).toHaveLength(1);
         expect(
           JSON.parse(await readFile(policy.resultPath, 'utf8')),
         ).toMatchObject({
@@ -318,7 +300,7 @@ describe('when testing subagent child runtime', () => {
         });
         expect(
           JSON.parse(await readFile(policy.resultPath, 'utf8')).summary,
-        ).toContain('Productive calls completed: 10.');
+        ).toContain('Productive calls completed: 8.');
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

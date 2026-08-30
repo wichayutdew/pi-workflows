@@ -122,6 +122,8 @@ describe('when testing prompt', () => {
       expect(delegatedTask).toMatch(/Agent profile: scout/);
       expect(delegatedTask).toContain('## Original workflow request');
       expect(delegatedTask).toContain('original workflow request');
+      expect(delegatedTask).toContain('## Approved plan');
+      expect(delegatedTask).toContain('immutable approved plan');
       expect(delegatedTask).toContain(
         'Bash allow rules: [{"executable":"git","argsPrefix":["status"]}]',
       );
