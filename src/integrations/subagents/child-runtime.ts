@@ -16,6 +16,8 @@ import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from './child-runtime-dependencies
 import {
   COMPLETION_REPAIR_PROMPT,
   needsCompletionRepair,
+  TOOL_BUDGET_HANDOFF_PROMPT,
+  toolBudgetWarningPrompt,
 } from './child-runtime-repair.ts';
 import {
   verifyChildCapability,
@@ -43,7 +45,9 @@ type ChildRuntimeState = {
   readonly policyError: string | undefined;
   readonly invalidCompletionCalls: ReadonlySet<string>;
   readonly effectiveTools: ReadonlySet<string>;
+  readonly productiveToolCallIds: ReadonlySet<string>;
   readonly repairRequested: boolean;
+  readonly runtimeMode: 'working' | 'handoff';
 };
 
 const INITIAL_STATE: ChildRuntimeState = {
@@ -51,7 +55,9 @@ const INITIAL_STATE: ChildRuntimeState = {
   policyError: undefined,
   invalidCompletionCalls: new Set(),
   effectiveTools: new Set(),
+  productiveToolCallIds: new Set(),
   repairRequested: false,
+  runtimeMode: 'working',
 };
 
 const errorMessage = (error: unknown): string =>
@@ -148,7 +154,9 @@ export const registerSubagentChildRuntime = (
         activePolicy: extracted.policy,
         policyError: undefined,
         effectiveTools,
+        productiveToolCallIds: new Set(),
         repairRequested: false,
+        runtimeMode: 'working',
       };
     } catch (error) {
       const policyError = errorMessage(error);
@@ -180,6 +188,51 @@ export const registerSubagentChildRuntime = (
 
   pi.on('turn_start', () => {
     state = { ...state, invalidCompletionCalls: new Set() };
+  });
+
+  pi.on('tool_execution_end', (event) => {
+    const policy = state.activePolicy;
+    const handoffReserve = policy?.handoffReserve;
+    if (
+      !policy ||
+      policy.maxToolCalls === undefined ||
+      handoffReserve === undefined ||
+      event.toolName === CHILD_COMPLETION_TOOL ||
+      state.runtimeMode === 'handoff' ||
+      state.productiveToolCallIds.has(event.toolCallId)
+    ) {
+      return;
+    }
+
+    const productiveToolCallIds = new Set(state.productiveToolCallIds);
+    productiveToolCallIds.add(event.toolCallId);
+    const productiveCalls = productiveToolCallIds.size;
+    if (productiveCalls >= policy.maxToolCalls) {
+      state = {
+        ...state,
+        effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+        productiveToolCallIds,
+        runtimeMode: 'handoff',
+      };
+      pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+      pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
+        deliverAs: 'followUp',
+      });
+      return;
+    }
+
+    state = { ...state, productiveToolCallIds };
+    const productiveRemaining = policy.maxToolCalls - productiveCalls;
+    if (productiveRemaining <= handoffReserve) {
+      pi.sendUserMessage(
+        toolBudgetWarningPrompt({
+          productiveCalls,
+          productiveRemaining,
+          handoffReserve,
+        }),
+        { deliverAs: 'followUp' },
+      );
+    }
   });
 
   pi.on('agent_settled', () => {
@@ -251,6 +304,13 @@ export const registerSubagentChildRuntime = (
           reason: errorMessage(error),
         };
       }
+    }
+    if (state.runtimeMode === 'handoff') {
+      return {
+        block: true,
+        reason:
+          'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+      };
     }
     if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {
       return {

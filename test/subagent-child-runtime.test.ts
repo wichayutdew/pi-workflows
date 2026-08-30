@@ -205,6 +205,102 @@ describe('when testing subagent child runtime', () => {
       }
     });
 
+    test('warns at the productive budget threshold then locks work tools for handoff', async () => {
+      // This fails if executed child calls are not counted or the productive
+      // budget does not transition the child from working to handoff mode.
+      const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
+      const policy = childPolicy(directory, {
+        maxToolCalls: 10,
+        handoffReserve: 2,
+        totalToolCalls: 12,
+      });
+      const rig = runtime(policy.agent);
+
+      try {
+        await writeFile(policy.capabilityPath, policy.capabilityToken);
+        const input = rig.handlers.get('input')?.[0];
+        const toolCall = rig.handlers.get('tool_call')?.[0];
+        const toolExecutionEnd = rig.handlers.get('tool_execution_end')?.[0];
+        const settled = rig.handlers.get('agent_settled')?.[0];
+        expectTruthy(input);
+        expectTruthy(toolCall);
+        expectTruthy(toolExecutionEnd);
+        expectTruthy(settled);
+        input({ text: `${encodeChildPolicy(policy)}\n\nInspect.` });
+
+        for (let call = 1; call <= 10; call += 1) {
+          expect(
+            toolCall({
+              toolCallId: `productive-${call}`,
+              toolName: 'read',
+              input: { path: 'README.md' },
+            }),
+          ).toBe(undefined);
+          toolExecutionEnd({
+            toolCallId: `productive-${call}`,
+            toolName: 'read',
+            result: {},
+            isError: false,
+          });
+
+          if (call === 8 || call === 9) {
+            const warning = rig.sentUserMessages.at(-1);
+            expect(warning?.content).toContain(
+              `Productive calls used: ${call}.`,
+            );
+            expect(warning?.content).toContain(
+              `Productive calls remaining: ${10 - call}.`,
+            );
+            expect(warning?.content).toContain('Handoff reserve: 2 calls.');
+            expect(warning?.options).toEqual({ deliverAs: 'followUp' });
+          }
+        }
+
+        expect(rig.activeTools.at(-1)).toEqual([CHILD_COMPLETION_TOOL]);
+        expect(rig.sentUserMessages.at(-1)?.content).toMatch(
+          /compact handoff/i,
+        );
+        expect(
+          toolCall({
+            toolCallId: 'late-read',
+            toolName: 'read',
+            input: { path: 'README.md' },
+          }),
+        ).toEqual({
+          block: true,
+          reason:
+            'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+        });
+        expect(
+          toolCall({
+            toolCallId: 'late-bash',
+            toolName: 'bash',
+            input: { command: 'git status' },
+          }),
+        ).toEqual({
+          block: true,
+          reason:
+            'Productive tool-call budget is exhausted; only structured_output is available for handoff',
+        });
+
+        settled({});
+
+        expect(rig.sentUserMessages).toHaveLength(4);
+        expect(rig.sentUserMessages.at(-1)?.content).toMatch(
+          /required correlated result/i,
+        );
+        expect(
+          toolCall({
+            toolCallId: 'handoff-completion',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: { value: { outcome: 'ready', summary: 'Compact handoff' } },
+          }),
+        ).toBe(undefined);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     test('child runtime narrows tools, enforces Bash, and writes a correlated result', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
