@@ -23,7 +23,6 @@ import {
   E2E_PLAN_HANDOFF,
   E2E_PLAN_MARKER,
   E2E_PROVIDER_ID,
-  E2E_RETRY_HANDOFF,
   E2E_VERIFY_MARKER,
 } from '../fixtures/e2e-values.ts';
 

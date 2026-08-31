@@ -165,7 +165,7 @@ describe('when testing subagent child runtime', () => {
         'Work tools are locked when the productive budget is exhausted.',
       );
       expect(prompt).toContain(
-        'the extension writes the configured `handoff` structured result',
+        'the parent workflow harness composes a contextual fallback handoff',
       );
       expect(prompt).toContain(
         'Do not launch subagents while executing this declarative workflow step.',
@@ -290,23 +290,13 @@ describe('when testing subagent child runtime', () => {
         settled({});
 
         expect(rig.sentUserMessages).toHaveLength(1);
-        expect(
-          JSON.parse(await readFile(policy.resultPath, 'utf8')),
-        ).toMatchObject({
-          version: 1,
-          policyDigest: policy.policyDigest,
-          outcome: 'handoff',
-          summary: expect.stringContaining('# Handoff:'),
-        });
-        expect(
-          JSON.parse(await readFile(policy.resultPath, 'utf8')).summary,
-        ).toContain('Productive calls completed: 8.');
+        expect(await Bun.file(policy.resultPath).exists()).toBe(false);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
     });
 
-    test('persists a ledger handoff when a budgeted child settles early', async () => {
+    test('defers a budgeted child settlement without a result to the parent', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, {
         outcomes: ['ready', 'blocked', 'handoff'],
@@ -345,17 +335,11 @@ describe('when testing subagent child runtime', () => {
 
         settled({});
 
-        expect(
-          JSON.parse(await readFile(policy.resultPath, 'utf8')),
-        ).toMatchObject({
-          outcome: 'handoff',
-          summary: expect.stringContaining(
-            '# Handoff: Delegated child settled without a result.',
-          ),
-        });
-        expect(
-          JSON.parse(await readFile(policy.resultPath, 'utf8')).summary,
-        ).toContain('Tool ledger: read README.md');
+        expect(await Bun.file(policy.resultPath).exists()).toBe(false);
+        expect(rig.activeTools.at(-1)).toEqual([CHILD_COMPLETION_TOOL]);
+        expect(rig.sentUserMessages.at(-1)?.content).toMatch(
+          /correlated result/i,
+        );
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
