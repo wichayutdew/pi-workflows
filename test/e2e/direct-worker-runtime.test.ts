@@ -193,6 +193,7 @@ describe('direct Pi workflow workers', () => {
             prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
             transitions: {
               checkpoint: 'implement',
+              handoff: 'implement',
               implemented: 'verify',
               blocked: '$pause',
             },
@@ -294,12 +295,6 @@ describe('direct Pi workflow workers', () => {
           },
           {
             stepId: 'implement',
-            outcome: 'checkpoint',
-            summary: E2E_RETRY_HANDOFF,
-            workspaceCwd: undefined,
-          },
-          {
-            stepId: 'implement',
             outcome: 'implemented',
             summary: E2E_IMPLEMENT_HANDOFF,
             workspaceCwd: undefined,
@@ -321,7 +316,7 @@ describe('direct Pi workflow workers', () => {
           }
           return { stepId: entry.stepId, usage: entry.usage };
         });
-        expect(historyUsage).toHaveLength(5);
+        expect(historyUsage).toHaveLength(4);
         for (const { usage } of historyUsage) {
           expect(
             usage.usage.inputTokens + usage.usage.outputTokens,
@@ -338,7 +333,7 @@ describe('direct Pi workflow workers', () => {
         const implementUsage = historyUsage.filter(
           (entry) => entry.stepId === 'implement',
         );
-        expect(implementUsage).toHaveLength(2);
+        expect(implementUsage).toHaveLength(1);
         expect(
           implementUsage.reduce(
             (total, entry) =>

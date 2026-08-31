@@ -215,6 +215,14 @@ async function finishDelegation(
           ? `settled=${response.diagnostic.settled}, truncated=${response.diagnostic.truncated}, calls=${response.diagnostic.calls.length}`
           : 'unavailable';
         if (step.transitions.handoff) {
+          let repositoryState: string;
+          try {
+            repositoryState = this.dependencies.inspectRepositoryState(
+              this.run.cwd ?? this.run.startCwd ?? '',
+            );
+          } catch (repositoryError) {
+            repositoryState = `unavailable (${repositoryError instanceof Error ? repositoryError.message : String(repositoryError)})`;
+          }
           const summary = [
             '# Handoff: Delegated child ended without a confirmed result.',
             '',
@@ -223,7 +231,7 @@ async function finishDelegation(
             `- Original request: ${this.run.input || '(none recorded)'}`,
             `- Previous checkpoint: ${this.run.stepHandoff || '(none recorded)'}`,
             `- Observed state: ${diagnosticState}.`,
-            `- Repository state: ${this.dependencies.inspectRepositoryState(this.run.cwd ?? this.run.startCwd ?? '')}.`,
+            `- Repository state: ${repositoryState}.`,
             `- Blocker: ${active.agent} did not produce its required structured result.`,
             '**Next:** Reconcile the worktree, then implement the next unconfirmed plan-backed feature.',
           ].join('\n');

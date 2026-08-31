@@ -38,6 +38,7 @@ interface Observation {
   hasRetryHandoff: boolean;
   hasImplementHandoff: boolean;
   hasWorkflowInput: boolean;
+  hasUnconfirmedCompletion: boolean;
   hasExpectedProfile: boolean;
   hasReplanOutcome: boolean;
   hasCompletionRepair: boolean;
@@ -132,6 +133,9 @@ function observe(context: Context): Observation {
     hasRetryHandoff: user.text.includes(E2E_RETRY_HANDOFF),
     hasImplementHandoff: user.text.includes(E2E_IMPLEMENT_HANDOFF),
     hasWorkflowInput: user.text.includes(E2E_INPUT_MARKER),
+    hasUnconfirmedCompletion: user.text.includes(
+      'No new feature is confirmed complete.',
+    ),
     hasExpectedProfile:
       expectedAgent.length > 0 &&
       user.text.includes(`Agent profile: ${expectedAgent}`),
@@ -202,10 +206,18 @@ function observe(context: Context): Observation {
       observation.violations.push('implement marker is missing');
     if (observation.visit === 1 && !observation.hasPlanHandoff)
       observation.violations.push('compact plan handoff is missing');
-    if (observation.visit === 2 && !observation.hasRetryHandoff)
-      observation.violations.push('compact retry handoff is missing');
-    if (observation.visit > 2)
-      observation.violations.push('implement revisited more than once');
+    if (observation.visit === 3) {
+      if (!observation.hasPlanHandoff)
+        observation.violations.push('approved plan is missing from recovery');
+      if (!observation.hasWorkflowInput)
+        observation.violations.push(
+          'original request is missing from recovery',
+        );
+      if (!observation.hasUnconfirmedCompletion)
+        observation.violations.push('unconfirmed completion marker is missing');
+    }
+    if (observation.visit > 4)
+      observation.violations.push('implement revisited more than three times');
     if (
       observation.hasBootstrapMarker ||
       observation.hasPlanMarker ||
@@ -213,13 +225,13 @@ function observe(context: Context): Observation {
       observation.hasBootstrapHandoff ||
       observation.hasImplementHandoff ||
       (observation.visit === 1 && observation.hasRetryHandoff) ||
-      (observation.visit === 2 && observation.hasPlanHandoff)
+      (observation.visit === 2 && observation.hasRetryHandoff)
     ) {
       observation.violations.push(
         'unrelated context leaked into implement context',
       );
     }
-    if (observation.hasWorkflowInput)
+    if (observation.visit < 3 && observation.hasWorkflowInput)
       observation.violations.push(
         'workflow input leaked into implement context',
       );
@@ -269,11 +281,14 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
       }
 
       if (
-        observation.step === 'plan' &&
-        observation.visit === 1 &&
-        !observation.hasCompletionRepair
+        (observation.step === 'plan' &&
+          observation.visit === 1 &&
+          !observation.hasCompletionRepair) ||
+        (observation.step === 'implement' && observation.visit === 1)
       ) {
-        return fauxAssistantMessage([fauxText('Planning is complete.')]);
+        return fauxAssistantMessage([
+          fauxText('Worker settled without output.'),
+        ]);
       }
 
       const result =
@@ -286,16 +301,16 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
           : observation.step === 'plan'
             ? { outcome: 'planned', summary: E2E_PLAN_HANDOFF }
             : observation.step === 'implement'
-              ? observation.visit === 1
+              ? observation.visit === 3
                 ? {
                     outcome: 'checkpoint',
-                    summary: E2E_RETRY_HANDOFF,
+                    summary: 'Feature B checkpointed',
                     progress: {
-                      feature: 'feature A',
-                      commit: 'abcdef1 implement feature A',
-                      changedFiles: ['src/feature-a.ts'],
-                      verification: ['bun test feature-a: passed'],
-                      remaining: ['feature B'],
+                      feature: 'feature B',
+                      commit: 'abcdef2 implement feature B',
+                      changedFiles: ['src/feature-b.ts'],
+                      verification: ['bun test feature-b: passed'],
+                      remaining: [],
                     },
                   }
                 : { outcome: 'implemented', summary: E2E_IMPLEMENT_HANDOFF }
