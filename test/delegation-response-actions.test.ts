@@ -207,4 +207,122 @@ describe('when a delegated child settles without a correlated result', () => {
       'No new feature is confirmed complete.',
     );
   });
+
+  test('records the same contextual handoff when the child settled after exhausting its productive tool-call reserve', async () => {
+    const workflow = handoffCapableWorkflow();
+    const run = runAtImplementStep(workflow);
+    const active = buildActiveDelegation(run);
+    const reserveExhaustedCalls = Array.from({ length: 24 }, (_, index) => ({
+      id: `call-${index}`,
+      name: index % 2 === 0 ? 'edit' : 'bash',
+      state: 'completed' as const,
+    }));
+    const response: SubagentDelegationResponse = {
+      requestId: active.requestId,
+      agent: 'worker',
+      status: 'completed',
+      diagnostic: {
+        settled: true,
+        truncated: false,
+        calls: reserveExhaustedCalls,
+      },
+    };
+
+    const calls = {
+      cleanupCount: 0,
+      paused: [] as Array<string>,
+      settled: [] as Array<{
+        stepId: string;
+        outcome: string;
+        summary: string;
+      }>,
+      inspectedCwd: [] as Array<string>,
+    };
+
+    const fixture = {
+      activeDelegation: active,
+      catalog: {
+        workflows: new Map([[workflow.definition.id, workflow]]),
+      },
+      cleanupDelegation: async () => {
+        calls.cleanupCount += 1;
+      },
+      dependencies: {
+        now: () => 100,
+        readDelegatedResult: async () => {
+          throw Object.assign(new Error('result file is missing'), {
+            code: 'ENOENT',
+          });
+        },
+        inspectRepositoryState: (cwd: string) => {
+          calls.inspectedCwd.push(cwd);
+          return REPOSITORY_STATE_SNAPSHOT;
+        },
+      },
+      finishDelegation: async () => undefined,
+      isSessionActive: true,
+      latestContext: undefined,
+      launchCurrentStep: () => {
+        throw new Error('must not retry an unsafe diagnostic');
+      },
+      mutationQueue: {
+        run: async <T>(operation: () => Promise<T> | T) => operation(),
+      },
+      pauseForDelegationFailure: (reason: string) => {
+        calls.paused.push(reason);
+      },
+      persist: () => undefined,
+      releaseMainAfterCancellation: () => undefined,
+      retainUnconfirmedDelegation: () => undefined,
+      run,
+      sessionEpoch: 5,
+      settleAfterTransition: (
+        _workflow: LoadedWorkflow,
+        report: { stepId: string; outcome: string; summary: string },
+      ) => {
+        calls.settled.push(report);
+      },
+      subagents: { activeRequestId: undefined },
+      submitGate: async () => undefined,
+      updateStatus: () => undefined,
+    };
+
+    const actions = createDelegationResponseActions();
+    await actions.finishDelegation.call(
+      fixture as unknown as HarnessActionContext,
+      active,
+      response,
+    );
+
+    expect(calls.paused).toEqual([]);
+    expect(calls.cleanupCount).toBe(1);
+    expect(calls.settled).toHaveLength(1);
+    expect(calls.settled[0]).toMatchObject({
+      stepId: 'implement',
+      outcome: 'handoff',
+    });
+
+    const summary = calls.settled[0]!.summary;
+    expect(summary).toContain(
+      '# Handoff: Delegated child ended without a confirmed result.',
+    );
+    expect(summary).toContain('No new feature is confirmed complete.');
+    expect(summary).toContain(APPROVED_PLAN);
+    expect(summary).toContain(ORIGINAL_REQUEST);
+    expect(summary).toContain(PREVIOUS_CHECKPOINT);
+    expect(summary).toContain(
+      `settled=true, truncated=false, calls=${reserveExhaustedCalls.length}`,
+    );
+    expect(summary).toContain(REPOSITORY_STATE_SNAPSHOT);
+    expect(summary).not.toContain('Productive calls completed:');
+    expect(summary).not.toContain('Tool ledger: ');
+    expect(summary).not.toContain(
+      'A fresh child must inspect the previous handoff and continue this same step.',
+    );
+
+    expect(fixture.run.stepHandoff).toContain(PREVIOUS_CHECKPOINT);
+    expect(fixture.run.stepHandoff).toContain(
+      'No new feature is confirmed complete.',
+    );
+  });
 });

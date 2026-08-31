@@ -13,6 +13,7 @@ flowchart TD
   Steps --> Step[WorkflowStep]
   Step --> Prompt[inline prompt or prompt file]
   Step --> Agent[optional workflow role profile]
+  Step --> Budget[optional maxToolCalls]
   Step --> Permissions[permissions]
   Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
@@ -117,6 +118,30 @@ safe fix; the implementor should return to `verify` only after applying that
 fix. Keep `blocked` for stale, ambiguous, or unsafe situations. This loop is
 still bounded by `maxStepVisits`; resume the durable checkpoint or raise that
 workflow-specific limit when more repair rounds are appropriate.
+
+## Tool Budgets And Handoffs
+
+A delegated step may set `maxToolCalls` to cap productive child tool calls. This
+requires a `handoff` transition that loops back to the same step:
+
+```yaml
+implement:
+  maxToolCalls: 24
+  transitions:
+    ready: verify
+    handoff: implement
+    blocked: $pause
+```
+
+The child runtime reserves two additional calls for checkpointing. When the
+productive budget is nearly exhausted, it warns the child to prepare a compact
+handoff. Once exhausted, work tools are locked and only `structured_output`
+remains available. If the child then settles without a result, the parent can
+advance through the self-looping `handoff` transition with a contextual fallback
+summary built from the approved plan, original request, previous handoff,
+diagnostic state, and repository state. That fallback does not claim unconfirmed
+work is complete; the next visit must inspect the worktree and continue the same
+plan-backed step.
 
 ## Prompt Rendering
 

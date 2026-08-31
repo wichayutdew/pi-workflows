@@ -18,7 +18,6 @@ import {
   COMPLETION_REPAIR_PROMPT,
   needsCompletionRepair,
   TOOL_BUDGET_HANDOFF_PROMPT,
-  toolBudgetHandoffResult,
   toolBudgetWarningPrompt,
 } from './child-runtime-repair.ts';
 import {
@@ -274,45 +273,16 @@ export const registerSubagentChildRuntime = (
 
   pi.on('agent_settled', () => {
     const policy = state.activePolicy;
-    if (!policy || state.repairRequested) return;
     if (
-      state.runtimeMode === 'handoff' &&
-      needsCompletionRepair({ policy, dependencies })
+      !policy ||
+      state.repairRequested ||
+      !needsCompletionRepair({ policy, dependencies })
     ) {
-      try {
-        writeChildResult({
-          policy,
-          result: toolBudgetHandoffResult(
-            policy,
-            state.productiveToolCallIds.size,
-            [...state.productiveToolLedger.values()],
-          ),
-          dependencies,
-        });
-        return;
-      } catch {
-        // Preserve the normal completion-repair path so the parent gets the
-        // correlated result failure if the protected write cannot be made.
-      }
+      return;
     }
-    if (!needsCompletionRepair({ policy, dependencies })) return;
-    if (policy.handoffOutcome === 'handoff') {
-      try {
-        writeChildResult({
-          policy,
-          result: toolBudgetHandoffResult(
-            policy,
-            state.productiveToolCallIds.size,
-            [...state.productiveToolLedger.values()],
-            true,
-          ),
-          dependencies,
-        });
-        pi.setActiveTools([]);
-        return;
-      } catch {
-        // Retain the single completion-repair prompt when fallback persistence fails.
-      }
+    if (state.runtimeMode === 'handoff') {
+      state = { ...state, repairRequested: true };
+      return;
     }
     state = {
       ...state,

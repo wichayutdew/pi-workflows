@@ -48,7 +48,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
           `Total tool-call budget: ${policy.totalToolCalls} calls.`,
           'At 2 productive calls remaining, prepare a concise handoff with completed work, current state, remaining work, and any blocker.',
           'Work tools are locked when the productive budget is exhausted.',
-          'If the child settles without a result after exhaustion, the extension writes the configured `handoff` structured result.',
+          'If you settle without a result after exhaustion, the parent workflow harness composes a contextual fallback handoff from the approved plan, original request, and your prior checkpoints.',
         ]),
     ...(policy.gateSubmitOutcome
       ? [
