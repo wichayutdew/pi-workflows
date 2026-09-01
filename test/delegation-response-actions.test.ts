@@ -186,7 +186,9 @@ describe('when a delegated child settles without a correlated result', () => {
     expect(summary).toContain(
       '# Handoff: Delegated child ended without a confirmed result.',
     );
-    expect(summary).toContain('No new feature is confirmed complete.');
+    expect(summary).toContain(
+      '- Confirmed that no new feature completed before the delegated child ended.',
+    );
     expect(summary).toContain(APPROVED_PLAN);
     expect(summary).toContain(ORIGINAL_REQUEST);
     expect(summary).toContain(PREVIOUS_CHECKPOINT);
@@ -204,7 +206,7 @@ describe('when a delegated child settles without a correlated result', () => {
     expect(fixture.run.stepHandoff).toContain(PREVIOUS_CHECKPOINT);
     expect(fixture.run.stepHandoff).toContain('Latest handoff:');
     expect(fixture.run.stepHandoff).toContain(
-      'No new feature is confirmed complete.',
+      'Confirmed that no new feature completed before the delegated child ended.',
     );
   });
 
@@ -306,7 +308,9 @@ describe('when a delegated child settles without a correlated result', () => {
     expect(summary).toContain(
       '# Handoff: Delegated child ended without a confirmed result.',
     );
-    expect(summary).toContain('No new feature is confirmed complete.');
+    expect(summary).toContain(
+      '- Confirmed that no new feature completed before the delegated child ended.',
+    );
     expect(summary).toContain(APPROVED_PLAN);
     expect(summary).toContain(ORIGINAL_REQUEST);
     expect(summary).toContain(PREVIOUS_CHECKPOINT);
@@ -322,7 +326,7 @@ describe('when a delegated child settles without a correlated result', () => {
 
     expect(fixture.run.stepHandoff).toContain(PREVIOUS_CHECKPOINT);
     expect(fixture.run.stepHandoff).toContain(
-      'No new feature is confirmed complete.',
+      'Confirmed that no new feature completed before the delegated child ended.',
     );
   });
 });

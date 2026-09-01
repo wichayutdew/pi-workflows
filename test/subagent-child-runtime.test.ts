@@ -20,6 +20,8 @@ import { expectTruthy } from './helpers.ts';
 
 describe('when testing subagent child runtime', () => {
   type Handler = (event: Record<string, unknown>) => unknown;
+  const readySummary =
+    '# Ready: Inspection is complete.\n**Completed:**\n- Inspected `README.md`.\n**Remaining:**\n- Continue with the next workflow step.';
 
   function childPolicy(
     directory: string,
@@ -476,7 +478,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'ready',
-                summary: 'Inspection complete',
+                summary: readySummary,
                 extra: true,
               },
             },
@@ -486,7 +488,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'unknown',
-                summary: 'Inspection complete',
+                summary: readySummary,
               },
             },
             reason: /invalid outcome/,
@@ -506,7 +508,7 @@ describe('when testing subagent child runtime', () => {
         const completionInput = {
           value: {
             outcome: 'ready',
-            summary: 'Inspection complete',
+            summary: readySummary,
             workspace: { cwd: '/tmp/worktree' },
           },
         };
@@ -527,7 +529,7 @@ describe('when testing subagent child runtime', () => {
           version: 1,
           policyDigest: policy.policyDigest,
           outcome: 'ready',
-          summary: 'Inspection complete',
+          summary: readySummary,
           workspace: { cwd: '/tmp/worktree' },
         });
         expect(
@@ -538,7 +540,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'ready',
-                summary: 'Duplicate',
+                summary: readySummary,
                 workspace: { cwd: '/tmp/worktree' },
               },
             },
@@ -606,7 +608,7 @@ describe('when testing subagent child runtime', () => {
         const completionInput = {
           value: {
             outcome: 'ready',
-            summary: 'Ready for review',
+            summary: readySummary,
             artifact: '# Complete plan',
           },
         };
@@ -717,7 +719,7 @@ describe('when testing subagent child runtime', () => {
           toolCall({
             toolCallId: 'complete-before-settled',
             toolName: CHILD_COMPLETION_TOOL,
-            input: { value: { outcome: 'ready', summary: 'Done' } },
+            input: { value: { outcome: 'ready', summary: readySummary } },
           }),
         ).toBe(undefined);
 
@@ -960,7 +962,7 @@ describe('when testing subagent child runtime', () => {
           input: {
             value: {
               outcome: 'ready',
-              summary: 'Done',
+              summary: readySummary,
             },
           },
         }) as { block: boolean; reason: string };
@@ -1053,7 +1055,7 @@ describe('when testing subagent child runtime', () => {
       const completionInput = {
         value: {
           outcome: 'ready',
-          summary: 'Completed through injected boundaries',
+          summary: readySummary,
         },
       };
       const completionResult = toolCall({
@@ -1074,7 +1076,7 @@ describe('when testing subagent child runtime', () => {
         version: 1,
         policyDigest: policy.policyDigest,
         outcome: 'ready',
-        summary: 'Completed through injected boundaries',
+        summary: readySummary,
       });
       expect(Object.isFrozen(completionInput)).toBe(true);
     });

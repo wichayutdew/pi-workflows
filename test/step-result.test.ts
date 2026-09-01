@@ -5,26 +5,27 @@ describe('when testing step result', () => {
   const policy = {
     policyDigest: 'policy-1',
     outcomes: ['done', 'submit', 'bind'],
-    summaryMaxChars: 5,
+    summaryMaxChars: 1_000,
     gateSubmitOutcome: 'submit',
     workspace: {
       bindOn: ['bind'],
       allowedRoots: ['../worktrees'],
     },
   };
+  const standardSummary =
+    '# Done: Implementation is complete.\n**Completed:**\n- Implemented and verified `src/example.ts` with `bun test`.\n**Remaining:**\n- None; workflow is complete.';
 
   describe('should satisfy its behavioral contract', () => {
     test('normalizes valid workflow results and preserves an optional artifact', () => {
-      // given
-      // when
-      // then
+      const summary = standardSummary;
+
       expect(
         parseWorkflowStepResult(
           {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'done',
-            summary: ' done ',
+            summary: ` ${summary} `,
             artifact: 'artifact',
           },
           policy,
@@ -33,7 +34,7 @@ describe('when testing step result', () => {
         version: 1,
         policyDigest: 'policy-1',
         outcome: 'done',
-        summary: 'done',
+        summary,
         artifact: 'artifact',
       });
     });
@@ -49,16 +50,16 @@ describe('when testing step result', () => {
         [
           'blocked',
           'error',
-          /blocked summary must identify the missing user prerequisite and next action/,
+          /step summary must list specific completed and remaining work/,
         ],
         [
           'blocked',
-          '# Blocked: Need input\n**Next:** resume.',
+          '# Blocked: Need input\n**Completed:**\n- Reviewed `docs/authorization.md`.\n**Remaining:**\n- Continue after the prerequisite is available.\n**Question:** Which authorization matrix applies?\n**Next:** resume.',
           /blocked summary must identify the missing user prerequisite and next action/,
         ],
         [
           'retry',
-          '# Retry: Need requirements\n**Next:** provide details.',
+          '# Retry: Need requirements\n**Completed:**\n- Read `README.md`.\n**Remaining:**\n- Retry the transient operation.\n**Next:** provide details.',
           /retry summary must identify a transient failure and safe retry condition/,
         ],
       ];
@@ -79,11 +80,149 @@ describe('when testing step result', () => {
             policyDigest: 'policy-1',
             outcome: 'blocked',
             summary:
-              '# Blocked: Missing authorization matrix.\n1. **Authorization policy** — no role matrix was supplied.\n   **Action:** Product owner must provide the endpoint authorization matrix.\n**Next:** Provide the authorization matrix and run `/workflow-resume`.',
+              '# Blocked: Missing authorization matrix.\n**Completed:**\n- Reviewed `docs/authorization.md`.\n**Remaining:**\n- Implement the endpoint policy after the matrix is supplied.\n**Question:** Which roles may access each endpoint?\n1. **Authorization policy** — no role matrix was supplied.\n   **Action:** Product owner must provide the endpoint authorization matrix.\n**Next:** Provide the authorization matrix and run `/workflow-resume`.',
           },
           nonSuccessPolicy,
         ),
       ).toMatchObject({ outcome: 'blocked' });
+    });
+
+    test('requires completed and remaining work on every outcome and a question when blocked', () => {
+      const stopPolicy = {
+        policyDigest: 'policy-1',
+        outcomes: ['ready', 'done', 'blocked'],
+        summaryMaxChars: 1_000,
+      };
+      const invalid: Array<[string, string, RegExp]> = [
+        [
+          'ready',
+          'x',
+          /step summary must list specific completed and remaining work/,
+        ],
+        [
+          'ready',
+          '# Ready: Research is complete\n**Completed:** Reviewed the approved scope.',
+          /step summary must list specific completed and remaining work/,
+        ],
+        [
+          'done',
+          '# Done: Complete\n**Completed:** DUMMY\n**Remaining:** None; workflow is complete.',
+          /step summary must list specific completed and remaining work/,
+        ],
+        [
+          'blocked',
+          '# Blocked: Need input\n**Completed:**\n- Reviewed `src/runtime/step-result.ts`.\n**Remaining:**\n- Continue after the decision.\n**Action:** Product owner must decide.\n**Next:** Resume after the decision.',
+          /blocked summary must ask a clarifying question/,
+        ],
+      ];
+
+      for (const [outcome, summary, message] of invalid) {
+        expect(() =>
+          parseWorkflowStepResult(
+            { version: 1, policyDigest: 'policy-1', outcome, summary },
+            stopPolicy,
+          ),
+        ).toThrow(message);
+      }
+
+      expect(
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'ready',
+            summary:
+              '# Ready: Research is complete.\n**Completed:**\n- Reviewed `src/runtime/step-result.ts` and collected source evidence.\n**Remaining:**\n- Reconcile the sources and write the final report.',
+          },
+          stopPolicy,
+        ),
+      ).toMatchObject({ outcome: 'ready' });
+    });
+
+    test('requires specific list items in stop reports', () => {
+      const stopPolicy = {
+        policyDigest: 'policy-1',
+        outcomes: ['ready'],
+        summaryMaxChars: 1_000,
+      };
+
+      for (const summary of [
+        '# Ready: Research is complete.\n**Completed:**\n- Work done\n**Remaining:**\n- More work',
+        '# Ready: Research is complete.\n**Completed:**\n- Reviewed `src/runtime/step-result.ts`.\n**Remaining:**\n- Continue work',
+      ]) {
+        expect(() =>
+          parseWorkflowStepResult(
+            {
+              version: 1,
+              policyDigest: 'policy-1',
+              outcome: 'ready',
+              summary,
+            },
+            stopPolicy,
+          ),
+        ).toThrow(
+          /step summary must list specific completed and remaining work/,
+        );
+      }
+
+      expect(
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'ready',
+            summary:
+              '# Ready: Research is complete.\n**Completed:**\n- Reviewed `src/runtime/step-result.ts` and identified missing ready validation.\n**Remaining:**\n- Add the ready-summary regression test and run `bun test`.',
+          },
+          stopPolicy,
+        ),
+      ).toMatchObject({ outcome: 'ready' });
+    });
+
+    test('rejects placeholder and incomplete handoff summaries', () => {
+      const handoffPolicy = {
+        policyDigest: 'policy-1',
+        outcomes: ['handoff'],
+        summaryMaxChars: 1_000,
+      };
+      const invalid = [
+        'placeholder',
+        'pplaceholder',
+        'DUMMY',
+        '# Handoff: Research paused\n**Completed:** Reviewed the approved scope.',
+        '# Handoff: Research paused\n**Remaining:** Identify source evidence.',
+        '# Handoff: Research paused\n**Completed:** dummy\n**Remaining:** Identify source evidence.',
+        '# Handoff: Research paused\n**Completed:** Reviewed the approved scope.\n**Remaining:** placeholder',
+      ];
+
+      for (const summary of invalid) {
+        expect(() =>
+          parseWorkflowStepResult(
+            {
+              version: 1,
+              policyDigest: 'policy-1',
+              outcome: 'handoff',
+              summary,
+            },
+            handoffPolicy,
+          ),
+        ).toThrow(
+          /step summary must list specific completed and remaining work/,
+        );
+      }
+
+      expect(
+        parseWorkflowStepResult(
+          {
+            version: 1,
+            policyDigest: 'policy-1',
+            outcome: 'handoff',
+            summary:
+              '# Handoff: Research paused at the evidence review.\n**Completed:**\n- Reviewed `src/runtime/step-result.ts` and collected source evidence.\n**Remaining:**\n- Reconcile the sources and write the final report.',
+          },
+          handoffPolicy,
+        ),
+      ).toMatchObject({ outcome: 'handoff' });
     });
 
     test('requires semantic progress for checkpoint outcomes', () => {
@@ -97,7 +236,7 @@ describe('when testing step result', () => {
           version: 1,
           policyDigest: 'policy-1',
           outcome: 'checkpoint',
-          summary: '# Checkpoint: auth feature complete',
+          summary: standardSummary,
           progress: {
             feature: 'auth feature',
             commit: 'abcdef1 implement auth feature',
@@ -115,7 +254,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'checkpoint',
-            summary: '# Checkpoint: incomplete',
+            summary: standardSummary,
           },
           checkpointPolicy,
         ),
@@ -129,7 +268,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'bind',
-            summary: 'bound',
+            summary: standardSummary,
             workspace: { cwd: '/tmp/worktree ' },
           },
           policy,
@@ -138,7 +277,7 @@ describe('when testing step result', () => {
         version: 1,
         policyDigest: 'policy-1',
         outcome: 'bind',
-        summary: 'bound',
+        summary: standardSummary,
         workspace: { cwd: '/tmp/worktree ' },
       });
 
@@ -148,7 +287,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'bind',
-            summary: 'bound',
+            summary: standardSummary,
           },
           /requires workspace\.cwd/,
         ],
@@ -157,7 +296,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'done',
-            summary: 'done',
+            summary: standardSummary,
             workspace: { cwd: '/tmp/worktree' },
           },
           /workspace is forbidden/,
@@ -167,7 +306,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'bind',
-            summary: 'bound',
+            summary: standardSummary,
             workspace: { cwd: 'relative/worktree' },
           },
           /must be an absolute path/,
@@ -177,7 +316,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'bind',
-            summary: 'bound',
+            summary: standardSummary,
             workspace: { cwd: `/${'x'.repeat(4_096)}` },
           },
           /exceeds 4096 characters/,
@@ -187,7 +326,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'bind',
-            summary: 'bound',
+            summary: standardSummary,
             workspace: { cwd: '/tmp/worktree', extra: true },
           },
           /workspace has unknown property/,
@@ -230,14 +369,14 @@ describe('when testing step result', () => {
             outcome: 'done',
             summary: 'too long',
           },
-          'exceeds 5',
+          'step summary must list specific completed and remaining work',
         ],
         [
           {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'done',
-            summary: 'done',
+            summary: standardSummary,
             artifact: 1,
           },
           'artifact must be a string',
@@ -247,7 +386,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'submit',
-            summary: 'done',
+            summary: standardSummary,
           },
           'requires a non-empty artifact',
         ],
@@ -265,7 +404,7 @@ describe('when testing step result', () => {
             version: 1,
             policyDigest: 'policy-1',
             outcome: 'done',
-            summary: 'done',
+            summary: standardSummary,
             artifact: 'x'.repeat(200_001),
           },
           policy,

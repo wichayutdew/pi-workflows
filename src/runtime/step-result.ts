@@ -55,8 +55,53 @@ const isObject = (value: unknown): value is Record<string, unknown> => {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 };
 
+const isPlaceholder = (value: string): boolean =>
+  /^(?:p?placeholder|dummy)$/i.test(value.trim());
+
+const listItems = (summary: string, label: string): ReadonlyArray<string> => {
+  const section = new RegExp(
+    `^\\s*\\*\\*${label}:\\*\\*\\s*\\n((?:\\s*-\\s+.+(?:\\n|$))+)`,
+    'm',
+  ).exec(summary)?.[1];
+  return section
+    ? [...section.matchAll(/^\s*-\s+(.+)$/gm)].map((match) =>
+        (match[1] ?? '').trim(),
+      )
+    : [];
+};
+
+const isSpecificCompletedItem = (item: string): boolean =>
+  !isPlaceholder(item) &&
+  !/^(?:work done|completed|done|none\.?)$/i.test(item) &&
+  /`[^`]+`|(?:^|\s)(?:[\w.-]+\/)+[\w.-]+|(?:^|\s)[A-Z][A-Z0-9]+-\d+\b|\b(?:approved|rejected|selected|confirmed|provided)\b/i.test(
+    item,
+  );
+
+const isSpecificRemainingItem = (item: string): boolean =>
+  !isPlaceholder(item) &&
+  !/^(?:more work|remaining work|continue(?: work)?|next step|follow[- ]?up|todo|tbd)$/i.test(
+    item,
+  );
+
 function validateNonSuccessSummary(outcome: string, summary: string): void {
+  const completed = listItems(summary, 'Completed');
+  const remaining = listItems(summary, 'Remaining');
+  if (
+    !/^# [^:\n]+:\s+.+/m.test(summary) ||
+    completed.length === 0 ||
+    remaining.length === 0 ||
+    !completed.every(isSpecificCompletedItem) ||
+    !remaining.every(isSpecificRemainingItem)
+  ) {
+    throw new Error(
+      'step summary must list specific completed and remaining work',
+    );
+  }
   if (outcome === 'blocked') {
+    const question = /^\s*\*\*Question:\*\*\s*(.+\?)\s*$/m.exec(summary)?.[1];
+    if (!question || isPlaceholder(question)) {
+      throw new Error('blocked summary must ask a clarifying question');
+    }
     const isActionable =
       /^# Blocked:\s+.+/m.test(summary) &&
       /^\s*\*\*Action:\*\*\s+.+/m.test(summary) &&

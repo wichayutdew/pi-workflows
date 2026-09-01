@@ -226,7 +226,10 @@ async function finishDelegation(
           const summary = [
             '# Handoff: Delegated child ended without a confirmed result.',
             '',
-            '- Completed work: No new feature is confirmed complete.',
+            '**Completed:**',
+            '- Confirmed that no new feature completed before the delegated child ended.',
+            '**Remaining:**',
+            '- Reconcile the worktree, then implement the next unconfirmed plan-backed feature.',
             `- Approved plan: ${this.run.reviewedArtifact || '(none recorded)'}`,
             `- Original request: ${this.run.input || '(none recorded)'}`,
             `- Previous checkpoint: ${this.run.stepHandoff || '(none recorded)'}`,

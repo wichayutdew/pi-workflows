@@ -38,6 +38,12 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
+    'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    ...(policy.outcomes.includes('blocked')
+      ? [
+          'For `blocked`, also include `**Question:** <one concrete clarifying question ending in ?>`.',
+        ]
+      : []),
     ...(policy.maxToolCalls === undefined
       ? []
       : [
