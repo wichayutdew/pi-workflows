@@ -27,7 +27,9 @@ export const toolBudgetWarningPrompt = ({
 export const TOOL_BUDGET_HANDOFF_PROMPT = [
   'The productive tool-call budget is exhausted.',
   'Work tools are locked; do not execute further work.',
-  'Call `structured_output` exactly once, alone, with a detailed configured result now.',
+  'Use the `handoff` outcome. Call `structured_output` exactly once, alone, now.',
+  'Use the approved plan and previous handoff to identify each plan item as completed, in progress, or not started.',
+  'Cite evidence for completed or in-progress work and name the exact first action for the next child.',
   'If you settle without a result, the parent workflow harness composes a contextual fallback handoff from the approved plan, original request, and your prior checkpoints; it does not fabricate completed work on your behalf.',
 ].join('\n');
 

@@ -266,6 +266,42 @@ describe('when testing subagent child runtime', () => {
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
           'Call `structured_output` exactly once',
         );
+        expect(rig.sentUserMessages.at(-1)?.content).toContain(
+          'Use the `handoff` outcome',
+        );
+        expect(
+          toolCall({
+            toolCallId: 'wrong-outcome',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: {
+              value: { outcome: 'ready', summary: readySummary },
+            },
+          }),
+        ).toEqual({
+          block: true,
+          reason:
+            'Productive tool-call budget reserve requires the configured "handoff" outcome',
+        });
+        expect(
+          toolCall({
+            toolCallId: 'checkpoint-handoff',
+            toolName: CHILD_COMPLETION_TOOL,
+            input: {
+              value: {
+                outcome: 'handoff',
+                summary:
+                  '# Handoff: Paused at approved plan item 2.\n**Completed:**\n- Implemented plan item 1 in `src/example.ts`.\n**Remaining:**\n- Continue plan item 2 by verifying `src/example.ts`.',
+              },
+            },
+          }),
+        ).toBe(undefined);
+        expect(await Bun.file(policy.resultPath).exists()).toBe(true);
+        expect(
+          JSON.parse(await readFile(policy.resultPath, 'utf8')),
+        ).toMatchObject({
+          outcome: 'handoff',
+          summary: expect.stringContaining('plan item 2'),
+        });
         expect(
           toolCall({
             toolCallId: 'late-read',
@@ -292,7 +328,7 @@ describe('when testing subagent child runtime', () => {
         settled({});
 
         expect(rig.sentUserMessages).toHaveLength(1);
-        expect(await Bun.file(policy.resultPath).exists()).toBe(false);
+        expect(await Bun.file(policy.resultPath).exists()).toBe(true);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
