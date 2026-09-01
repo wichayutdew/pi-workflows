@@ -304,7 +304,8 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
               ? observation.visit === 3
                 ? {
                     outcome: 'checkpoint',
-                    summary: 'Feature B checkpointed',
+                    summary:
+                      '# Checkpoint: Feature B checkpointed.\n**Completed:** Checkpointed feature B.\n**Remaining:** Implement the remaining approved work.',
                     progress: {
                       feature: 'feature B',
                       commit: 'abcdef2 implement feature B',

@@ -10,6 +10,8 @@ import { MainStepRuntime } from '../src/runtime/main-step-runtime.ts';
 import { WORKFLOW_COMPLETION_TOOL } from '../src/runtime/completion-tool.ts';
 
 describe('when testing main step runtime', () => {
+  const doneSummary =
+    '# Done: Implementation is complete.\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- None; workflow is complete.';
   type Handler = (event: Record<string, unknown>, context?: unknown) => unknown;
 
   describe('should satisfy its behavioral contract', () => {
@@ -63,7 +65,7 @@ describe('when testing main step runtime', () => {
         policyDigest: 'policy-digest',
         task: 'Do exact work',
         outcomes: ['done'],
-        summaryMaxChars: 20,
+        summaryMaxChars: 1_000,
         workspace: { bindOn: ['done'], allowedRoots: ['.'] },
         step: {
           title: 'Step',
@@ -129,7 +131,7 @@ describe('when testing main step runtime', () => {
       ).toBe(undefined);
       const result = await completion!.execute('complete-1', {
         outcome: 'done',
-        summary: ' finished ',
+        summary: doneSummary,
         workspace: { cwd: '/tmp/worktree' },
       });
       expect(result).toEqual({
@@ -150,7 +152,7 @@ describe('when testing main step runtime', () => {
           version: 1,
           policyDigest: 'policy-digest',
           outcome: 'done',
-          summary: 'finished',
+          summary: doneSummary,
           workspace: { cwd: '/tmp/worktree' },
         },
       ]);
@@ -239,7 +241,7 @@ describe('when testing main step runtime', () => {
         policyDigest: 'policy',
         task: 'Exact workflow task',
         outcomes: ['done'],
-        summaryMaxChars: 100,
+        summaryMaxChars: 1_000,
         step: {
           title: 'Step',
           prompt: { inline: 'Do work' },
@@ -366,7 +368,7 @@ describe('when testing main step runtime', () => {
 
       await completion!.execute('complete', {
         outcome: 'done',
-        summary: 'finished',
+        summary: doneSummary,
       });
       await handlers.get('turn_end')!(
         {
@@ -377,7 +379,7 @@ describe('when testing main step runtime', () => {
                 type: 'toolCall',
                 id: 'complete',
                 name: WORKFLOW_COMPLETION_TOOL,
-                arguments: { outcome: 'done', summary: 'finished' },
+                arguments: { outcome: 'done', summary: doneSummary },
               },
             ],
           },
@@ -463,7 +465,7 @@ describe('when testing main step runtime', () => {
         policyDigest: 'policy',
         task: 'Do exact work',
         outcomes: ['done'],
-        summaryMaxChars: 20,
+        summaryMaxChars: 1_000,
         step: {
           title: 'Step',
           prompt: { inline: 'Do work' },

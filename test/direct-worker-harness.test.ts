@@ -76,7 +76,8 @@ describe('when running a workflow through a direct Pi worker', () => {
           version: 1,
           policyDigest: policy.policy.policyDigest,
           outcome: 'done',
-          summary: 'Worker completed the step',
+          summary:
+            '# Done: Worker completed the step.\n**Completed:**\n- Completed the delegated work in `src/example.ts`.\n**Remaining:**\n- None; workflow is complete.',
         });
         return {
           requestId: request.requestId,
