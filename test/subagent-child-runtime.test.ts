@@ -161,13 +161,19 @@ describe('when testing subagent child runtime', () => {
       expect(prompt).toContain('Productive tool-call budget: 10 calls.');
       expect(prompt).toContain('Handoff reserve: 2 calls.');
       expect(prompt).toContain(
-        'At 2 productive calls remaining, prepare a concise handoff',
+        'At 2 productive calls remaining, finish the active delegated step with its applicable configured outcome when possible; otherwise prepare a concise handoff for its incomplete work.',
       );
       expect(prompt).toContain(
         'Work tools are locked when the productive budget is exhausted.',
       );
       expect(prompt).toContain(
         'the parent workflow harness composes a contextual fallback handoff',
+      );
+      expect(prompt).toContain(
+        "Evaluate completion and choose an outcome using only this delegated step's instructions.",
+      );
+      expect(prompt).toContain(
+        'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
       );
       expect(prompt).toContain(
         'Do not launch subagents while executing this declarative workflow step.',
@@ -268,6 +274,9 @@ describe('when testing subagent child runtime', () => {
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
           'Use the `handoff` outcome',
+        );
+        expect(rig.sentUserMessages.at(-1)?.content).toContain(
+          'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
         );
         expect(
           toolCall({

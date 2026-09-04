@@ -169,6 +169,13 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     ...contract.workspaceLines,
     '',
     'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    ...(isDelegated
+      ? [
+          "Evaluate completion and choose an outcome using only this delegated step's instructions.",
+          'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
+          'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
+        ]
+      : []),
     'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
     ...(contract.outcomes.includes('blocked')
       ? [

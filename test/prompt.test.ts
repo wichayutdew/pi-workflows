@@ -81,9 +81,9 @@ describe('when testing prompt', () => {
       expect(
         renderTemplate('Hello {{ name }} {{missing}}', { name: 'Pi' }),
       ).toBe('Hello Pi ');
-      expect(buildMainStepTask(workflow, run)).toMatch(
-        /Main-agent declarative workflow step/,
-      );
+      const mainTask = buildMainStepTask(workflow, run);
+      expect(mainTask).toMatch(/Main-agent declarative workflow step/);
+      expect(mainTask).not.toContain('No active-step work remains.');
       expect(buildDelegatedStepTask(workflow, run, 'policy envelope')).toMatch(
         /policy envelope/,
       );
@@ -136,6 +136,15 @@ describe('when testing prompt', () => {
       );
       expect(delegatedTask).not.toMatch(/replan|contract remains valid/i);
       expect(delegatedTask).toMatch(/Call `structured_output` exactly once/);
+      expect(delegatedTask).toContain(
+        "Evaluate completion and choose an outcome using only this delegated step's instructions.",
+      );
+      expect(delegatedTask).toContain(
+        'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
+      );
+      expect(delegatedTask).toContain(
+        'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
+      );
       expect(delegatedTask).toContain(
         'This step cannot bind a workspace; omit `workspace`.',
       );
