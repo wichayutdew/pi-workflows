@@ -273,7 +273,7 @@ describe('when testing subagent child runtime', () => {
           'Call `structured_output` exactly once',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
-          'Use the `handoff` outcome',
+          'Call `structured_output` exactly once, alone, with the configured outcome that accurately reflects the active delegated step state.',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
           'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
@@ -283,24 +283,19 @@ describe('when testing subagent child runtime', () => {
             toolCallId: 'wrong-outcome',
             toolName: CHILD_COMPLETION_TOOL,
             input: {
-              value: { outcome: 'ready', summary: readySummary },
+              value: { outcome: 'not-configured', summary: readySummary },
             },
           }),
-        ).toEqual({
+        ).toMatchObject({
           block: true,
-          reason:
-            'Productive tool-call budget reserve requires the configured "handoff" outcome',
+          reason: expect.stringContaining('invalid outcome'),
         });
         expect(
           toolCall({
-            toolCallId: 'checkpoint-handoff',
+            toolCallId: 'completed-outcome',
             toolName: CHILD_COMPLETION_TOOL,
             input: {
-              value: {
-                outcome: 'handoff',
-                summary:
-                  '# Handoff: Paused at approved plan item 2.\n**Completed:**\n- Implemented plan item 1 in `src/example.ts`.\n**Remaining:**\n- Continue plan item 2 by verifying `src/example.ts`.',
-              },
+              value: { outcome: 'ready', summary: readySummary },
             },
           }),
         ).toBe(undefined);
@@ -308,8 +303,8 @@ describe('when testing subagent child runtime', () => {
         expect(
           JSON.parse(await readFile(policy.resultPath, 'utf8')),
         ).toMatchObject({
-          outcome: 'handoff',
-          summary: expect.stringContaining('plan item 2'),
+          outcome: 'ready',
+          summary: readySummary,
         });
         expect(
           toolCall({

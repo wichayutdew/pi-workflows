@@ -331,11 +331,6 @@ export const registerSubagentChildRuntime = (
           input: event.input,
           policy: activePolicy,
         });
-        if (state.runtimeMode === 'handoff' && result.outcome !== 'handoff') {
-          throw new Error(
-            'Productive tool-call budget reserve requires the configured "handoff" outcome',
-          );
-        }
         writeChildResult({
           policy: activePolicy,
           result,
