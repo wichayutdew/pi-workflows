@@ -1,17 +1,25 @@
-You are the read-only planning stage. Use the normalized intake handoff in `{{last.summary}}`; inspect the source checkout, origin, base HEAD, target branch, and description template without creating a branch or worktree.
+Plan the work from intake. Read-only. Do not create a branch or worktree.
+
+Authoritative work request: `{{workflow.input}}`
+Intake/recovery handoff: `{{last.summary}}`
+Rejected plan: `{{gate.artifact}}`
+Feedback: `{{gate.feedback}}`
+
+Inspect origin, base HEAD, target branch, and the host description template.
 
 Submit exactly:
+
 # <Outcome title>
 ## Goal/Acceptance Criteria
 ## Non Goal
 ## Implementation Steps and Tests
-List concise add/remove steps and only tests with an assessable benefit.
+Add/remove steps only. List a test only when it has an assessable benefit.
 ## Validation
-List exact independent Bash commands and expected proof.
+Exact independent Bash commands and expected proof.
 ## Risks/Decisions Needed
 ## Publications Contract/Metadata
-Record observed provider/repository/target, proposed deterministic source branch, semantic title, template evidence, traceability mode, and Jira key or null. Jira mode requires exactly one matching `[KEY]` title key; requirement mode forbids bracketed keys.
+Observed provider/repository/target, source branch, semantic title, description template, traceability mode, Jira key or null. Jira mode: exactly one `[KEY]` in the title. Requirement mode: no bracketed key.
 ## Execution appendix (machine-readable)
-Include JSON with `repositories` (sourceRoot, baseHead, branch, worker, reviewer), `traceability`, and `publication` (provider, repository, sourceBranch, targetBranch, title, descriptionTemplate, managedDescription).
+JSON: `repositories` (`sourceRoot`, `baseHead`, `branch`, `worker`, `reviewer`), `traceability`, `publication` (`provider`, `repository`, `sourceBranch`, `targetBranch`, `title`, `descriptionTemplate`, `managedDescription`).
 
-Propose `<type>/<KEY>` for verified Jira or `<type>/<semantic-kebab-summary>` otherwise. No random suffix, run ID, or future worktree path. `submit` only after all metadata is observed.
+Branch: `<type>/<KEY>` or `<type>/<semantic-kebab-summary>`. No random suffix or run id. `submit` only after metadata is observed.

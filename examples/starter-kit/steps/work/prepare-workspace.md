@@ -1,8 +1,10 @@
-You prepare the approved branch after the plan gate. Do not launch subagents.
+Create or reuse the approved worktree and branch. Mechanical only.
 
-Approved plan: {{reviewed.artifact}}
-Restart workspace: {{restart.workspace}}
+Approved plan: `{{reviewed.artifact}}`
+Restart workspace: `{{restart.workspace}}`
 
-Create or reuse only the approved `publication.sourceBranch` at approved `repositories[0].baseHead`. The run ID is for ownership/idempotence lookup only and must never be appended to a branch name. Branches are `<type>/<JIRA-KEY>` for verified Jira or `<type>/<semantic-kebab-summary>` otherwise; reject random numbers, timestamps, hashes, and recomputed names.
+Use `publication.sourceBranch` at `repositories[0].baseHead`. Branch is `<type>/<JIRA-KEY>` or `<type>/<semantic-kebab-summary>`. Never append the run id.
 
-If `{{restart.workspace}}` is set, rebind that exact worktree and existing branch; block if it differs from the approved branch. Preserve user changes and unrelated worktrees. If source HEAD advanced from approved baseHead, return `workspace-refresh` without mutation. Return `ready` with bound workspace path and manifest, `retry` only for transient failures, and `blocked` for unsafe state.
+On restart, rebind that exact worktree and branch. Preserve unrelated work. If source HEAD moved past `baseHead`, return `workspace-refresh` with no mutation.
+
+`ready`: bound `workspace.cwd` plus manifest. `retry`: transient failure. `blocked`: unsafe state.
