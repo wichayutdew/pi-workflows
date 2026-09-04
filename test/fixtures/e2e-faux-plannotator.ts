@@ -3,7 +3,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   PLANNOTATOR_REQUEST_CHANNEL,
   PLANNOTATOR_RESULT_CHANNEL,
-} from '../../src/integrations/plannotator.ts';
+} from '../../src/infrastructure/integrations/plannotator.ts';
 import { E2E_GATE_FEEDBACK } from './e2e-gate-values.ts';
 
 function tracePath(): string {

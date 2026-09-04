@@ -1,39 +1,35 @@
 version: 1
 id: work
 command: work
-description: 'Plan, implement, verify, and publish Pull Request'
+description: 'Jira or brief → plan → worktree → TDD → review → PR/MR.'
 start: intake
-maxStepVisits: 20
+maxStepVisits: 10
 summaryMaxChars: 30000
 steps:
   intake:
-    title: Normalize requirement and optional Jira evidence
-    prompt:
-      file: steps/work/intake.md
-    agent: planner
+    title: Pull Jira or normalize the brief
+    prompt: { file: steps/work/intake.md }
+    agent: scout
+    maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     transitions:
-      ready: plan
-      retry: intake
-      blocked: $pause
+      { ready: plan, retry: intake, blocked: $pause, handoff: intake }
   plan:
-    title: Explore and approve local work
-    prompt:
-      file: steps/work/plan.md
+    title: Plan work for Plannotator
+    prompt: { file: steps/work/plan.md }
     agent: planner
+    maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, mcp]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     gate:
       provider: plannotator
       submitOutcome: submit
@@ -54,76 +50,83 @@ steps:
           - 'The complete gate artifact is the exact Markdown saved at'
         onValidationFailure: retry
     transitions:
-      approved: prepare-workspace
-      changes-requested: plan
-      retry: plan
-      blocked: $pause
+      {
+        approved: prepare-workspace,
+        changes-requested: plan,
+        retry: plan,
+        blocked: $pause,
+        handoff: plan,
+      }
   prepare-workspace:
-    title: Prepare approved branch and worktree
-    prompt:
-      file: steps/work/prepare-workspace.md
-    agent: workspace-preparer
+    title: Create worktree and branch
+    prompt: { file: steps/work/prepare-workspace.md }
+    agent: scout
+    maxToolCalls: 10
     workspace:
       bindOn: [ready]
       allowedRoots: [~/repositories/worktrees]
     permissions:
       tools: [read, ls, bash]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     transitions:
-      ready: implement
-      workspace-refresh: plan
-      retry: prepare-workspace
-      blocked: $pause
+      {
+        ready: implement,
+        workspace-refresh: plan,
+        retry: prepare-workspace,
+        blocked: $pause,
+        handoff: prepare-workspace,
+      }
   implement:
-    title: Implement approved work
-    prompt:
-      file: steps/work/implement.md
+    title: Implement approved plan with TDD
+    prompt: { file: steps/work/implement.md }
     agent: worker
+    maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, edit, write, mcp]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     transitions:
-      ready: verify
-      retry: implement
-      blocked: $pause
+      {
+        checkpoint: implement,
+        ready: verify,
+        retry: implement,
+        blocked: $pause,
+        handoff: implement,
+      }
   verify:
-    title: Independently verify local work
-    prompt:
-      file: steps/work/verify.md
+    title: Check goal and acceptance criteria
+    prompt: { file: steps/work/verify.md }
     agent: reviewer
+    maxToolCalls: 60
     permissions:
       tools: [read, ls, bash]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     transitions:
-      passed: publish
-      failed: implement
-      retry: verify
-      blocked: verify
+      {
+        passed: publish,
+        failed: implement,
+        retry: verify,
+        blocked: verify,
+        handoff: verify,
+      }
   publish:
-    title: Publish verified branch and open review
-    prompt:
-      file: steps/work/publish-remote.md
-    agent: worker
+    title: Push and open or update PR/MR
+    prompt: { file: steps/work/publish-remote.md }
+    agent: scout
+    maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
       mcp: []
-      extensions: [/]
+      extensions: []
       skills: []
-      bash:
-        mode: unrestricted
+      bash: { mode: unrestricted }
     transitions:
-      published: $done
-      retry: publish
-      blocked: $pause
+      { published: $done, retry: publish, blocked: $pause, handoff: publish }

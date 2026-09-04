@@ -1,0 +1,394 @@
+import type {
+  ExtensionAPI,
+  InputEvent,
+  InputEventResult,
+} from '@earendil-works/pi-coding-agent';
+import { Type } from 'typebox';
+import type { ChildStepPolicy } from '../../domain/index.ts';
+import {
+  authorizeToolCall,
+  extractChildPolicy,
+  freezeToolInput,
+  invalidCompletionCallIds,
+  resolveActiveTools,
+} from '../../function/index.ts';
+import { redactStepDetailText } from '../../ui/index.ts';
+import {
+  verifyChildCapability,
+  verifyChildWorkingDirectory,
+  writeChildResult,
+} from '../fs/subagent-files.ts';
+import {
+  CHILD_COMPLETION_TOOL,
+  CHILD_COORDINATION_TOOLS,
+  parseChildStructuredResult,
+} from './child-runtime-completion.ts';
+import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from './child-runtime-dependencies.ts';
+import { childPolicyStep, childSystemPrompt } from './child-runtime-policy.ts';
+import {
+  COMPLETION_REPAIR_PROMPT,
+  needsCompletionRepair,
+  TOOL_BUDGET_HANDOFF_PROMPT,
+  toolBudgetWarningPrompt,
+} from './child-runtime-repair.ts';
+import type {
+  SubagentChildRuntimeDependencies,
+  SubagentChildRuntimeOptions,
+} from './child-runtime-types.ts';
+
+export { CHILD_COMPLETION_TOOL } from './child-runtime-completion.ts';
+export type {
+  ChildRuntimeFileSystem,
+  ChildRuntimePathInspection,
+  SubagentChildRuntimeDependencies,
+  SubagentChildRuntimeOptions,
+} from './child-runtime-types.ts';
+
+type ChildRuntimeState = {
+  readonly activePolicy: ChildStepPolicy | undefined;
+  readonly policyError: string | undefined;
+  readonly invalidCompletionCalls: ReadonlySet<string>;
+  readonly effectiveTools: ReadonlySet<string>;
+  readonly productiveToolCallIds: ReadonlySet<string>;
+  readonly productiveToolInputs: ReadonlyMap<
+    string,
+    { readonly toolName: string; readonly input: unknown }
+  >;
+  readonly productiveToolLedger: ReadonlyMap<string, string>;
+  readonly repairRequested: boolean;
+  readonly runtimeMode: 'working' | 'handoff';
+};
+
+const INITIAL_STATE: ChildRuntimeState = {
+  activePolicy: undefined,
+  policyError: undefined,
+  invalidCompletionCalls: new Set(),
+  effectiveTools: new Set(),
+  productiveToolCallIds: new Set(),
+  productiveToolInputs: new Map(),
+  productiveToolLedger: new Map(),
+  repairRequested: false,
+  runtimeMode: 'working',
+};
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const toolLedgerEntry = (
+  toolName: string,
+  input: unknown,
+  isError: boolean,
+): string => {
+  const args =
+    input !== null && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  const target =
+    typeof args.path === 'string'
+      ? args.path
+      : typeof args.command === 'string'
+        ? args.command
+        : '';
+  const detail = target ? ` ${redactStepDetailText(target).slice(0, 200)}` : '';
+  return `${toolName}${detail}${isError ? ' (failed)' : ''}`;
+};
+
+const invalidPolicyInput = (
+  pi: ExtensionAPI,
+  policyError: string,
+  images: InputEvent['images'],
+): InputEventResult => {
+  pi.setActiveTools([]);
+  return {
+    action: 'transform' as const,
+    text: `Delegated workflow policy is invalid: ${policyError}`,
+    ...(images ? { images } : {}),
+  };
+};
+
+const resolveChildAgent = (
+  options: SubagentChildRuntimeOptions,
+  dependencies: SubagentChildRuntimeDependencies,
+): string | undefined =>
+  options.childAgent ?? dependencies.environmentChildAgent();
+
+/**
+ * Registers the policy-enforcing runtime used inside a delegated subagent.
+ *
+ * All file-system, identity, process, and capability-comparison boundaries can
+ * be supplied through `options.dependencies`.
+ */
+export const registerSubagentChildRuntime = (
+  pi: ExtensionAPI,
+  options: SubagentChildRuntimeOptions = {},
+): void => {
+  const dependencies =
+    options.dependencies ?? DEFAULT_CHILD_RUNTIME_DEPENDENCIES;
+  const childAgent = resolveChildAgent(options, dependencies);
+  let state = INITIAL_STATE;
+
+  pi.registerTool({
+    name: CHILD_COMPLETION_TOOL,
+    label: 'Complete Workflow Step',
+    description: 'Return the one structured result for this workflow step',
+    parameters: Type.Object({ value: Type.Any() }),
+    executionMode: 'sequential',
+    execute: async () => ({
+      content: [
+        { type: 'text' as const, text: 'Captured workflow step result.' },
+      ],
+      details: {},
+      terminate: true,
+    }),
+  });
+
+  pi.on('input', (event) => {
+    let extracted;
+    try {
+      extracted = extractChildPolicy(event.text, {
+        temporaryDirectory: dependencies.temporaryDirectory,
+      });
+    } catch (error) {
+      const policyError = errorMessage(error);
+      state = { ...state, policyError };
+      return invalidPolicyInput(pi, policyError, event.images);
+    }
+    if (!extracted) return;
+    if (state.activePolicy) {
+      const policyError = 'child received more than one workflow policy';
+      state = { ...state, policyError };
+      return invalidPolicyInput(pi, policyError, event.images);
+    }
+
+    try {
+      if (!childAgent) throw new Error('workflow worker agent is unavailable');
+      verifyChildWorkingDirectory(extracted.policy, dependencies);
+      verifyChildCapability({
+        policy: extracted.policy,
+        childAgent,
+        dependencies,
+      });
+      const profileTools = new Set(pi.getActiveTools());
+      if (!profileTools.has(CHILD_COMPLETION_TOOL)) {
+        throw new Error('workflow worker completion tool is unavailable');
+      }
+      const effectiveTools = new Set(
+        resolveActiveTools(
+          pi.getAllTools(),
+          childPolicyStep(extracted.policy),
+          CHILD_COMPLETION_TOOL,
+        ).filter((toolName) => !CHILD_COORDINATION_TOOLS.has(toolName)),
+      );
+      state = {
+        ...state,
+        activePolicy: extracted.policy,
+        policyError: undefined,
+        effectiveTools,
+        productiveToolCallIds: new Set(),
+        productiveToolInputs: new Map(),
+        productiveToolLedger: new Map(),
+        repairRequested: false,
+        runtimeMode: 'working',
+      };
+    } catch (error) {
+      const policyError = errorMessage(error);
+      state = {
+        ...state,
+        policyError,
+        effectiveTools: new Set(),
+      };
+      return invalidPolicyInput(pi, policyError, event.images);
+    }
+
+    pi.setActiveTools([...state.effectiveTools]);
+    return {
+      action: 'transform' as const,
+      text: extracted.task,
+      ...(event.images ? { images: event.images } : {}),
+    };
+  });
+
+  pi.on('before_agent_start', (event) => {
+    if (!state.activePolicy) {
+      if (state.policyError) pi.setActiveTools([]);
+      return;
+    }
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n${childSystemPrompt(state.activePolicy)}`,
+    };
+  });
+
+  pi.on('turn_start', () => {
+    state = { ...state, invalidCompletionCalls: new Set() };
+  });
+
+  pi.on('tool_execution_end', (event) => {
+    const policy = state.activePolicy;
+    const handoffReserve = policy?.handoffReserve;
+    if (
+      !policy ||
+      policy.maxToolCalls === undefined ||
+      handoffReserve === undefined ||
+      event.toolName === CHILD_COMPLETION_TOOL ||
+      state.runtimeMode === 'handoff' ||
+      state.productiveToolCallIds.has(event.toolCallId)
+    ) {
+      return;
+    }
+
+    const productiveToolCallIds = new Set(state.productiveToolCallIds);
+    productiveToolCallIds.add(event.toolCallId);
+    const productiveToolLedger = new Map(state.productiveToolLedger);
+    const pendingTool = state.productiveToolInputs.get(event.toolCallId);
+    productiveToolLedger.set(
+      event.toolCallId,
+      toolLedgerEntry(event.toolName, pendingTool?.input, event.isError),
+    );
+    const productiveCalls = productiveToolCallIds.size;
+    if (productiveCalls >= policy.maxToolCalls - handoffReserve) {
+      state = {
+        ...state,
+        effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+        productiveToolCallIds,
+        productiveToolLedger,
+        runtimeMode: 'handoff',
+      };
+      pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+      pi.sendUserMessage(TOOL_BUDGET_HANDOFF_PROMPT, {
+        deliverAs: 'followUp',
+      });
+      return;
+    }
+
+    state = { ...state, productiveToolCallIds, productiveToolLedger };
+    const productiveRemaining = policy.maxToolCalls - productiveCalls;
+    if (productiveRemaining <= handoffReserve) {
+      pi.sendUserMessage(
+        toolBudgetWarningPrompt({
+          productiveCalls,
+          productiveRemaining,
+          handoffReserve,
+        }),
+        { deliverAs: 'followUp' },
+      );
+    }
+  });
+
+  pi.on('agent_settled', () => {
+    const policy = state.activePolicy;
+    if (
+      !policy ||
+      state.repairRequested ||
+      !needsCompletionRepair({ policy, dependencies })
+    ) {
+      return;
+    }
+    if (state.runtimeMode === 'handoff') {
+      state = { ...state, repairRequested: true };
+      return;
+    }
+    state = {
+      ...state,
+      repairRequested: true,
+      effectiveTools: new Set([CHILD_COMPLETION_TOOL]),
+    };
+    pi.setActiveTools([CHILD_COMPLETION_TOOL]);
+    pi.sendUserMessage(COMPLETION_REPAIR_PROMPT, { deliverAs: 'followUp' });
+  });
+
+  pi.on('message_end', (event) => {
+    if (!state.activePolicy) return;
+    const invalid = invalidCompletionCallIds(
+      event.message,
+      CHILD_COMPLETION_TOOL,
+    );
+    if (invalid.size > 0 || event.message.role === 'assistant') {
+      state = { ...state, invalidCompletionCalls: invalid };
+    }
+  });
+
+  pi.on('tool_call', (event) => {
+    const { activePolicy, policyError } = state;
+    if (!activePolicy) {
+      if (!policyError) return;
+      return {
+        block: true,
+        reason: policyError,
+      };
+    }
+    if (state.invalidCompletionCalls.has(event.toolCallId)) {
+      return {
+        block: true,
+        reason: `${CHILD_COMPLETION_TOOL} must be the only tool call in its message`,
+      };
+    }
+    if (event.toolName === CHILD_COMPLETION_TOOL) {
+      if (policyError) {
+        return {
+          block: true,
+          reason: policyError,
+        };
+      }
+      try {
+        const result = parseChildStructuredResult({
+          input: event.input,
+          policy: activePolicy,
+        });
+        writeChildResult({
+          policy: activePolicy,
+          result,
+          dependencies,
+        });
+        freezeToolInput(event.input);
+        return;
+      } catch (error) {
+        return {
+          block: true,
+          reason: errorMessage(error),
+        };
+      }
+    }
+    if (state.runtimeMode === 'handoff') {
+      return {
+        block: true,
+        reason:
+          'Productive tool-call budget reserve is reached; only structured_output is available for checkpoint handoff',
+      };
+    }
+    if (CHILD_COORDINATION_TOOLS.has(event.toolName)) {
+      return {
+        block: true,
+        reason:
+          'workflow children are non-interactive; follow the step prompt and use structured_output with one configured valid outcome',
+      };
+    }
+
+    const input: Record<string, unknown> = { ...event.input };
+    const authorization = authorizeToolCall(
+      event.toolName,
+      input,
+      childPolicyStep(activePolicy),
+      pi.getAllTools(),
+    );
+    if (!authorization.allowed) {
+      return {
+        block: true,
+        reason: authorization.reason ?? 'Tool blocked by workflow child policy',
+      };
+    }
+    if (!state.effectiveTools.has(event.toolName)) {
+      return {
+        block: true,
+        reason: `tool "${event.toolName}" is allowed by the workflow but unavailable in this child runtime`,
+      };
+    }
+
+    const productiveToolInputs = new Map(state.productiveToolInputs);
+    productiveToolInputs.set(event.toolCallId, {
+      toolName: event.toolName,
+      input,
+    });
+    state = { ...state, productiveToolInputs };
+    freezeToolInput(event.input);
+  });
+};

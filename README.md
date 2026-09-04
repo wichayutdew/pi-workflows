@@ -28,26 +28,26 @@ dictating your language, framework, or delivery process.
 
 ## Why Pi Workflows
 
-- Turn multi-step agent work into clear, reviewable workflow definitions.
-- Pause for human approval and resume from the same durable checkpoint.
-- Keep worktree-bound iterations safe, including follow-up enhancements.
-- Enforce declared resources and stop unsafe loops before they run away.
-- Assign a workflow-owned role prompt with `agent: planner`, `worker`,
-  `reviewer`, or `scout`; customize profiles under `~/.agents/agents`.
+- **Declarative & Structured**: Turn multi-step agent tasks into clear, reviewable workflow definitions with predictable transitions.
+- **Durable Checkpoints**: Pause for human approval or feedback and resume seamlessly without repeating completed steps.
+- **Safe Worktree Iterations**: Keep worktree-bound iterations isolated and carry forward verified changes for follow-up enhancements.
+- **Resource & Loop Guarding**: Enforce strict tool and Bash allowlists and halt runaway loops before they exceed step limits.
+- **Role Profiles**: Assign workflow-owned roles (`scout`, `planner`, `worker`, `reviewer`) with custom model and thinking overrides.
+- **Live Terminal UI**: Interactive status board, execution path visualization, step transcript inspection, and real-time cost ledger.
+
+## Quick Installation
+
+Install the published extension in Pi:
+
+```bash
+pi install npm:@wichayutdew/pi-workflows
+```
 
 ## Herdr workflow status
 
 When Pi runs delegated workflow steps, the parent agent may be idle while child work continues. Pi Workflows includes a Herdr companion extension that reports workflow lifecycle state so the pane remains **working** until the workflow completes, pauses, or is interrupted.
 
 The companion is inactive unless Herdr provides `HERDR_ENV=1`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID`. It uses Herdr's existing managed Pi reporter, so it does not create a competing pane agent.
-
-### Install from npm
-
-```bash
-pi install npm:@wichayutdew/pi-workflows
-```
-
-Start a new Pi session in Herdr, then run a workflow normally. Herdr should show the pane as working while the workflow is active and display the terminal workflow message after completion or interruption.
 
 ### Reapply after a Herdr update
 
@@ -67,12 +67,9 @@ Restart Pi or run `/reload` after patching. If Herdr's managed extension changes
 
 ## Explore
 
-- [Getting started guide](./GETTING_STARTED.md) — install Pi Workflows and
-  run your first workflow.
-- [Contribution guide](./CONTRIBUTING.md) — set up the project, validate a
-  change, and open a focused pull request.
-- [Documentation → OpenWiki](./openwiki/quickstart.md) — architecture,
-  workflow authoring, security, integrations, and development references.
+- [Getting started guide](./GETTING_STARTED.md) — install Pi Workflows and run your first workflow.
+- [Contribution guide](./CONTRIBUTING.md) — development setup, code conventions, test layers, and validation pipeline.
+- [Documentation → OpenWiki](./openwiki/quickstart.md) — architecture, workflow authoring, security, integrations, and development references.
 
 ## License
 

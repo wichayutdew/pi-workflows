@@ -51,7 +51,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  PiChild[Pi child process] --> Env{PI_SUBAGENT_CHILD=1 and valid profile name?}
+  PiChild[Pi child process] --> Env{PI_WORKFLOWS_CHILD=1<br/>runtime enabled<br/>and agent set?}
   Env -- no --> Stop[do not register child runtime]
   Env -- yes --> Runtime[register inert policy listeners]
   Runtime --> Input[input event]
@@ -146,9 +146,11 @@ When a delegated step has a productive tool-call budget, the warning at two
 productive calls remaining tells the child to finish the active delegated step
 with its applicable configured outcome when possible; otherwise it prepares a
 handoff for incomplete active-step work. After the productive budget is
-exhausted, work tools are locked and the completion reserve accepts only the
-configured `handoff` outcome. That handoff must cite evidence for completed or
-in-progress active-step work and identify the first action for the next child.
+exhausted, work tools are locked and the completion reserve accepts the
+configured outcome that accurately reflects the active delegated step state,
+including `handoff` when active-step work is incomplete. A handoff must cite
+evidence for completed or in-progress active-step work and identify the first
+action for the next child.
 
 ## Result Path
 

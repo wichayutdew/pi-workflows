@@ -7,45 +7,42 @@ flowchart TD
   Pi[Pi extension host] --> Entry[src/index.ts]
 
   Entry -->|parent mode| HarnessFacade[src/harness.ts<br/>WorkflowHarness facade]
-  Entry -->|child mode| ChildRuntime[src/integrations/subagents/child-runtime.ts]
+  Entry -->|child mode| ChildRuntime[src/infrastructure/runtime/child-runtime.ts]
 
-  HarnessFacade --> HarnessActions[src/harness/*<br/>action modules]
-  HarnessFacade --> Commands[src/commands.ts]
-  HarnessActions --> ConfigFacade[src/config/load.ts<br/>Node facade]
-  HarnessActions --> EngineFacade[src/engine/transitions.ts<br/>transition facade]
-  HarnessActions --> PromptFacade[src/prompt.ts<br/>prompt facade]
-  HarnessActions --> SubClient[src/integrations/subagents/client.ts]
-  HarnessActions --> Plannotator[src/integrations/plannotator*.ts]
-  HarnessActions --> PromptGate[src/integrations/prompt-gate.ts]
-  HarnessActions --> MainRuntime[src/runtime/main-step-runtime.ts]
-  HarnessActions --> Queue[src/runtime/serial-task-queue.ts]
-  HarnessActions --> StatusFacade[src/workflow-status.ts<br/>status facade]
+  HarnessFacade --> HarnessActions[src/infrastructure/harness/*<br/>action modules]
+  HarnessFacade --> Commands[src/infrastructure/harness/commands.ts]
+  HarnessActions --> ConfigLoader[src/infrastructure/fs/load.ts<br/>Node loader]
+  HarnessActions --> EngineCore[src/function/engine/*<br/>pure transitions]
+  HarnessActions --> PromptCore[src/function/prompt/*<br/>prompt rendering]
+  HarnessActions --> SubClient[src/infrastructure/process/subagent-client.ts]
+  HarnessActions --> Plannotator[src/infrastructure/integrations/plannotator*.ts]
+  HarnessActions --> PromptGate[src/infrastructure/integrations/prompt-gate.ts]
+  HarnessActions --> MainRuntime[src/infrastructure/runtime/main-step-runtime.ts]
+  HarnessActions --> Queue[src/infrastructure/runtime/task-queue.ts]
+  HarnessActions --> StatusCore[src/ui/*]
 
-  ConfigFacade --> ConfigCore[src/config/catalog.ts<br/>load-settings/load-workflows]
-  ConfigCore --> Validation[src/config/validation/*]
-  ConfigCore --> Ceiling[src/config/ceiling.ts]
-  ConfigCore --> Conflict[src/config/command-conflicts.ts]
-  ConfigCore --> Digest[src/digest.ts]
+  ConfigLoader --> ConfigCore[src/function/config/*]
+  ConfigCore --> Domain[src/domain/*<br/>shared types]
+  ConfigCore --> Digest[src/function/digest.ts]
 
-  EngineFacade --> EngineCore[src/engine/create-run<br/>run-*<br/>gate-*]
-
-  MainRuntime --> PolicyFacades[src/policy/tools.ts<br/>bash.ts]
-  ChildRuntime --> PolicyFacades
-  ChildRuntime --> ChildPolicy[src/integrations/subagents/child-policy-*]
-  ChildRuntime --> ChildFiles[src/integrations/subagents/child-runtime-*]
-  SubClient --> SubProtocol[src/integrations/subagents/protocol.ts]
-  SubClient --> SubDiagnostics[src/integrations/subagents/diagnostics.ts]
-  StatusFacade --> StatusCore[src/workflow-status/*]
+  MainRuntime --> PolicyCore[src/function/policy/*]
+  ChildRuntime --> PolicyCore
+  ChildRuntime --> ChildPolicy[src/function/subagent/child-policy-*]
+  ChildRuntime --> ChildFiles[src/infrastructure/fs/subagent-files.ts]
+  SubClient --> SubDiagnostics[src/function/subagent/diagnostics.ts]
+  StatusCore --> Transcript[src/infrastructure/fs/transcript-reader.ts]
 ```
 
 `src/index.ts` is the only Pi extension entry point. It chooses parent mode by
 constructing `WorkflowHarness`, or child mode by registering the delegated
-subagent runtime when `PI_SUBAGENT_CHILD=1` and the child profile name is valid.
+subagent runtime when `PI_WORKFLOWS_CHILD=1`,
+`PI_WORKFLOWS_CHILD_RUNTIME=1`, and `PI_WORKFLOWS_CHILD_AGENT` is set.
 
 ## Source Tree Guide
 
-The refactor keeps stable import surfaces while moving implementation details
-into focused functional modules:
+The current source tree is split by dependency direction: shared domain types,
+pure functional cores, infrastructure adapters that touch Pi/files/processes,
+and UI rendering.
 
 For file-level ownership, use
 [Orchestration Modules](./orchestration-modules.md) for configuration, state,
@@ -53,35 +50,28 @@ and parent coordination, and
 [Execution Modules](./execution-modules.md) for integrations, policy, prompts,
 runtimes, and status rendering.
 
-| Area                                                | Handles                                                                                                                                                                                                                                                                                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/command-names.ts`                              | Reserved slash-command names owned by Pi and by the workflow extension. Config validation uses these names to prevent workflow command conflicts.                                                                                                                                                                                           |
-| `src/commands.ts`                                   | Declarative registration for `/workflow-list`, `/workflow-doctor`, `/workflow-start`, `/workflow-restart`, `/workflow-pause`, `/workflow-resume`, `/workflow-abort`, and `/workflow-reload`. It depends only on the `WorkflowCommandController` port.                                                                                       |
-| `src/agents/profile.ts`                             | Loads workflow role profiles from `~/.agents/agents` with bundled starter-kit fallbacks and optional `model`/`thinking` frontmatter.                                                                                                                                                                                                        |
-| `src/config/`                                       | Settings and workflow catalog loading. `load.ts`, `validate.ts`, and `types.ts` are compatibility/public facades; `catalog.ts`, `load-settings.ts`, `load-workflows.ts`, `yaml.ts`, `diagnostics.ts`, `ceiling.ts`, and `command-conflicts.ts` do the work.                                                                                 |
-| `src/config/validation/`                            | Schema-level validation split by concern: settings, workflow, step, shortcut, permissions, prompt, and shared result helpers. These modules normalize untrusted YAML before it reaches the runtime.                                                                                                                                         |
-| `src/digest.ts`                                     | Stable hashing for workflow and step digests, used by catalog loading and run reconciliation.                                                                                                                                                                                                                                               |
-| `src/engine/`                                       | Pure workflow state core. `state.ts` and `transitions.ts` are facades; `state-types.ts`, `transition-types.ts`, `create-run.ts`, `run-advance.ts`, `run-lifecycle.ts`, `gate-transitions.ts`, `run-reconciliation.ts`, `reconciliation-history.ts`, `run-validation.ts`, and `transition-helpers.ts` implement immutable state transitions. |
-| `src/harness.ts` and `src/harness/`                 | Parent-mode orchestration. `harness.ts` preserves the `WorkflowHarness` class surface and wires action modules; `src/harness/*-actions.ts` handle start, restart, pause, resume, lifecycle, status, gate, prompt-review, Plannotator, main-step, and delegation flows.                                                                      |
-| `src/index.ts`                                      | Pi extension factory with injected environment, settings loader, child-runtime registration, and harness creation boundaries.                                                                                                                                                                                                               |
-| `src/integrations/`                                 | External integration adapters. Plannotator request/response/type helpers live beside the public `plannotator.ts`; prompt review gates live in `prompt-gate.ts`; `subagents/` owns parent-child delegation and child runtime contracts.                                                                                                      |
-| `src/integrations/subagents/`                       | Pi Subagents protocol family. `protocol.ts`, `client.ts`, `diagnostics.ts`, and `child-runtime.ts` are stable facades; implementation modules cover event protocol, delegation lifecycle, child policy envelope/path/validation, child completion/result files, replay safety, failure diagnostics, and transcript correlation.             |
-| `src/policy/`                                       | Domain-neutral tool and command authorization. The `tools.ts` and `bash.ts` facades cover tool calls, MCP selectors, generic Bash modes and allow-list parsing, plus immutable completion inputs.                                                                                                                                           |
-| `src/preflight.ts`                                  | Runtime availability checks for required tools, extensions, MCP proxy support, skills, Plannotator, and pi-subagents before a step launches.                                                                                                                                                                                                |
-| `src/prompt.ts` and `src/prompt/`                   | Prompt rendering. The facade exports main workflow notices, main/delegated step tasks, retry tasks, step contract/sections, and template rendering.                                                                                                                                                                                         |
-| `src/runtime/`                                      | Main-agent execution runtime and task serialization. `main-step-runtime.ts` is the public controller plus a compatibility class; sibling modules register lifecycle, policy, completion, state, completion-tool, step-result parsing, and the serial task queue.                                                                            |
-| `src/workflow-list.ts`                              | Formatting for the workflow catalog list command.                                                                                                                                                                                                                                                                                           |
-| `src/workflow-doctor.ts`                            | Deterministic transition-graph liveness diagnostics used by `/workflow-doctor` and start refusal.                                                                                                                                                                                                                                           |
-| `src/workflow-status.ts` and `src/workflow-status/` | Status overlay rendering. The facade exports board/text formatting, shortcut labels, view controller, and types; the folder handles layout, path rendering, summary and detail rendering, transcript reads, status formatting, and the TUI view.                                                                                            |
+| Area                                   | Handles                                                                                                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/`                          | Canonical shared types and constants for configuration, runs, policies, harness state, Plannotator, status rendering, step results, subagents, and role profiles.                                                               |
+| `src/function/`                        | Pure application logic: configuration validation, digests, workflow doctor checks, immutable engine transitions, policy decisions, preflight checks, prompt rendering, step-result parsing, and child-policy validation.          |
+| `src/infrastructure/fs/`               | Node-backed filesystem adapters for settings/workflow loading, YAML parsing, catalog assembly, child result workspaces, and transcript reads.                                                                                   |
+| `src/infrastructure/harness/`          | Parent-mode orchestration. `harness.ts` composes action modules for start, restart, pause, resume, lifecycle, status, gate, prompt-review, Plannotator, main-step, and delegation flows.                                        |
+| `src/infrastructure/integrations/`     | External review adapters for Plannotator, prompt gates, and the optional Herdr companion reporter.                                                                                                                              |
+| `src/infrastructure/process/`          | Pi Subagents parent-side process/event client.                                                                                                                                                                                   |
+| `src/infrastructure/runtime/`          | Main-agent and child-agent runtimes, completion tools, policy hooks, lifecycle handling, trace capture, same-child repair, tool-budget handoff mode, and task serialization.                                                    |
+| `src/ui/`                              | Workflow status text, board/detail rendering, usage formatting, step logs, layout helpers, shortcut labels, and the interactive TUI view.                                                                                       |
+| `src/harness.ts`                       | Root compatibility export for `WorkflowHarness` from `src/infrastructure/harness/harness.ts`.                                                                                                                                   |
+| `src/herdr-workflow-state.ts`          | Optional Herdr companion reporter that mirrors workflow lifecycle state to Herdr's managed pane status socket.                                                                                                                   |
+| `src/index.ts`                         | Pi extension factory with injected environment, settings loader, child-runtime registration, and harness creation boundaries.                                                                                                    |
 
 ## Parent And Child Modes
 
 ```mermaid
 flowchart TD
   Start[src/index.ts loaded by Pi]
-  Start --> ChildEnv{PI_SUBAGENT_CHILD=1?}
+  Start --> ChildEnv{PI_WORKFLOWS_CHILD=1<br/>and runtime enabled?}
   ChildEnv -- no --> Parent[Create WorkflowHarness]
-  ChildEnv -- yes --> NameOk{valid configured<br/>agent profile name?}
+  ChildEnv -- yes --> NameOk{child agent<br/>env set?}
   NameOk -- yes --> Child[Register child runtime]
   NameOk -- no --> Noop[Return without registering workflow runtime]
 
@@ -137,12 +127,9 @@ subagents, status views, and main-step runtime through
 policy/parsing/file dependencies. Tests can replace those ports without
 changing workflow state logic.
 
-Compatibility facades keep older imports stable after the refactor. For
-example, callers can still import from `src/engine/transitions.ts`,
-`src/config/load.ts`, `src/config/validate.ts`, `src/prompt.ts`,
-`src/policy/tools.ts`, `src/policy/bash.ts`, `src/runtime/main-step-runtime.ts`,
-`src/integrations/subagents/protocol.ts`, and `src/workflow-status.ts`, while
-the behavior is implemented in the narrower sibling modules.
+Layer barrels keep internal imports explicit: `src/domain/index.ts` exports
+shared types, `src/function/index.ts` exports pure logic, `src/infrastructure/index.ts`
+exports adapters and runtimes, and `src/ui/index.ts` exports status rendering.
 
 ## Catalog Loading
 
