@@ -27,7 +27,7 @@ export const toolBudgetWarningPrompt = ({
 export const TOOL_BUDGET_HANDOFF_PROMPT = [
   'The productive tool-call budget is exhausted.',
   'Work tools are locked; do not execute further work.',
-  'Use the `handoff` outcome. Call `structured_output` exactly once, alone, now.',
+  'Call `structured_output` exactly once, alone, with the configured outcome that accurately reflects the active delegated step state.',
   'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
   'Use the active-step instructions and previous handoff to identify its completed, in-progress, and not-started work.',
   'Cite evidence for completed or in-progress work and name the exact first action for the next child to continue this active step.',
