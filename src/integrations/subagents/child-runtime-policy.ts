@@ -38,6 +38,9 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
+    "Evaluate completion and choose an outcome using only this delegated step's instructions.",
+    'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
+    'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
     'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
     ...(policy.outcomes.includes('blocked')
       ? [
@@ -52,9 +55,9 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
           `Productive tool-call budget: ${policy.maxToolCalls} calls.`,
           `Handoff reserve: ${policy.handoffReserve} calls.`,
           `Total tool-call budget: ${policy.totalToolCalls} calls.`,
-          'At 2 productive calls remaining, prepare a concise handoff with completed work, current state, remaining work, and any blocker.',
+          'At 2 productive calls remaining, finish the active delegated step with its applicable configured outcome when possible; otherwise prepare a concise handoff for its incomplete work.',
           'Work tools are locked when the productive budget is exhausted.',
-          'If you settle without a result after exhaustion, the parent workflow harness composes a contextual fallback handoff from the approved plan, original request, and your prior checkpoints.',
+          'If you settle without a result after exhaustion, the parent workflow harness composes a contextual fallback handoff from available active-step context and your prior checkpoints.',
         ]),
     ...(policy.gateSubmitOutcome
       ? [

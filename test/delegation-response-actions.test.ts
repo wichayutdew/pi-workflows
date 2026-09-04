@@ -187,7 +187,7 @@ describe('when a delegated child settles without a correlated result', () => {
       '# Handoff: Delegated child ended without a confirmed result.',
     );
     expect(summary).toContain(
-      '- Confirmed that no new feature completed before the delegated child ended.',
+      '- Confirmed that no delegated-step completion can be verified after the child ended.',
     );
     expect(summary).toContain(APPROVED_PLAN);
     expect(summary).toContain(ORIGINAL_REQUEST);
@@ -198,15 +198,19 @@ describe('when a delegated child settles without a correlated result', () => {
       'worker did not produce its required structured result.',
     );
     expect(summary).toContain(
-      '**Next:** Reconcile the worktree, then implement the next unconfirmed plan-backed feature.',
+      '- Reconcile the worktree, then continue the current delegated step.',
     );
+    expect(summary).toContain(
+      '**Next:** Reconcile the worktree, then continue the current delegated step.',
+    );
+    expect(summary).not.toContain('plan-backed feature');
 
     expect(fixture.run.status).toBe('running');
     expect(fixture.run.currentStepId).toBe('implement');
     expect(fixture.run.stepHandoff).toContain(PREVIOUS_CHECKPOINT);
     expect(fixture.run.stepHandoff).toContain('Latest handoff:');
     expect(fixture.run.stepHandoff).toContain(
-      'Confirmed that no new feature completed before the delegated child ended.',
+      'Confirmed that no delegated-step completion can be verified after the child ended.',
     );
   });
 
@@ -309,7 +313,7 @@ describe('when a delegated child settles without a correlated result', () => {
       '# Handoff: Delegated child ended without a confirmed result.',
     );
     expect(summary).toContain(
-      '- Confirmed that no new feature completed before the delegated child ended.',
+      '- Confirmed that no delegated-step completion can be verified after the child ended.',
     );
     expect(summary).toContain(APPROVED_PLAN);
     expect(summary).toContain(ORIGINAL_REQUEST);
@@ -320,13 +324,17 @@ describe('when a delegated child settles without a correlated result', () => {
     expect(summary).toContain(REPOSITORY_STATE_SNAPSHOT);
     expect(summary).not.toContain('Productive calls completed:');
     expect(summary).not.toContain('Tool ledger: ');
-    expect(summary).not.toContain(
-      'A fresh child must inspect the previous handoff and continue this same step.',
+    expect(summary).toContain(
+      '- Reconcile the worktree, then continue the current delegated step.',
     );
+    expect(summary).toContain(
+      '**Next:** Reconcile the worktree, then continue the current delegated step.',
+    );
+    expect(summary).not.toContain('plan-backed feature');
 
     expect(fixture.run.stepHandoff).toContain(PREVIOUS_CHECKPOINT);
     expect(fixture.run.stepHandoff).toContain(
-      'Confirmed that no new feature completed before the delegated child ended.',
+      'Confirmed that no delegated-step completion can be verified after the child ended.',
     );
   });
 });
