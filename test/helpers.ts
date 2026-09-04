@@ -1,14 +1,14 @@
 import { expect } from 'bun:test';
-import { digest } from '../src/digest.ts';
+import { digest } from '../src/function/digest.ts';
 import type {
   LoadedWorkflow,
   WorkflowDefinition,
-} from '../src/config/types.ts';
-import { validateWorkflow } from '../src/config/validate.ts';
+} from '../src/domain/index.ts';
+import { validateWorkflow } from '../src/function/config/index.ts';
 import {
   digestWorkflowStep,
   digestWorkflowStepStructure,
-} from '../src/config/step-digests.ts';
+} from '../src/function/config/step-digests.ts';
 
 export function expectTruthy<T>(value: T): asserts value {
   expect(value).toBeTruthy();

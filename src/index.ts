@@ -1,8 +1,11 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import type { KeyId } from '@earendil-works/pi-tui';
-import { defaultUserWorkflowDirectory, loadSettings } from './config/load.ts';
-import { WorkflowHarness } from './harness.ts';
-import { registerSubagentChildRuntime } from './integrations/subagents/child-runtime.ts';
+import {
+  defaultUserWorkflowDirectory,
+  loadSettings,
+} from './infrastructure/fs/load.ts';
+import { createWorkflowHarness } from './infrastructure/harness/harness.ts';
+import { registerSubagentChildRuntime } from './infrastructure/runtime/child-runtime.ts';
 
 /**
  * Asynchronous entry point accepted by Pi's extension loader.
@@ -41,7 +44,7 @@ const DEFAULT_DEPENDENCIES = {
     registerSubagentChildRuntime(pi, { childAgent });
   },
   createHarness: (pi, statusShortcut): void => {
-    new WorkflowHarness(pi, statusShortcut);
+    createWorkflowHarness(pi, statusShortcut);
   },
 } as const satisfies PiWorkflowsExtensionDependencies;
 
