@@ -93,12 +93,14 @@ never inherited.
 Ordinary tool failures remain inside the same child whenever its runtime can
 continue. The base delegated completion contract only requires the child to
 stay within configured permissions and choose an outcome defined by the step
-prompt. If a child settles without producing the required correlated result,
-same-child repair runs first. After that, a step with a configured self-looping
-`handoff` outcome can advance with a parent-composed contextual handoff; other
-missing completions still require replay-safe read-only diagnostics for one
-fresh retry before pausing. The workflow prompt still owns the meaning of every
-outcome and decides how unresolved failures are reported.
+prompt. Delegated completion is evaluated only against the active step's
+instructions; later workflow steps are not unfinished work for that step. If a
+child settles without producing the required correlated result, same-child
+repair runs first. After that, a step with a configured self-looping `handoff`
+outcome can advance with a parent-composed contextual handoff for the current
+delegated step; other missing completions still require replay-safe read-only
+diagnostics for one fresh retry before pausing. The workflow prompt still owns
+the meaning of every outcome and decides how unresolved failures are reported.
 
 The first request starts in the absolute working directory captured when the
 workflow run began. A YAML-authorized delegated step may return a structured
@@ -132,12 +134,21 @@ remote publication.
 The parent still accepts only `result.json` after policy-digest and step-result
 validation; it never infers an outcome from prose. If repair also produces no
 result and the step declares a self-looping `handoff` transition, the parent
-records a durable fallback handoff from the approved plan, original request,
-prior checkpoint, diagnostic state, and repository state, then revisits the same
-step. Without that transition, complete bounded terminal evidence can permit one
-fresh retry only when all completed calls were read-only: `read`, `ls`, `grep`,
-or `structured_output`. Any Bash, edit, write, MCP, unknown, failed, started,
-malformed, missing, or truncated evidence pauses the workflow with diagnostics.
+records a durable fallback handoff from available active-step context, prior
+checkpoint, diagnostic state, and repository state, then revisits the same
+step. Without that transition, complete bounded terminal evidence can permit
+one fresh retry only when all completed calls were read-only: `read`, `ls`,
+`grep`, or `structured_output`. Any Bash, edit, write, MCP, unknown, failed,
+started, malformed, missing, or truncated evidence pauses the workflow with
+diagnostics.
+
+When a delegated step has a productive tool-call budget, the warning at two
+productive calls remaining tells the child to finish the active delegated step
+with its applicable configured outcome when possible; otherwise it prepares a
+handoff for incomplete active-step work. After the productive budget is
+exhausted, work tools are locked and the completion reserve accepts only the
+configured `handoff` outcome. That handoff must cite evidence for completed or
+in-progress active-step work and identify the first action for the next child.
 
 ## Result Path
 

@@ -134,14 +134,17 @@ implement:
 ```
 
 The child runtime reserves two additional calls for checkpointing. When the
-productive budget is nearly exhausted, it warns the child to prepare a compact
-handoff. Once exhausted, work tools are locked and only `structured_output`
-remains available. If the child then settles without a result, the parent can
+productive budget is nearly exhausted, it tells the child to finish the active
+delegated step with its applicable configured outcome when possible; otherwise
+it should prepare a compact handoff for that step's incomplete work. Once
+exhausted, work tools are locked and only `structured_output` remains
+available. In that reserve mode, `structured_output` must use the configured
+`handoff` outcome. If the child then settles without a result, the parent can
 advance through the self-looping `handoff` transition with a contextual fallback
-summary built from the approved plan, original request, previous handoff,
+summary built from available active-step context, the previous handoff,
 diagnostic state, and repository state. That fallback does not claim unconfirmed
 work is complete; the next visit must inspect the worktree and continue the same
-plan-backed step.
+delegated step.
 
 ## Prompt Rendering
 
@@ -173,6 +176,16 @@ Supported variables:
 | `{{reviewed.feedback}}`  | Feedback paired with that approval.                                                                                        |
 | `{{resume.input}}`       | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
 | `{{restart.workspace}}`  | Exact prior workspace that a restarted iteration must rebind; empty for a first iteration.                                 |
+
+Every step result summary must be a structured handoff: start with
+`# <Outcome>: <state>`, then include `**Completed:**` and `**Remaining:**`
+sections with one or more `- ` list items. Completed items must cite concrete
+evidence such as a path, command, identifier, or user decision; placeholder or
+generic completed and remaining items are rejected. A `blocked` result must also
+include `**Question:**` with one concrete clarifying question ending in `?`.
+Delegated steps choose an outcome using only the active step's instructions:
+later workflow steps do not count as unfinished work, and a completed delegated
+step should state `- No active-step work remains.` under `Remaining`.
 
 ## Prompt File Safety
 
