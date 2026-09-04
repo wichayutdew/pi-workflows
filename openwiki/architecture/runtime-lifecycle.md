@@ -25,12 +25,12 @@ stateDiagram-v2
 ```
 
 The state machine is implemented by the pure engine modules under
-`src/engine/`. `create-run.ts` creates the initial immutable run,
-`run-advance.ts` handles ordinary step outcomes, `gate-transitions.ts` handles
-review submission and resolution, `run-lifecycle.ts` owns pause/resume/abort/restart
-helpers, and `run-reconciliation.ts` plus `reconciliation-history.ts` reconcile
-persisted checkpoints after workflow files change. `transitions.ts` and
-`state.ts` are compatibility facades over those modules.
+`src/function/engine/`, with shared run types in `src/domain/state.ts`.
+`create-run.ts` creates the initial immutable run, `advance-run.ts` handles
+ordinary step outcomes, `gate-transitions.ts` handles review submission and
+resolution, `lifecycle-transitions.ts` owns pause/resume/abort/restart helpers,
+and `reconciliation.ts` plus `reconciliation-history.ts` reconcile persisted
+checkpoints after workflow files change.
 
 ## Start Sequence
 
@@ -56,11 +56,12 @@ sequenceDiagram
   Harness->>Sub: configured profile delegation request
 ```
 
-Parent-mode orchestration starts in `src/harness.ts`, but the behavior is now
-split across action modules in `src/harness/`. `start-actions.ts` reloads the
-catalog, checks the requested step, captures baseline tools, creates the run,
-persists the checkpoint, and launches either a main step or a delegated step.
-`dependencies.ts` is the injected boundary for Pi APIs, time, IDs,
+Parent-mode orchestration starts in `src/harness.ts`, which re-exports the
+implementation in `src/infrastructure/harness/harness.ts`. Action modules under
+`src/infrastructure/harness/` split the behavior. `start-actions.ts` reloads
+the catalog, checks the requested step, captures baseline tools, creates the
+run, persists the checkpoint, and launches either a main step or a delegated
+step. `dependencies.ts` is the injected boundary for Pi APIs, time, IDs,
 configuration loading, temporary delegation workspaces, status display,
 Plannotator, prompt gates, subagents, and the main-step runtime.
 
@@ -83,13 +84,14 @@ sequenceDiagram
   Harness->>Engine: advanceRun or beginGate
 ```
 
-Main-agent execution is registered by `src/runtime/main-step-runtime.ts`. That
-facade creates a controller over `main-step-state.ts`,
-`main-step-lifecycle.ts`, `main-step-policy.ts`, and
-`main-step-completion.ts`; it also preserves the older `MainStepRuntime` class
-for compatibility. Policy decisions come from `src/policy/tools.ts`,
-`bash.ts`, `completion-batch.ts`, and `immutable-input.ts`, while completion
-payloads are parsed by `step-result.ts`.
+Main-agent execution is registered by
+`src/infrastructure/runtime/main-step-runtime.ts`. That module creates a
+controller over `main-step-state.ts`, `main-step-lifecycle.ts`,
+`main-step-policy.ts`, and `main-step-completion.ts`; it also preserves the
+older `MainStepRuntime` class for compatibility. Policy decisions come from
+`src/function/policy/tools.ts`, `bash.ts`, `completion-batch.ts`, and
+`immutable-input.ts`, while completion payloads are parsed by
+`src/function/step-result/parse-result.ts`.
 
 ## Delegated Step Sequence
 
@@ -125,15 +127,17 @@ are available only when the prompt explicitly renders `{{reviewed.artifact}}`
 or `{{gate.artifact}}`; no accumulated parent or sibling transcript crosses
 the step boundary.
 
-Delegation planning lives in `src/harness/delegation-plan.ts`; response
-handling and recovery decisions live in `delegation-response-actions.ts`,
+Delegation planning lives in
+`src/infrastructure/harness/delegation-plan.ts`; response handling and recovery
+decisions live in `delegation-response-actions.ts`,
 `delegation-control-actions.ts`, and `delegation-recovery.ts`, then launch
 through `step-execution-actions.ts`. The parent-side subagent client surface is
-`src/integrations/subagents/client.ts`, which contains the correlated request,
-event handling, cancellation, late terminal handling, and timeout work.
+`src/infrastructure/process/subagent-client.ts`, which contains the correlated
+request, event handling, cancellation, late terminal handling, and timeout work.
 
-The child side is registered by `child-runtime.ts`. Its implementation modules
-parse the encoded policy envelope, validate child agent identity and private
+The child side is registered by
+`src/infrastructure/runtime/child-runtime.ts`. Its implementation modules parse
+the encoded policy envelope, validate child agent identity and private
 capability/result paths, narrow active tools, block interactive coordination
 tools, authorize Bash/MCP/tool calls through the shared policy core, validate
 structured completion, and write the bounded result file. Diagnostics classify
@@ -207,11 +211,10 @@ summary; the final message also marks the workflow complete. Other pauses relay
 their bounded reason. Failures relay a short redacted reason while their full
 diagnostic and attempt history remain confined to the checkpoint and explorer.
 
-The status facade is `src/workflow-status.ts`. Rendering and display details
-are split into `workflow-status/format-status.ts`, `formatting.ts`,
-`layout.ts`, `render-board.ts`, `render-path.ts`, `render-step-detail.ts`,
-`render-summary.ts`, `transcript-reader.ts`, `types.ts`, and `view.ts`; harness
-status actions call that facade instead of formatting the overlay inline.
+Status rendering exports live under `src/ui/`, with shared snapshot/view types
+in `src/domain/status.ts` and child transcript reading in
+`src/infrastructure/fs/transcript-reader.ts`. Harness status actions call those
+renderers instead of formatting the overlay inline.
 
 ## Pause And Resume
 
@@ -246,7 +249,8 @@ action succeeds but before it checkpoints, resume uses the same declarative step
 permissions. The step prompt must inspect observable remote state, skip only
 proven-complete actions, and pause on ambiguity.
 
-Pause and resume are coordinated by `pause-actions.ts`, `resume-action.ts`,
+Pause and resume are coordinated by
+`src/infrastructure/harness/pause-actions.ts`, `resume-action.ts`,
 `delegation-control-actions.ts`, `prompt-gate-actions.ts`, and
 `plannotator-result-actions.ts`. Engine helpers only produce the next
 checkpoint state; harness actions own effect cleanup, active-tool restoration,
