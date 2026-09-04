@@ -105,9 +105,13 @@ context; the YAML rule only defines executable scope.
 flowchart TD
   Complete[completion params] --> Outcome{outcome in policy.outcomes?}
   Outcome -- no --> Reject[throw]
-  Outcome -- yes --> Summary{summary trims non-empty and <= limit?}
+  Outcome -- yes --> Summary{summary structured, specific, and <= limit?}
   Summary -- no --> Reject
-  Summary -- yes --> Gate{outcome is gateSubmitOutcome?}
+  Summary -- yes --> BlockedOutcome{outcome is blocked?}
+  BlockedOutcome -- no --> Gate{outcome is gateSubmitOutcome?}
+  BlockedOutcome -- yes --> BlockedSummary{question/action/next present?}
+  BlockedSummary -- no --> Reject
+  BlockedSummary -- yes --> Gate
   Gate -- yes --> Artifact{artifact non-empty?}
   Artifact -- no --> Reject
   Artifact -- yes --> Mode{execution mode}
@@ -121,10 +125,13 @@ flowchart TD
 For a delegated step, pi-subagents 0.36 supplies `structured_output`; for a
 main-agent step, the harness registers `workflow_complete_step`. Both paths
 feed the same outcome, summary, artifact, sole-call, and policy-digest
-validation. The workflow step permissions become the sole active-tool
-allow-list after the child capability is verified. The selected workflow
-`agent` profile supplies role instructions plus optional model/thinking
-overrides; unavailable tools or extension providers fail closed.
+validation. Summaries must start with `# <Outcome>: <state>`, include specific
+`Completed` and `Remaining` bullet sections, and avoid placeholder or generic
+items; `blocked` summaries must also ask one concrete clarifying question. The
+workflow step permissions become the sole active-tool allow-list after the
+child capability is verified. The selected workflow `agent` profile supplies
+role instructions plus optional model/thinking overrides; unavailable tools or
+extension providers fail closed.
 
 The harness captures the working directory when a run starts. A configured
 delegated step may bind one canonical existing directory under a YAML-authorized

@@ -149,11 +149,12 @@ step without repeating work.
 If repair still produces no result and the active step declares a self-looping
 `handoff` transition, `delegation-response-actions.ts` records a contextual
 fallback result and advances through that transition so the next visit can
-inspect current state and continue. The fallback includes the approved plan,
-original request, previous checkpoint, diagnostic state, and repository state;
-it does not mark new work as confirmed complete. Without that transition,
-`delegation-recovery.ts` permits one fresh child retry only for the first
-subagent attempt and only when diagnostics prove the attempt was settled,
+inspect current state and continue the current delegated step. The fallback
+states that no delegated-step completion can be verified, includes available
+active-step context, the previous checkpoint, diagnostic state, and repository
+state, and does not mark new work as confirmed complete. Without that
+transition, `delegation-recovery.ts` permits one fresh child retry only for the
+first subagent attempt and only when diagnostics prove the attempt was settled,
 untruncated, and used completed read-only calls: `read`, `ls`, `grep`, or
 `structured_output`. Missing diagnostics, truncated evidence, failed/started
 calls, Bash, edit/write, MCP, or any other tool class pause the workflow.
