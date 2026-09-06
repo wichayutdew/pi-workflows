@@ -20,12 +20,14 @@ import {
   advanceRun,
   abortRun,
   attachGateReviewId,
+  attachTuiReviewSurface,
   beginGate,
   failGate,
   pauseRun,
   reconcileRun,
   resolveGate,
   resumeRun,
+  setGateReviewTransport,
   setResumeInput,
   storeGateResolution,
 } from '../../src/function/engine/index.ts';
@@ -1641,6 +1643,94 @@ describe('when testing engine', () => {
         'Review ready',
       );
       expect(isWorkflowRun(awaiting)).toBe(true);
+    });
+
+    test('attaches a TUI review surface and a browser transport marker', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: { approved: '$done', rejected: 'plan' },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      let run = beginGate(
+        workflow,
+        createRun(workflow, '', [], 'run-transport', 1),
+        'submit',
+        '# Plan',
+        'request-1',
+        2,
+        'Plan ready',
+      );
+
+      run = attachTuiReviewSurface(run, '/tmp/tui/artifact.md', 3);
+      expect(run.pendingGate).toMatchObject({
+        reviewTransport: 'tui',
+        reviewArtifactPath: '/tmp/tui/artifact.md',
+      });
+      expect(isWorkflowRun(run)).toBe(true);
+
+      run = setGateReviewTransport(run, 'browser', 4);
+      expect(run.pendingGate?.reviewTransport).toBe('browser');
+      expect(run.pendingGate?.reviewArtifactPath).toBeUndefined();
+      expect(isWorkflowRun(run)).toBe(true);
+
+      expect(() =>
+        attachTuiReviewSurface(
+          { ...run, pendingGate: undefined },
+          '/tmp/tui/artifact.md',
+          5,
+        ),
+      ).toThrow(/no pending gate/);
+      expect(() =>
+        setGateReviewTransport(
+          { ...run, pendingGate: undefined },
+          'browser',
+          5,
+        ),
+      ).toThrow(/no pending gate/);
+    });
+
+    test('rejects an unsupported review transport value', () => {
+      const raw = baseWorkflow();
+      raw.start = 'plan';
+      raw.steps = {
+        plan: {
+          prompt: 'Plan',
+          gate: {
+            provider: 'plannotator',
+            submitOutcome: 'submit',
+            approvedOutcome: 'approved',
+            rejectedOutcome: 'rejected',
+          },
+          transitions: { approved: '$done', rejected: 'plan' },
+        },
+      };
+      const workflow = loadedWorkflow(raw);
+      const run = beginGate(
+        workflow,
+        createRun(workflow, '', [], 'run-transport-invalid', 1),
+        'submit',
+        '# Plan',
+        'request-1',
+        2,
+        'Plan ready',
+      );
+
+      expect(
+        isWorkflowRun({
+          ...run,
+          pendingGate: { ...run.pendingGate!, reviewTransport: 'email' },
+        }),
+      ).toBe(false);
     });
   });
 

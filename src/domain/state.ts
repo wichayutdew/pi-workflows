@@ -141,6 +141,8 @@ export type GateResolution = {
   readonly resolvedAt: number;
 };
 
+export type GateReviewTransport = 'browser' | 'tui';
+
 export type PendingGate = {
   readonly provider: 'prompt' | 'plannotator';
   readonly requestId: string;
@@ -150,6 +152,10 @@ export type PendingGate = {
   readonly summary?: string | undefined;
   readonly submittedOutcome: string;
   readonly requestedAt: number;
+  /** Distinguishes browser-backed, TUI-backed, and legacy pending gates. */
+  readonly reviewTransport?: GateReviewTransport | undefined;
+  /** Retained private artifact path when a TUI review surface is open. */
+  readonly reviewArtifactPath?: string | undefined;
   readonly reviewId?: string | undefined;
   readonly resolution?: GateResolution | undefined;
 };

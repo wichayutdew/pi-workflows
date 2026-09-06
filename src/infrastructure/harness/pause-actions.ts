@@ -1,5 +1,9 @@
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
-import { abortRun, pauseRun } from '../../function/index.ts';
+import {
+  abortRun,
+  pauseRun,
+  tuiArtifactPathFromPendingGate,
+} from '../../function/index.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { conciseStepPauseSummary, reportPausedStep } from './step-reporting.ts';
 
@@ -105,7 +109,13 @@ async function abortNow(
     context.abort();
     if (isMainStepSuspended) await context.waitForIdle();
   }
+  const tuiArtifactPath = tuiArtifactPathFromPendingGate(this.run.pendingGate);
   this.run = abortRun(this.run, reason, this.dependencies.now());
+  if (tuiArtifactPath) {
+    await this.dependencies.plannotatorTuiLauncher.cleanupArtifact(
+      tuiArtifactPath,
+    );
+  }
   this.persist();
   if (isCancellationConfirmed) {
     this.restoreBaselineTools();

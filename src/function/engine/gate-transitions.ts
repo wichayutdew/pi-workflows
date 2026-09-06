@@ -1,6 +1,8 @@
 import type {
   GateResolution,
+  GateReviewTransport,
   LoadedWorkflow,
+  PendingGate,
   WorkflowRun,
 } from '../../domain/index.ts';
 import { MAX_GATE_FEEDBACK_CHARS } from '../../domain/index.ts';
@@ -113,6 +115,79 @@ export const attachGateReviewId = (
     now,
   );
 };
+
+/**
+ * Marks the review transport for a pending gate.
+ *
+ * @param run - Current workflow state.
+ * @param transport - Selected review transport.
+ * @param now - Update timestamp.
+ * @returns A new workflow state with the transport marker.
+ * @throws When no gate is pending.
+ */
+export const setGateReviewTransport = (
+  run: WorkflowRun,
+  transport: GateReviewTransport,
+  now: number,
+): WorkflowRun => {
+  if (!run.pendingGate) throw new Error('workflow has no pending gate');
+  return withRunUpdate(
+    run,
+    {
+      pendingGate: {
+        ...run.pendingGate,
+        reviewTransport: transport,
+        ...(transport !== 'tui' ? { reviewArtifactPath: undefined } : {}),
+      },
+    },
+    now,
+  );
+};
+
+/**
+ * Attaches a confirmed TUI review surface and retains the private artifact
+ * path the TUI is reading.
+ *
+ * @param run - Current workflow state.
+ * @param artifactPath - Private temporary artifact delivered to the TUI.
+ * @param now - Update timestamp.
+ * @returns A new workflow state marked as TUI-backed.
+ * @throws When no Plannotator gate is pending.
+ */
+export const attachTuiReviewSurface = (
+  run: WorkflowRun,
+  artifactPath: string,
+  now: number,
+): WorkflowRun => {
+  if (!run.pendingGate) throw new Error('workflow has no pending gate');
+  if (run.pendingGate.provider !== 'plannotator') {
+    throw new Error('only a Plannotator gate can have a TUI review surface');
+  }
+  return withRunUpdate(
+    run,
+    {
+      pendingGate: {
+        ...run.pendingGate,
+        reviewTransport: 'tui',
+        reviewArtifactPath: artifactPath,
+      },
+    },
+    now,
+  );
+};
+
+/**
+ * Returns the retained TUI artifact path for cleanup, if any.
+ *
+ * A pending gate owns a private temporary artifact only when it has been
+ * successfully opened by a Plannotator TUI review surface.
+ */
+export const tuiArtifactPathFromPendingGate = (
+  pendingGate: PendingGate | undefined,
+): string | undefined =>
+  pendingGate?.reviewTransport === 'tui'
+    ? pendingGate.reviewArtifactPath
+    : undefined;
 
 /**
  * Returns a failed gate request to active step execution with feedback.

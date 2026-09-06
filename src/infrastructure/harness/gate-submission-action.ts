@@ -4,9 +4,11 @@ import { validateArtifactContract } from '../../function/index.ts';
 import {
   attachGateReviewId,
   advanceRun,
+  attachTuiReviewSurface,
   beginGate,
   failGate,
   failRun,
+  setGateReviewTransport,
 } from '../../function/index.ts';
 import type { HarnessActionContext as FullHarnessActionContext } from './action-context.ts';
 import { reportFailedStep } from './step-reporting.ts';
@@ -110,6 +112,36 @@ async function submitGate(
     return;
   }
 
+  const tuiResult =
+    await this.dependencies.plannotatorTuiLauncher.launch(artifact);
+  const isSuperseded = (run: WorkflowRun | undefined): boolean =>
+    !this.isSessionActive ||
+    this.sessionEpoch !== requestSessionEpoch ||
+    !isCurrentGateRequest(run, originalRun, requestId);
+  let currentRun = this.run;
+  if (isSuperseded(currentRun)) {
+    if (tuiResult.kind === 'opened') {
+      await this.dependencies.plannotatorTuiLauncher.cleanupArtifact(
+        tuiResult.artifactPath,
+      );
+    }
+    throw new Error('Gate request was superseded by a workflow state change');
+  }
+  if (tuiResult.kind === 'opened') {
+    this.run = attachTuiReviewSurface(
+      currentRun,
+      tuiResult.artifactPath,
+      this.dependencies.now(),
+    );
+    this.persist();
+    this.updateStatus();
+    this.latestContext?.ui.notify(
+      `Submitted "${originalRun.currentStepId}" for Plannotator TUI review`,
+      'info',
+    );
+    return;
+  }
+
   const response = await this.dependencies.requestPlannotatorReview(
     this.pi.events,
     requestId,
@@ -117,12 +149,8 @@ async function submitGate(
     `pi-workflows:${workflow.definition.id}:${originalRun.currentStepId}`,
     step.gate.timeoutMs,
   );
-  const currentRun = this.run;
-  if (
-    !this.isSessionActive ||
-    this.sessionEpoch !== requestSessionEpoch ||
-    !isCurrentGateRequest(currentRun, originalRun, requestId)
-  ) {
+  currentRun = this.run;
+  if (isSuperseded(currentRun)) {
     throw new Error('Gate request was superseded by a workflow state change');
   }
   if (response.status !== 'handled') {
@@ -138,6 +166,11 @@ async function submitGate(
   this.run = attachGateReviewId(
     currentRun,
     response.result.reviewId,
+    this.dependencies.now(),
+  );
+  this.run = setGateReviewTransport(
+    this.run,
+    'browser',
     this.dependencies.now(),
   );
   this.persist();
