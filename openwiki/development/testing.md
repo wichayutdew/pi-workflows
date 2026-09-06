@@ -84,3 +84,76 @@ flowchart TD
   Doctor -- yes --> SubDoctor["/subagents-doctor"]
   Doctor -- no --> Done[workflow running]
 ```
+
+## Isolated Herdr / Plannotator TUI Smoke
+
+Use a temporary `PI_CODING_AGENT_DIR` so the global Pi configuration is never
+modified. The smoke verifies that a `provider: plannotator` gate opens the
+artifact in a separate Plannotator TUI pane instead of emitting a browser
+review request.
+
+Build and typecheck the worktree first:
+
+```bash
+cd /absolute/path/to/pi-workflows
+bun run check
+bun run build
+```
+
+Create an isolated agent directory that copies the current user settings and
+replaces the Pi Workflows package with the worktree path:
+
+```bash
+WORKTREE=/absolute/path/to/pi-workflows
+AGENT_DIR="$(mktemp -d)"
+cp -R "$HOME/.pi/agent/." "$AGENT_DIR"
+python3 - "$AGENT_DIR/settings.json" "$WORKTREE" <<'PY'
+import json
+import pathlib
+import sys
+settings = pathlib.Path(sys.argv[1])
+worktree = sys.argv[2]
+data = json.loads(settings.read_text())
+packages = data.get("packages", [])
+data["packages"] = [p for p in packages if p != "npm:@wichayutdew/pi-workflows"] + [worktree]
+settings.write_text(json.dumps(data, indent=2) + "\n")
+PY
+PI_CODING_AGENT_DIR="$AGENT_DIR" pi list
+printf '%s\n' "$AGENT_DIR"
+```
+
+Confirm that `pi list` shows the worktree path as the Pi Workflows package and
+that `~/.pi/agent/settings.json` is unchanged.
+
+Create a new Herdr pane for observation:
+
+```bash
+WORKTREE=/absolute/path/to/pi-workflows
+herdr pane split --current --direction right --cwd "$WORKTREE" --focus
+herdr pane list
+```
+
+In the new pane, start Pi with the isolated directory and run a workflow that
+reaches a Plannotator gate:
+
+```bash
+PI_CODING_AGENT_DIR=<AGENT_DIR> pi
+/workflow-start work
+Open a Plannotator TUI review for this harmless smoke request; do not make repository changes.
+```
+
+Wait for the planner gate. Expected observations:
+
+- A separate Plannotator TUI document-review pane opens for the gate artifact.
+- No browser Plannotator review opens.
+- The original Pi pane remains `awaiting-gate`.
+- `herdr pane list` shows the new review pane before and after the gate.
+
+Record the pane list and the visible TUI title/output in the implementation
+report. When finished, remove the isolated directory:
+
+```bash
+rm -rf "$AGENT_DIR"
+```
+
+This leaves the global Pi settings and installed package selection unchanged.

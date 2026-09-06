@@ -3,15 +3,26 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type { WorkflowCatalog } from '../../src/domain/index.ts';
-import { advanceRun } from '../../src/function/engine/index.ts';
+import type {
+  LoadedWorkflow,
+  WorkflowCatalog,
+} from '../../src/domain/index.ts';
+import {
+  advanceRun,
+  attachTuiReviewSurface,
+  beginGate,
+  pauseRun,
+} from '../../src/function/engine/index.ts';
 import { createRun, type WorkflowRun } from '../../src/domain/index.ts';
-import { pauseRun } from '../../src/function/engine/index.ts';
 import type { HarnessActionContext } from '../../src/infrastructure/harness/action-context.ts';
 import { createEmptyCatalog } from '../../src/infrastructure/harness/catalog.ts';
 import { createCoreActions } from '../../src/infrastructure/harness/core-actions.ts';
 import { createPauseActions } from '../../src/infrastructure/harness/pause-actions.ts';
-import { loadedWorkflow } from '../helpers.ts';
+import type {
+  PlannotatorTuiLauncher,
+  TuiLaunchResult,
+} from '../../src/infrastructure/integrations/plannotator-tui.ts';
+import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
 
 type Notice = {
   message: string;
@@ -36,6 +47,22 @@ function createExtensionContext(
   } as unknown as ExtensionContext;
 }
 
+function gatedWorkflow(): LoadedWorkflow {
+  const raw = baseWorkflow();
+  const steps = raw.steps as Record<string, Record<string, unknown>>;
+  const inspect = steps.inspect!;
+  inspect.permissions = { extensions: ['plannotator'] };
+  inspect.requires = { extensions: ['plannotator'] };
+  inspect.gate = {
+    provider: 'plannotator',
+    submitOutcome: 'submit',
+    approvedOutcome: 'ready',
+    rejectedOutcome: 'blocked',
+    timeoutMs: 1_000,
+  };
+  return loadedWorkflow(raw);
+}
+
 function createCoreFixture() {
   const notices: Array<Notice> = [];
   const calls = {
@@ -51,6 +78,7 @@ function createCoreFixture() {
     }>,
     statusUpdates: 0,
     toolSets: [] as Array<Array<string>>,
+    tuiCleanups: [] as Array<string>,
   };
   const fixture = {
     activeDelegation: undefined,
@@ -64,11 +92,24 @@ function createCoreFixture() {
       },
       loadCatalog: async () => createEmptyCatalog(),
       now: () => 10,
+      plannotatorTuiLauncher: {
+        isAvailable: () => false,
+        launch: async (): Promise<TuiLaunchResult> => ({
+          kind: 'unavailable',
+          reason: 'none',
+        }),
+        cleanupArtifact: async (path: string) => {
+          calls.tuiCleanups.push(path);
+        },
+      } as PlannotatorTuiLauncher,
     },
     isSessionActive: true,
     latestContext: createExtensionContext(notices),
+    cancelActiveDelegation: async () => true,
+    cancelPromptReview: () => {},
     mainSteps: {
       release: () => {},
+      suspend: () => true,
     },
     mutationQueue: {
       run: async (operation: () => Promise<void>) => operation(),
@@ -359,5 +400,31 @@ describe('when testing pause actions', () => {
       message: 'Workflow is already paused: waiting for review',
       level: 'info',
     });
+  });
+
+  test('cleans up the retained TUI artifact when aborting a workflow', async () => {
+    const workflow = gatedWorkflow();
+    const { calls, fixture, notices } = createCoreFixture();
+    let run = beginGate(
+      workflow,
+      createRun(workflow, 'request', ['read'], 'run-1', 1),
+      'submit',
+      '# Plan',
+      'gate-request',
+      2,
+      'Plan ready',
+    );
+    run = attachTuiReviewSurface(run, '/tmp/tui/abort-artifact.md', 3);
+    fixture.run = run;
+
+    await actions.abortNow.call(
+      fixture as unknown as HarnessActionContext,
+      'manual abort',
+      createCommandContext(notices),
+    );
+
+    expect(fixture.run?.status).toBe('aborted');
+    expect(fixture.run?.pendingGate).toBeUndefined();
+    expect(calls.tuiCleanups).toEqual(['/tmp/tui/abort-artifact.md']);
   });
 });

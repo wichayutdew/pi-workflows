@@ -29,7 +29,7 @@ stateDiagram-v2
 flowchart TD
   Gate[gate config] --> Provider{provider}
   Provider -- omitted or prompt --> Prompt[use built-in Pi review]
-  Provider -- plannotator --> Detect{extension detectable?}
+  Provider -- plannotator --> Detect{browser extension or TUI surface detectable?}
   Provider -- other --> Reject[reject workflow]
   Detect -- no --> Preflight[block step preflight]
   Detect -- yes --> Outcomes{approved != rejected?}
@@ -48,16 +48,23 @@ flowchart TD
 sequenceDiagram
   participant Child
   participant Harness
+  participant TUI as Plannotator TUI
   participant Pi as Pi event bus
-  participant Review as Plannotator
+  participant Review as Plannotator browser
 
   Child->>Harness: result outcome submit plus summary plus artifact
   Harness->>Harness: beginGate and persist awaiting-gate
-  Harness->>Pi: plannotator:request action plan-review
-  Pi->>Review: review request with opaque artifact
-  Review-->>Pi: handled pending reviewId
-  Pi-->>Harness: reviewId
-  Harness->>Harness: attachGateReviewId and persist
+  alt TUI review surface available
+    Harness->>TUI: write private artifact.md and spawn herdr open ... --deliver-to <pane>
+    TUI-->>Harness: opened
+    Harness->>Harness: attachTuiReviewSurface and persist
+  else TUI unavailable or failed to open
+    Harness->>Pi: plannotator:request action plan-review
+    Pi->>Review: review request with opaque artifact
+    Review-->>Pi: handled pending reviewId
+    Pi-->>Harness: reviewId
+    Harness->>Harness: attachGateReviewId, mark browser transport, persist
+  end
 ```
 
 ## Review Result
@@ -83,8 +90,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Resume["/workflow-resume"] --> Pending{pending gate has reviewId and no resolution?}
-  Pending -- no --> Apply[resume or apply stored resolution]
+  Resume["/workflow-resume"] --> Transport{pending gate transport?}
+  Transport -- TUI --> Apply[resume to awaiting-gate; no status query]
+  Transport -- browser --> Pending{pending gate has reviewId and no resolution?}
+  Pending -- no --> Apply
   Pending -- yes --> Status[emit plannotator review-status]
   Status --> Response{status}
   Response -- pending --> Await[remain awaiting gate]
@@ -95,6 +104,10 @@ flowchart TD
   Store --> Apply
   Fail --> Apply
 ```
+
+Legacy checkpoints without a `reviewTransport` field are treated as browser
+backed, so existing Plannotator review IDs continue to poll and resolve exactly
+as before.
 
 A built-in review opened from print or JSON mode remains paused because those
 modes cannot show the dialog. Reopen the same session in TUI or RPC mode and
@@ -113,6 +126,58 @@ flowchart LR
   Rejected --> GateArtifact[gate.artifact template value]
   Rejected --> GateFeedback[gate.feedback template value]
 ```
+
+## TUI Review Surface
+
+A `provider: plannotator` gate first attempts to open the artifact in a local
+Plannotator TUI review pane. Two sources are discovered, in order:
+
+1. A standalone `plannotator-tui` executable on `PATH`.
+2. An enabled Herdr `annotate` plugin whose manifest declares an `open` action
+   and a `doc` pane, with a present executable relative to its plugin root.
+
+Discovery requires the active Pi process to be running inside Herdr with
+`HERDR_ENV=1`, a non-empty `HERDR_SOCKET_PATH`, and a non-empty
+`HERDR_PANE_ID`. If any Herdr context is missing, no TUI candidate is attempted.
+
+The launcher writes the opaque gate artifact to a mode-restricted temporary
+Markdown file and invokes:
+
+```text
+plannotator-tui herdr open <artifact-path> --deliver-to <HERDR_PANE_ID>
+```
+
+When the process exits with code `0`, the launch is treated as an opened review
+surface. The temporary artifact is retained because the TUI may read it after
+the launcher returns; the harness owns cleanup through the persisted
+`reviewArtifactPath` and removes it on abort, failed/unavailable launch, or
+other known terminal lifecycle paths.
+
+## Browser Fallback
+
+If no TUI candidate is available, discovery fails, the spawn fails, the process
+times out, exits non-zero, or does not confirm an open, the gate falls back to
+the existing browser Plannotator request exactly once. The browser path emits
+`plannotator:request`, receives a correlated `reviewId`, and continues with the
+existing result-event handling and resume polling.
+
+## Transport-Specific Recovery
+
+A TUI-backed pending gate is persisted with `reviewTransport: 'tui'` and a
+`reviewArtifactPath`. Resume does not treat the absence of a `reviewId` as an
+interrupted submission, and it does not emit `review-status`. The gate remains
+`awaiting-gate` until an explicit compatible resolution is supplied.
+
+Browser-backed gates keep `reviewTransport: 'browser'` (or the legacy absent
+marker) and continue to use `reviewId` correlation for result events and resume
+status polling.
+
+## No Implicit Approval
+
+The extension does not infer approval or rejection from TUI annotations,
+process exit status, feedback text, or the existence of a temporary artifact.
+TUI-backed gates remain in `awaiting-gate` until a documented compatible result
+contract is wired to `GateResolution`.
 
 Approval and rejection outcome names are opaque transition labels. The
 extension does not infer planning, retry, replan, or implementation semantics

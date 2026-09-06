@@ -8,6 +8,10 @@ import {
 } from '../../src/function/engine/index.ts';
 import { createRun, type WorkflowRun } from '../../src/domain/index.ts';
 import type { PlannotatorStartResponse } from '../../src/infrastructure/integrations/plannotator.ts';
+import type {
+  PlannotatorTuiLauncher,
+  TuiLaunchResult,
+} from '../../src/infrastructure/integrations/plannotator-tui.ts';
 import type { HarnessActionContext } from '../../src/infrastructure/harness/action-context.ts';
 import { createGateSubmissionAction } from '../../src/infrastructure/harness/gate-submission-action.ts';
 import { createPlannotatorResultActions } from '../../src/infrastructure/harness/plannotator-result-actions.ts';
@@ -89,6 +93,8 @@ function createGateFixture(run: WorkflowRun, workflow: LoadedWorkflow) {
     restoredTools: 0,
     settled: 0,
     statusUpdates: 0,
+    tuiLaunches: 0,
+    tuiCleanups: [] as Array<string>,
   };
   let now = 10;
   const fixture = {
@@ -112,6 +118,16 @@ function createGateFixture(run: WorkflowRun, workflow: LoadedWorkflow) {
       requestPromptGateReview: async () => ({
         status: 'dismissed' as const,
       }),
+      plannotatorTuiLauncher: {
+        isAvailable: () => false,
+        launch: async (): Promise<TuiLaunchResult> => {
+          calls.tuiLaunches += 1;
+          return { kind: 'unavailable', reason: 'none' };
+        },
+        cleanupArtifact: async (path: string) => {
+          calls.tuiCleanups.push(path);
+        },
+      } as PlannotatorTuiLauncher,
     },
     isSessionActive: true,
     latestContext: {
@@ -503,5 +519,131 @@ describe('when testing gate actions', () => {
       restoredTools: 1,
       statusUpdates: 1,
     });
+  });
+
+  test('opens a Plannotator TUI review and suppresses the browser request', async () => {
+    const workflow = gatedWorkflow('plannotator');
+    const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
+    const { calls, fixture, notices } = createGateFixture(
+      originalRun,
+      workflow,
+    );
+    fixture.dependencies.plannotatorTuiLauncher = {
+      isAvailable: () => true,
+      launch: async () => {
+        calls.tuiLaunches += 1;
+        return {
+          kind: 'opened',
+          artifactPath: '/tmp/tui/private-artifact.md',
+        } as const;
+      },
+      cleanupArtifact: async (path: string) => {
+        calls.tuiCleanups.push(path);
+      },
+    };
+    fixture.dependencies.requestPlannotatorReview = async () => {
+      calls.plannotatorRequests += 1;
+      return {
+        status: 'handled' as const,
+        result: { status: 'pending' as const, reviewId: 'review-1' },
+      };
+    };
+
+    await createGateSubmissionAction().submitGate.call(
+      fixture as unknown as HarnessActionContext,
+      workflow,
+      originalRun,
+      'submit',
+      'Plan ready',
+      '# Plan',
+    );
+
+    expect(calls.tuiLaunches).toBe(1);
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(fixture.run?.pendingGate).toMatchObject({
+      reviewTransport: 'tui',
+      reviewArtifactPath: '/tmp/tui/private-artifact.md',
+    });
+    expect(calls.persisted).toBe(2);
+    expect(notices.at(-1)?.message).toContain('Plannotator TUI');
+  });
+
+  test('does not open browser Plannotator when an available TUI fails to launch', async () => {
+    const workflow = gatedWorkflow('plannotator');
+    const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
+    const { calls, fixture } = createGateFixture(originalRun, workflow);
+    fixture.dependencies.plannotatorTuiLauncher = {
+      isAvailable: () => true,
+      launch: async () => {
+        calls.tuiLaunches += 1;
+        return { kind: 'unavailable', reason: 'no Herdr context' } as const;
+      },
+      cleanupArtifact: async () => {},
+    };
+    fixture.dependencies.requestPlannotatorReview = async () => {
+      calls.plannotatorRequests += 1;
+      return {
+        status: 'handled' as const,
+        result: { status: 'pending' as const, reviewId: 'review-1' },
+      };
+    };
+
+    await createGateSubmissionAction().submitGate.call(
+      fixture as unknown as HarnessActionContext,
+      workflow,
+      originalRun,
+      'submit',
+      'Plan ready',
+      '# Plan',
+    );
+
+    expect(calls.tuiLaunches).toBe(1);
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(fixture.run).toMatchObject({
+      status: 'paused',
+      failedStepId: 'inspect',
+      pauseReason: expect.stringContaining('no Herdr context'),
+    });
+  });
+
+  test('cleans up the TUI artifact when a confirmed open is superseded', async () => {
+    const workflow = gatedWorkflow('plannotator');
+    const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
+    const { calls, fixture } = createGateFixture(originalRun, workflow);
+    fixture.dependencies.plannotatorTuiLauncher = {
+      isAvailable: () => true,
+      launch: async () => {
+        calls.tuiLaunches += 1;
+        fixture.sessionEpoch += 1;
+        return {
+          kind: 'opened',
+          artifactPath: '/tmp/tui/superseded-artifact.md',
+        } as const;
+      },
+      cleanupArtifact: async (path: string) => {
+        calls.tuiCleanups.push(path);
+      },
+    };
+    fixture.dependencies.requestPlannotatorReview = async () => {
+      return {
+        status: 'handled' as const,
+        result: { status: 'pending' as const, reviewId: 'review-1' },
+      };
+    };
+
+    await expect(
+      createGateSubmissionAction().submitGate.call(
+        fixture as unknown as HarnessActionContext,
+        workflow,
+        originalRun,
+        'submit',
+        'Plan ready',
+        '# Plan',
+      ),
+    ).rejects.toThrow('superseded');
+
+    expect(calls.tuiLaunches).toBe(1);
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(calls.tuiCleanups).toEqual(['/tmp/tui/superseded-artifact.md']);
   });
 });

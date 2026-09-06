@@ -7,13 +7,15 @@ transitions, and parent-mode coordination.
 
 ## Review Integrations
 
-| Module                                                | Responsibility                                                                             |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `src/domain/plannotator.ts`                           | Event-bus port and normalized Plannotator request/status/result types.                     |
-| `src/infrastructure/integrations/plannotator.ts`      | Stable facade for Plannotator requests, response normalization, result parsing, and types. |
-| `src/infrastructure/integrations/plannotator-requests.ts`  | Publishes start/status events and makes timeout scheduling injectable.                     |
-| `src/infrastructure/integrations/plannotator-responses.ts` | Normalizes unknown event replies and validates review-result payloads.                     |
-| `src/infrastructure/integrations/prompt-gate.ts`      | Runs the built-in review selector and feedback editor with abort-aware UI dependencies.    |
+| Module                                                     | Responsibility                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/domain/plannotator.ts`                                | Event-bus port and normalized Plannotator request/status/result types.                                  |
+| `src/infrastructure/integrations/plannotator.ts`           | Stable facade for Plannotator requests, response normalization, result parsing, and types.              |
+| `src/infrastructure/integrations/plannotator-requests.ts`  | Publishes start/status events and makes timeout scheduling injectable.                                  |
+| `src/infrastructure/integrations/plannotator-responses.ts` | Normalizes unknown event replies and validates review-result payloads.                                  |
+| `src/infrastructure/integrations/plannotator-tui.ts`       | Discovers and launches a local Plannotator TUI review surface with injectable filesystem/process effects. |
+| `src/infrastructure/harness/dependencies.ts`               | Composes the production dependency boundary, including the default TUI launcher and browser Plannotator facades. |
+| `src/infrastructure/integrations/prompt-gate.ts`           | Runs the built-in review selector and feedback editor with abort-aware UI dependencies.                 |
 
 ## Subagent Integration
 

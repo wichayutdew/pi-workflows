@@ -248,6 +248,9 @@ const isGateResolution = (value: unknown): value is GateResolution =>
   value.feedback.length <= MAX_GATE_FEEDBACK_CHARS &&
   typeof value.resolvedAt === 'number';
 
+const isGateReviewTransport = (value: unknown): value is 'browser' | 'tui' =>
+  value === 'browser' || value === 'tui';
+
 const isPendingGate = (value: unknown): value is PendingGate =>
   isRecord(value) &&
   (value.provider === 'prompt' || value.provider === 'plannotator') &&
@@ -258,6 +261,10 @@ const isPendingGate = (value: unknown): value is PendingGate =>
   (value.summary === undefined || typeof value.summary === 'string') &&
   typeof value.submittedOutcome === 'string' &&
   typeof value.requestedAt === 'number' &&
+  (value.reviewTransport === undefined ||
+    isGateReviewTransport(value.reviewTransport)) &&
+  (value.reviewArtifactPath === undefined ||
+    typeof value.reviewArtifactPath === 'string') &&
   (value.reviewId === undefined || typeof value.reviewId === 'string') &&
   (value.resolution === undefined || isGateResolution(value.resolution));
 

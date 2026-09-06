@@ -124,7 +124,8 @@ async function resumeNow(
   let resumed = reconciled.run;
   if (
     resumed.pendingGate?.provider === 'plannotator' &&
-    !resumed.pendingGate.reviewId
+    !resumed.pendingGate.reviewId &&
+    resumed.pendingGate.reviewTransport !== 'tui'
   ) {
     resumed = failGate(
       resumed,
@@ -280,6 +281,13 @@ async function resumeNow(
     if (this.run.pendingGate?.provider === 'prompt') {
       this.launchPromptReview(workflow, this.run, context);
       context.ui.notify('Workflow resumed with built-in review open', 'info');
+      return;
+    }
+    if (this.run.pendingGate?.reviewTransport === 'tui') {
+      context.ui.notify(
+        'Workflow resumed with review open in the Plannotator TUI',
+        'info',
+      );
       return;
     }
     context.ui.notify(

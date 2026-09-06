@@ -3,6 +3,7 @@ import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import type { LoadedWorkflow } from '../../src/domain/index.ts';
 import {
   attachGateReviewId,
+  attachTuiReviewSurface,
   beginGate,
   pauseRun,
   storeGateResolution,
@@ -13,6 +14,10 @@ import {
   type WorkflowRun,
 } from '../../src/domain/index.ts';
 import type { PlannotatorStatusResponse } from '../../src/infrastructure/integrations/plannotator.ts';
+import type {
+  PlannotatorTuiLauncher,
+  TuiLaunchResult,
+} from '../../src/infrastructure/integrations/plannotator-tui.ts';
 import type { HarnessActionContext } from '../../src/infrastructure/harness/action-context.ts';
 import { createResumeAction } from '../../src/infrastructure/harness/resume-action.ts';
 import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
@@ -125,6 +130,7 @@ function createResumeFixture(
     statusRequests: 0,
     statusUpdates: 0,
     toolIsolations: 0,
+    tuiCleanups: [] as Array<string>,
   };
   let now = 10;
   const fixture = {
@@ -144,6 +150,16 @@ function createResumeFixture(
         calls.statusRequests += 1;
         return statusResponse;
       },
+      plannotatorTuiLauncher: {
+        isAvailable: () => false,
+        launch: async (): Promise<TuiLaunchResult> => ({
+          kind: 'unavailable',
+          reason: 'none',
+        }),
+        cleanupArtifact: async (path: string) => {
+          calls.tuiCleanups.push(path);
+        },
+      } as PlannotatorTuiLauncher,
     },
     isSessionActive: true,
     pi: { events: {} },
@@ -573,6 +589,57 @@ describe('when testing resume actions', () => {
     expect(fixture.run?.currentStepDigest).toBe(
       withoutGate.stepDigests.inspect,
     );
+    expect(calls.launched).toBe(1);
+  });
+
+  test('resumes a TUI-backed gate without browser status polling', async () => {
+    const workflow = gatedWorkflow('plannotator');
+    let run = beginGate(
+      workflow,
+      createRun(workflow, 'request', ['read'], 'run-1', 1),
+      'submit',
+      '# Plan',
+      'gate-request',
+      2,
+      'Plan ready',
+    );
+    run = attachTuiReviewSurface(run, '/tmp/tui/resume-artifact.md', 3);
+    run = pauseRun(run, 'inspect review', 4);
+    const { calls, fixture } = createResumeFixture(run, workflow);
+    const command = createCommandContext();
+
+    await action.resumeNow.call(
+      fixture as unknown as HarnessActionContext,
+      command.context,
+    );
+
+    expect(fixture.run?.status).toBe('awaiting-gate');
+    expect(calls.statusRequests).toBe(0);
+    expect(calls.launched).toBe(0);
+    expect(command.notices.at(-1)?.message).toContain('Plannotator TUI');
+    expect(
+      command.notices.some((n) => n.message.includes('review-status')),
+    ).toBe(false);
+  });
+
+  test('fails a legacy Plannotator gate without a review id as interrupted', async () => {
+    const workflow = gatedWorkflow('plannotator');
+    const { calls, fixture } = createResumeFixture(
+      pausedGateRun(workflow),
+      workflow,
+    );
+
+    await action.resumeNow.call(
+      fixture as unknown as HarnessActionContext,
+      createCommandContext().context,
+    );
+
+    expect(fixture.run).toMatchObject({
+      status: 'running',
+      gateFeedback:
+        'Gate submission was interrupted before a review id was recorded; submit it again',
+    });
+    expect(calls.statusRequests).toBe(0);
     expect(calls.launched).toBe(1);
   });
 });

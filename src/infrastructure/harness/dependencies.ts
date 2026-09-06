@@ -12,6 +12,10 @@ import {
 } from '../integrations/plannotator.ts';
 import { requestPromptGateReview } from '../integrations/prompt-gate.ts';
 import {
+  createPlannotatorTuiLauncher,
+  type PlannotatorTuiLauncher,
+} from '../integrations/plannotator-tui.ts';
+import {
   createSubagentDelegationClient,
   type SubagentDelegationClientController,
 } from '../process/subagent-client.ts';
@@ -58,6 +62,7 @@ export type WorkflowHarnessDependencies = {
   readonly requestPlannotatorReview: typeof requestPlannotatorReview;
   readonly requestPlannotatorReviewStatus: typeof requestPlannotatorReviewStatus;
   readonly requestPromptGateReview: typeof requestPromptGateReview;
+  readonly plannotatorTuiLauncher: PlannotatorTuiLauncher;
   readonly showWorkflowStatus: typeof showWorkflowStatus;
   readonly createSubagentClient: (
     pi: ExtensionAPI,
@@ -153,6 +158,7 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
   requestPromptGateReview,
+  plannotatorTuiLauncher: createPlannotatorTuiLauncher(),
   showWorkflowStatus,
   createSubagentClient: () => createSubagentDelegationClient(),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),

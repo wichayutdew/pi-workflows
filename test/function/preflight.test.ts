@@ -128,8 +128,101 @@ describe('when testing preflight', () => {
         skills: new Set(),
       });
       // then
-      expect(errors.join('\n')).toMatch(/Plannotator is required/);
+      expect(errors.join('\n')).toMatch(
+        /Plannotator is required.*neither its browser extension nor a Plannotator TUI review surface is installed or detectable/,
+      );
       expect(errors.join('\n')).not.toMatch(/pi-subagents/);
+    });
+
+    test('accepts a Plannotator gate when only a TUI review surface is available', () => {
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'plannotator-tui',
+        command: 'plannotator-tui',
+        description: 'Plannotator TUI',
+        start: 'plan',
+        steps: {
+          plan: {
+            prompt: 'Plan',
+            gate: {
+              provider: 'plannotator',
+              submitOutcome: 'submit',
+              approvedOutcome: 'approved',
+              rejectedOutcome: 'rejected',
+            },
+            transitions: { approved: '$done', rejected: 'plan' },
+          },
+        },
+      });
+
+      expect(
+        preflightStep(workflow.definition.steps.plan!, {
+          tools: [],
+          commands: [],
+          skills: new Set(),
+          hasPlannotatorTui: true,
+        }),
+      ).toEqual([]);
+    });
+
+    test('rejects a Plannotator gate when neither browser nor TUI surface is available', () => {
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'plannotator-missing',
+        command: 'plannotator-missing',
+        description: 'Plannotator missing',
+        start: 'plan',
+        steps: {
+          plan: {
+            prompt: 'Plan',
+            gate: {
+              provider: 'plannotator',
+              submitOutcome: 'submit',
+              approvedOutcome: 'approved',
+              rejectedOutcome: 'rejected',
+            },
+            transitions: { approved: '$done', rejected: 'plan' },
+          },
+        },
+      });
+
+      const errors = preflightStep(workflow.definition.steps.plan!, {
+        tools: [],
+        commands: [],
+        skills: new Set(),
+        hasPlannotatorTui: false,
+      });
+      expect(errors.join('\n')).toMatch(
+        /Plannotator is required.*neither its browser extension nor a Plannotator TUI review surface is installed or detectable/,
+      );
+    });
+
+    test('does not let a TUI capability satisfy unrelated extension requirements', () => {
+      const workflow = loadedWorkflow({
+        version: 1,
+        id: 'other-extension',
+        command: 'other-extension',
+        description: 'Other extension',
+        start: 'run',
+        steps: {
+          run: {
+            prompt: 'Run',
+            permissions: { extensions: ['some-other-extension'] },
+            requires: { extensions: ['some-other-extension'] },
+            transitions: { done: '$done' },
+          },
+        },
+      });
+
+      const errors = preflightStep(workflow.definition.steps.run!, {
+        tools: [],
+        commands: [],
+        skills: new Set(),
+        hasPlannotatorTui: true,
+      });
+      expect(errors).toEqual([
+        'required extension "some-other-extension" is not detectable',
+      ]);
     });
 
     test('MCP selectors are optional unless the proxy tool is required', () => {
