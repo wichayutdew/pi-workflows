@@ -112,6 +112,7 @@ async function submitGate(
     return;
   }
 
+  const tuiAvailable = this.dependencies.plannotatorTuiLauncher.isAvailable();
   const tuiResult =
     await this.dependencies.plannotatorTuiLauncher.launch(artifact);
   const isSuperseded = (run: WorkflowRun | undefined): boolean =>
@@ -139,6 +140,16 @@ async function submitGate(
       `Submitted "${originalRun.currentStepId}" for Plannotator TUI review`,
       'info',
     );
+    return;
+  }
+  if (tuiAvailable) {
+    const reason = `Cannot open Plannotator TUI: ${tuiResult.reason}`;
+    const gateFailed = failGate(currentRun, reason, this.dependencies.now());
+    this.run = failRun(gateFailed, reason, this.dependencies.now());
+    this.persist();
+    reportFailedStep(this.pi, workflow, this.run, reason);
+    this.restoreBaselineTools();
+    this.updateStatus();
     return;
   }
 

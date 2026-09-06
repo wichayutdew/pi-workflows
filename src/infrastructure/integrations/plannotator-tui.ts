@@ -14,6 +14,7 @@ type TuiCandidate =
   | {
       readonly kind: 'plugin';
       readonly executable: string;
+      readonly pluginId: string;
       readonly pluginRoot: string;
     };
 
@@ -30,7 +31,11 @@ export type PlannotatorTuiDependencies = {
   readonly spawn: (
     executable: string,
     args: ReadonlyArray<string>,
-    options: { readonly cwd: string | undefined; readonly timeoutMs: number },
+    options: {
+      readonly cwd: string | undefined;
+      readonly pluginId?: string;
+      readonly timeoutMs: number;
+    },
   ) => Promise<{
     readonly exitCode: number | null;
     readonly signal: string | null;
@@ -116,7 +121,7 @@ function findPluginCandidate(registry: unknown): TuiCandidate | undefined {
     );
     if (!executable) continue;
 
-    return { kind: 'plugin', executable, pluginRoot };
+    return { kind: 'plugin', executable, pluginId: PLUGIN_ID, pluginRoot };
   }
   return undefined;
 }
@@ -157,13 +162,20 @@ async function makeTempArtifact(
 async function spawnWithTimeout(
   executable: string,
   args: ReadonlyArray<string>,
-  options: { readonly cwd: string | undefined; readonly timeoutMs: number },
+  options: {
+    readonly cwd: string | undefined;
+    readonly pluginId?: string;
+    readonly timeoutMs: number;
+  },
 ): Promise<{
   readonly exitCode: number | null;
   readonly signal: string | null;
 }> {
   const child = spawn(executable, [...args], {
     cwd: options.cwd,
+    ...(options.pluginId
+      ? { env: { ...process.env, HERDR_PLUGIN_ID: options.pluginId } }
+      : {}),
     stdio: 'ignore',
   });
   return new Promise((resolve) => {
@@ -291,6 +303,9 @@ export function createPlannotatorTuiLauncher(
         candidate.kind === 'plugin' ? candidate.pluginRoot : undefined;
       const spawnResult = await dependencies.spawn(candidate.executable, args, {
         cwd,
+        ...(candidate.kind === 'plugin'
+          ? { pluginId: candidate.pluginId }
+          : {}),
         timeoutMs: 5_000,
       });
 

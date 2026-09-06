@@ -568,7 +568,7 @@ describe('when testing gate actions', () => {
     expect(notices.at(-1)?.message).toContain('Plannotator TUI');
   });
 
-  test('falls back to one browser request when the TUI is unavailable', async () => {
+  test('does not open browser Plannotator when an available TUI fails to launch', async () => {
     const workflow = gatedWorkflow('plannotator');
     const originalRun = createRun(workflow, 'request', ['read'], 'run-1', 1);
     const { calls, fixture } = createGateFixture(originalRun, workflow);
@@ -598,10 +598,11 @@ describe('when testing gate actions', () => {
     );
 
     expect(calls.tuiLaunches).toBe(1);
-    expect(calls.plannotatorRequests).toBe(1);
-    expect(fixture.run?.pendingGate).toMatchObject({
-      reviewId: 'review-1',
-      reviewTransport: 'browser',
+    expect(calls.plannotatorRequests).toBe(0);
+    expect(fixture.run).toMatchObject({
+      status: 'paused',
+      failedStepId: 'inspect',
+      pauseReason: expect.stringContaining('no Herdr context'),
     });
   });
 

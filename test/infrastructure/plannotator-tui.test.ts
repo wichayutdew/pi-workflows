@@ -10,7 +10,11 @@ import {
 type SpawnCall = {
   executable: string;
   args: ReadonlyArray<string>;
-  options: { cwd: string | undefined; timeoutMs: number };
+  options: {
+    cwd: string | undefined;
+    pluginId?: string;
+    timeoutMs: number;
+  };
 };
 
 type MutableDependencies = PlannotatorTuiDependencies & {
@@ -167,6 +171,49 @@ describe('when testing plannotator TUI launcher', () => {
       expect(deps.calls.executableChecks).toEqual([]);
     });
 
+    test('ignores registry entries without the exact TUI open action and document pane', () => {
+      const { launcher, deps } = createLauncher({
+        resolveExecutable: () => undefined,
+        readHerdrPluginRegistry: () => [
+          {
+            plugin_id: 'annotate',
+            enabled: true,
+            plugin_root: '/missing-action',
+            actions: [{ id: 'open', command: ['./bin/other.exe'] }],
+            panes: [{ id: 'doc', command: ['./bin/plannotator-tui.exe'] }],
+          },
+          {
+            plugin_id: 'annotate',
+            enabled: true,
+            plugin_root: '/missing-pane',
+            actions: [{ id: 'open', command: ['./bin/plannotator-tui.exe'] }],
+            panes: [{ id: 'preview', command: ['./bin/plannotator-tui.exe'] }],
+          },
+        ],
+      });
+
+      expect(launcher.isAvailable()).toBe(false);
+      expect(deps.calls.executableChecks).toEqual([]);
+    });
+
+    test('ignores registry entries without an executable open command', () => {
+      const { launcher, deps } = createLauncher({
+        resolveExecutable: () => undefined,
+        readHerdrPluginRegistry: () => [
+          {
+            plugin_id: 'annotate',
+            enabled: true,
+            plugin_root: '/invalid-command',
+            actions: [{ id: 'open', command: [42] }],
+            panes: [{ id: 'doc', command: ['./bin/plannotator-tui.exe'] }],
+          },
+        ],
+      });
+
+      expect(launcher.isAvailable()).toBe(false);
+      expect(deps.calls.executableChecks).toEqual([]);
+    });
+
     test('ignores a plugin whose executable is not present', () => {
       const { launcher, deps } = createLauncher({
         resolveExecutable: () => undefined,
@@ -232,7 +279,40 @@ describe('when testing plannotator TUI launcher', () => {
             '--deliver-to',
             'pane-1',
           ],
-          options: { cwd: pluginRoot, timeoutMs: 5_000 },
+          options: {
+            cwd: pluginRoot,
+            pluginId: 'annotate',
+            timeoutMs: 5_000,
+          },
+        },
+      ]);
+    });
+
+    test('uses the discovered Herdr plugin id when launching its binary', async () => {
+      const pluginRoot =
+        '/Users/dev/.config/herdr/plugins/github/annotate-9c299759567c';
+      const { launcher, deps } = createLauncher({
+        resolveExecutable: () => undefined,
+        readHerdrPluginRegistry: () => pluginRegistryEntry(),
+      });
+
+      await launcher.launch('# Plan\n');
+
+      expect(deps.calls.spawnCalls).toEqual([
+        {
+          executable: `${pluginRoot}/bin/plannotator-tui.exe`,
+          args: [
+            'herdr',
+            'open',
+            '/tmp/private/artifact.md',
+            '--deliver-to',
+            'pane-1',
+          ],
+          options: {
+            cwd: pluginRoot,
+            pluginId: 'annotate',
+            timeoutMs: 5_000,
+          },
         },
       ]);
     });
