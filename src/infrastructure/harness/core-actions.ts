@@ -141,6 +141,7 @@ function preflight(
     tools: this.pi.getAllTools(),
     commands: this.pi.getCommands(),
     skills: this.availableSkills,
+    hasPlannotatorTui: this.dependencies.plannotatorTuiLauncher.isAvailable(),
   });
 }
 

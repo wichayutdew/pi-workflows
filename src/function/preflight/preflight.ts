@@ -17,6 +17,8 @@ export type PreflightInventory = {
   readonly tools: ReadonlyArray<NamedResource>;
   readonly commands: ReadonlyArray<NamedResource>;
   readonly skills: ReadonlySet<string>;
+  /** True when a Plannotator TUI review surface is locally available. */
+  readonly hasPlannotatorTui?: boolean;
 };
 
 const sourceMatches = (resource: NamedResource, selector: string): boolean => {
@@ -72,6 +74,8 @@ export function preflightStep(
   const isPlannotatorRequired =
     step.gate?.provider === 'plannotator' &&
     !step.requires.extensions.includes('plannotator');
+  const hasPlannotatorSurface =
+    hasExtension('plannotator') || inventory.hasPlannotatorTui === true;
 
   return [
     ...missingRequiredResources({
@@ -79,9 +83,9 @@ export function preflightStep(
       hasResource: (toolName) => toolNames.has(toolName),
       resourceKind: 'tool',
     }),
-    ...(isPlannotatorRequired && !hasExtension('plannotator')
+    ...(isPlannotatorRequired && !hasPlannotatorSurface
       ? [
-          'Plannotator is required by this gate, but its extension is not installed or detectable',
+          'Plannotator is required by this gate, but neither its browser extension nor a Plannotator TUI review surface is installed or detectable',
         ]
       : []),
     ...missingRequiredResources({
