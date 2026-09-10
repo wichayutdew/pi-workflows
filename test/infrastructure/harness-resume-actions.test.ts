@@ -26,10 +26,6 @@ function gatedWorkflow(): LoadedWorkflow {
   const raw = baseWorkflow();
   const steps = raw.steps as Record<string, Record<string, unknown>>;
   const inspect = steps.inspect!;
-  const permissions = inspect.permissions as Record<string, unknown>;
-  const requirements = inspect.requires as Record<string, unknown>;
-  permissions.extensions = ['plannotator'];
-  requirements.extensions = ['plannotator'];
   inspect.gate = { timeoutMs: 1_000 };
   inspect.transitions = {
     ...(inspect.transitions as Record<string, string>),
@@ -274,7 +270,7 @@ describe('when testing resume actions', () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
-        prompt: 'Choose',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: { ready: '$done', handoff: 'choose' },
       },
     };

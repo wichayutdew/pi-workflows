@@ -48,12 +48,11 @@ const isStepPermissions = (value: unknown): value is StepPermissions => {
   return (
     hasOnlyKeys(
       value,
-      new Set(['tools', 'mcp', 'extensions', 'skills', 'bash']),
+      new Set(['tools', 'mcp', 'skills', 'bash']),
     ) &&
     hasOnlyKeys(bash, new Set(['mode', 'allow'])) &&
     isStringArray(value.tools) &&
     isStringArray(value.mcp) &&
-    isStringArray(value.extensions) &&
     isStringArray(value.skills) &&
     isValidMode &&
     hasValidRules &&

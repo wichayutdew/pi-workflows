@@ -8,18 +8,18 @@ function workspaceWorkflow() {
   raw.start = 'prepare';
   raw.steps = {
     prepare: {
-      prompt: 'Prepare the workspace',
+      prompt: { file: 'fixture-prompt-1.md' },
       agent: 'worker',
       workspace: { bindOn: ['ready'], allowedRoots: ['../worktrees'] },
       transitions: { ready: 'implement', blocked: '$pause' },
     },
     implement: {
-      prompt: 'Implement',
+      prompt: { file: 'fixture-prompt-2.md' },
       agent: 'worker',
       transitions: { ready: 'verify', blocked: '$pause' },
     },
     verify: {
-      prompt: 'Verify',
+      prompt: { file: 'fixture-prompt-3.md' },
       agent: 'reviewer',
       transitions: { ready: '$done', blocked: '$pause' },
     },

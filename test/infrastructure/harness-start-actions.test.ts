@@ -229,7 +229,7 @@ describe('when testing start actions', () => {
     const edited = baseWorkflow();
     edited.steps = {
       choose: {
-        prompt: 'Choose',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: { ready: '$done', handoff: 'choose' },
       },
     };
@@ -410,7 +410,7 @@ describe('when testing start actions', () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
-        prompt: 'Choose',
+        prompt: { file: 'fixture-prompt-2.md' },
         transitions: { ready: '$done', handoff: 'choose' },
       },
     };

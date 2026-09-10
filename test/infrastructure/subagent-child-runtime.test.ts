@@ -46,7 +46,6 @@ describe('when testing subagent child runtime', () => {
       permissions: {
         tools: ['read', 'bash'],
         mcp: ['gitlab/get_merge_request'],
-        extensions: [],
         skills: [],
         bash: {
           mode: 'allow-list',

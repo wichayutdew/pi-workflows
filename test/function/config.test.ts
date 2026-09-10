@@ -2,13 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
-import { checkWorkflowAgainstCeiling } from '../../src/function/config/ceiling.ts';
 import {
   defaultUserWorkflowDirectory,
   loadCatalog,
 } from '../../src/infrastructure/fs/load.ts';
 import {
-  cloneEmptyRequirements,
   validateSettings,
   validateWorkflow,
 } from '../../src/function/config/index.ts';
@@ -471,27 +469,6 @@ describe('when testing config', () => {
       expect(malformedErrors).toMatch(/at least one argument is required/);
       expect(malformedErrors).toMatch(/duplicate argument prefix/);
 
-      const settings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [
-              {
-                executable: 'git',
-                argsPrefixes: [['status'], ['diff']],
-              },
-            ],
-          },
-        },
-      });
-      expect(settings.errors).toEqual([]);
-      expect(settings.value?.permissionCeiling?.bash.allow).toEqual([
-        { executable: 'git', argsPrefix: ['status'] },
-        { executable: 'git', argsPrefix: ['diff'] },
-      ]);
     });
 
     test('rejects unknown properties and transition targets', () => {
@@ -519,6 +496,63 @@ describe('when testing config', () => {
       expect(result.errors.join('\n')).toMatch(
         /workflow\.\$schema: expected a string/,
       );
+    });
+
+    test('rejects removed prompt, requirement, and extension configuration', () => {
+      // given
+      const inlinePrompt = baseWorkflow();
+      const requiredResources = baseWorkflow();
+      const extensionPermissions = baseWorkflow();
+      const inlineStep = (inlinePrompt.steps as Record<string, Record<string, unknown>>)
+        .inspect!;
+      const requiredStep = (
+        requiredResources.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
+      const extensionStep = (
+        extensionPermissions.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
+      inlineStep.prompt = 'inline instructions';
+      requiredStep.requires = { tools: ['read'] };
+      extensionStep.permissions = { extensions: ['example'] };
+
+      // when
+      const inlineResult = validateWorkflow(inlinePrompt);
+      const requirementsResult = validateWorkflow(requiredResources);
+      const extensionsResult = validateWorkflow(extensionPermissions);
+
+      // then
+      expect(inlineResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect\.prompt: expected an object/,
+      );
+      expect(requirementsResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect: unknown property "requires"/,
+      );
+      expect(extensionsResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect\.permissions: unknown property "extensions"/,
+      );
+    });
+
+    test('defaults omitted optional permission categories', () => {
+      // when
+      const result = validateWorkflow(baseWorkflow());
+
+      // then
+      expect(result.errors).toEqual([]);
+      expect(result.value?.steps.inspect?.permissions).toEqual({
+        tools: ['read', 'bash'],
+        mcp: [],
+        skills: [],
+        bash: {
+          mode: 'allow-list',
+          allow: [{ executable: 'git', argsPrefix: ['status'] }],
+        },
+      });
+      expect(result.value?.steps.implement?.permissions).toEqual({
+        tools: ['read', 'edit'],
+        mcp: [],
+        skills: [],
+        bash: { mode: 'deny', allow: [] },
+      });
     });
 
     test('rejects malformed workflow fields at every validation boundary', () => {
@@ -678,7 +712,6 @@ describe('when testing config', () => {
       expect(errors.every((items) => items.length > 0)).toBe(true);
       expect(errors.flat().join('\n')).toMatch(/expected an object/);
       expect(errors.flat().join('\n')).toMatch(/must not be empty/);
-      expect(errors.flat().join('\n')).toMatch(/required tool "write"/);
       expect(errors.flat().join('\n')).toMatch(/missing gate outcome "ready"/);
       expect(validPrefix.errors).toEqual([]);
       expect(validPrefix.value?.steps.inspect?.permissions.bash.allow).toEqual([
@@ -723,84 +756,6 @@ describe('when testing config', () => {
       );
     });
 
-    test('rejects malformed settings and returns independent defaults', () => {
-      // given
-      const malformed: unknown[] = [
-        null,
-        {
-          $schema: 42,
-          version: 2,
-          allowProjectWorkflows: 'yes',
-          permissionCeiling: 42,
-          unexpected: true,
-        },
-        { version: 1, allowProjectWorkflows: true },
-        {
-          version: 1,
-          permissionCeiling: {
-            tools: ['bash'],
-            bash: { mode: 'read-only' },
-            subagent: 42,
-          },
-        },
-        {
-          version: 1,
-          permissionCeiling: {
-            subagent: {
-              agents: [],
-              contexts: ['fork'],
-              models: 'models',
-            },
-          },
-        },
-        {
-          version: 1,
-          permissionCeiling: {
-            subagent: {
-              agents: ['pi-workflows.step'],
-              contexts: ['fresh'],
-              models: [],
-              maxTimeoutMs: 0,
-              maxTurns: 0,
-              maxGraceTurns: 101,
-              maxToolCalls: 0,
-              artifacts: 'yes',
-            },
-          },
-        },
-      ];
-
-      // when
-      const errors = malformed.map((raw) => validateSettings(raw).errors);
-      const unknownAgentCeiling = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: [],
-          mcp: [],
-          extensions: [],
-          skills: [],
-          bash: { mode: 'deny' },
-          agent: 'worker',
-        },
-      });
-      const first = cloneEmptyRequirements();
-      const second = cloneEmptyRequirements();
-      first.tools.push('read');
-
-      // then
-      expect(errors.every((items) => items.length > 0)).toBe(true);
-      expect(errors.flat().join('\n')).toMatch(
-        /required when project workflows are enabled/,
-      );
-      expect(errors.flat().join('\n')).toMatch(/unknown property "subagent"/);
-      expect(unknownAgentCeiling.value).toBe(undefined);
-      expect(unknownAgentCeiling.errors.join('\n')).toMatch(
-        /unknown property "agent"/,
-      );
-      expect(second).toEqual({ tools: [], extensions: [], skills: [] });
-    });
-
     test('rejects workflow aliases reserved by Pi', () => {
       // given
       // when
@@ -831,63 +786,6 @@ describe('when testing config', () => {
 
     });
 
-    test('project permission ceiling constrains declarative Bash rules', () => {
-      // given
-      const raw = baseWorkflow();
-      const steps = raw.steps as Record<string, Record<string, unknown>>;
-      steps.inspect = {
-        ...steps.inspect,
-        permissions: {
-          tools: ['read', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      };
-      // when
-      const workflow = validateWorkflow(raw);
-      // then
-      expect(workflow.value).toBeTruthy();
-      const deniedSettings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['diff'] }],
-          },
-        },
-      });
-      expect(deniedSettings.value?.permissionCeiling).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          deniedSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).toMatch(/permissions\.bash: exceeds/);
-
-      const allowedSettings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      });
-      expect(allowedSettings.value?.permissionCeiling).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          allowedSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).not.toMatch(/permissions\.bash: exceeds/);
-    });
-
     test('loader accepts YAML workflow files and rejects duplicate YAML keys', async () => {
       // given
       const root = await mkdtemp(join(tmpdir(), 'pi-workflows-yaml-'));
@@ -903,7 +801,7 @@ describe('when testing config', () => {
           'start: inspect',
           'steps:',
           '  inspect:',
-          '    prompt: Inspect safely',
+          '    prompt: { file: compact.md }',
           '    agent: reviewer',
           '    maxToolCalls: 10',
           '    permissions:',
@@ -929,11 +827,14 @@ describe('when testing config', () => {
           'start: inspect',
           'steps:',
           '  inspect:',
-          '    prompt: Inspect',
+          '    prompt: { file: short-extension.md }',
           '    transitions: { ready: $done }',
         ].join('\n'),
         'utf8',
       );
+      await writeFile(join(userDirectory, 'compact.md'), 'Inspect safely', 'utf8');
+      await writeFile(join(userDirectory, 'short-extension.md'), 'Inspect', 'utf8');
+
       // when
       await writeFile(
         join(userDirectory, 'duplicate.workflow.yaml'),
@@ -954,8 +855,6 @@ describe('when testing config', () => {
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect([...catalog.workflows.keys()]).toEqual([
@@ -1027,8 +926,6 @@ describe('when testing config', () => {
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(catalog.workflows.size).toBe(0);
@@ -1064,8 +961,6 @@ describe('when testing config', () => {
           'utf8',
         );
         const configured = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(configured.diagnostics).toEqual([]);
@@ -1077,8 +972,6 @@ describe('when testing config', () => {
           'utf8',
         );
         const invalid = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(invalid.settings.statusShortcut).toBe('ctrl+alt+w');
@@ -1110,13 +1003,10 @@ describe('when testing config', () => {
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(catalog.settings).toEqual({
           version: 1,
-          allowProjectWorkflows: false,
           statusShortcut: 'ctrl+alt+w',
         });
         expect(catalog.diagnostics.length).toBe(1);
@@ -1126,60 +1016,6 @@ describe('when testing config', () => {
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(/unique/i);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(
           /line 3, column 1/,
-        );
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    });
-
-    test('trusted project workflows cannot override user workflow ids', async () => {
-      // given
-      const root = await mkdtemp(join(tmpdir(), 'pi-workflows-catalog-'));
-      const userDirectory = join(root, 'user');
-      const projectDirectory = join(root, 'project', '.pi', 'workflows');
-      await mkdir(userDirectory, { recursive: true });
-      await mkdir(projectDirectory, { recursive: true });
-      await writeFile(
-        join(userDirectory, 'settings.yaml'),
-        [
-          'version: 1',
-          'allowProjectWorkflows: true',
-          'permissionCeiling:',
-          '  tools: [read, edit, bash]',
-          '  mcp: []',
-          '  extensions: []',
-          '  skills: []',
-          '  bash:',
-          '    mode: allow-list',
-          '    allow:',
-          '      - executable: git',
-          '        argsPrefix: [status]',
-        ].join('\n'),
-        'utf8',
-      );
-      await writeFile(
-        join(userDirectory, 'example.workflow.yaml'),
-        JSON.stringify(baseWorkflow()),
-        'utf8',
-      );
-      const projectWorkflow = baseWorkflow();
-      // when
-      await writeFile(
-        join(projectDirectory, 'override.workflow.yaml'),
-        JSON.stringify(projectWorkflow),
-        'utf8',
-      );
-
-      // then
-      try {
-        const catalog = await loadCatalog({
-          cwd: join(root, 'project'),
-          projectTrusted: true,
-          userDirectory,
-        });
-        expect(catalog.workflows.size).toBe(1);
-        expect(catalog.diagnostics.at(-1)?.message ?? '').toMatch(
-          /overrides are not allowed/,
         );
       } finally {
         await rm(root, { recursive: true, force: true });
@@ -1213,7 +1049,7 @@ describe('when testing config', () => {
         command: 'invalid-prompt',
         steps: {
           run: {
-            prompt: 'Use {{unknown.variable}}',
+            prompt: { file: 'invalid-prompt.md' },
             transitions: { ready: '$done' },
           },
         },
@@ -1237,6 +1073,9 @@ describe('when testing config', () => {
         start: 'run',
       };
       await Promise.all([
+        writeFile(join(userDirectory, 'inspect.md'), 'Inspect', 'utf8'),
+        writeFile(join(userDirectory, 'implement.md'), 'Implement', 'utf8'),
+        writeFile(join(userDirectory, 'invalid-prompt.md'), 'Use {{unknown.variable}}', 'utf8'),
         writeFile(join(userDirectory, 'settings.yaml'), 'version: 2\n', 'utf8'),
         writeFile(
           join(userDirectory, 'invalid.workflow.yaml'),
@@ -1272,8 +1111,6 @@ describe('when testing config', () => {
 
       // when
       const catalog = await loadCatalog({
-        cwd: root,
-        projectTrusted: false,
         userDirectory,
       });
 
@@ -1299,8 +1136,6 @@ describe('when testing config', () => {
 
       // when
       const catalog = await loadCatalog({
-        cwd: root,
-        projectTrusted: false,
         userDirectory: filePath,
       });
       process.env.PI_WORKFLOWS_DIR = join(root, 'explicit');
@@ -1322,55 +1157,5 @@ describe('when testing config', () => {
       await rm(root, { recursive: true, force: true });
     });
 
-    test('loader explains every project workflow skip and ceiling failure', async () => {
-      // given
-      const root = await mkdtemp(join(tmpdir(), 'pi-workflows-project-load-'));
-      const project = join(root, 'project');
-      const projectDirectory = join(project, '.pi', 'workflows');
-      await mkdir(projectDirectory, { recursive: true });
-      await writeFile(
-        join(projectDirectory, 'project.workflow.yaml'),
-        JSON.stringify(baseWorkflow()),
-        'utf8',
-      );
-      const untrustedUser = join(root, 'untrusted');
-      const deniedUser = join(root, 'denied');
-      await Promise.all(
-        [untrustedUser, deniedUser].map((directory) =>
-          mkdir(directory, { recursive: true }),
-        ),
-      );
-      await writeFile(
-        join(untrustedUser, 'settings.yaml'),
-        'version: 1\nallowProjectWorkflows: true\npermissionCeiling:\n  tools: []\n  bash: { mode: deny }\n',
-        'utf8',
-      );
-      await writeFile(
-        join(deniedUser, 'settings.yaml'),
-        'version: 1\nallowProjectWorkflows: true\npermissionCeiling:\n  tools: []\n  bash: { mode: deny }\n',
-        'utf8',
-      );
-
-      // when
-      const [untrusted, denied] = await Promise.all([
-        loadCatalog({
-          cwd: project,
-          projectTrusted: false,
-          userDirectory: untrustedUser,
-        }),
-        loadCatalog({
-          cwd: project,
-          projectTrusted: true,
-          userDirectory: deniedUser,
-        }),
-      ]);
-
-      // then
-      expect(untrusted.diagnostics[0]?.message).toMatch(/not trusted/);
-      expect(denied.diagnostics.map((item) => item.message).join('\n')).toMatch(
-        /exceeds the user permission ceiling/,
-      );
-      await rm(root, { recursive: true, force: true });
-    });
   });
 });

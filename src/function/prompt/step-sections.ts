@@ -27,7 +27,6 @@ export function buildResourceSection({
     '',
     `Pi tools: ${formatList(step.permissions.tools)}`,
     `MCP selectors: ${formatList(step.permissions.mcp)}`,
-    `Extension selectors: ${formatList(step.permissions.extensions)}`,
     `Skills: ${formatList(step.permissions.skills)}`,
     `Bash policy: ${step.permissions.bash.mode}`,
     `Bash allow rules: ${

@@ -19,15 +19,15 @@ describe('when diagnosing workflow liveness', () => {
     raw.start = 'loop';
     raw.steps = {
       loop: {
-        prompt: 'Loop',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: { again: 'loop', escape: 'stranded' },
       },
       stranded: {
-        prompt: 'Stranded',
+        prompt: { file: 'fixture-prompt-2.md' },
         transitions: { stop: '$pause' },
       },
       unused: {
-        prompt: 'Unused',
+        prompt: { file: 'fixture-prompt-3.md' },
         transitions: { ready: '$done' },
       },
     };
@@ -96,15 +96,15 @@ describe('when diagnosing workflow liveness', () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
-        prompt: 'Choose',
+        prompt: { file: 'fixture-prompt-4.md' },
         transitions: { good: 'finish', bad: 'trap' },
       },
       finish: {
-        prompt: 'Finish',
+        prompt: { file: 'fixture-prompt-5.md' },
         transitions: { ready: '$done' },
       },
       trap: {
-        prompt: 'Trap',
+        prompt: { file: 'fixture-prompt-6.md' },
         transitions: { wait: '$pause' },
       },
     };
@@ -128,15 +128,15 @@ describe('when diagnosing workflow liveness', () => {
     const raw = baseWorkflow();
     raw.steps = {
       finish: {
-        prompt: 'Finish',
+        prompt: { file: 'fixture-prompt-7.md' },
         transitions: { ready: '$done' },
       },
       zeta: {
-        prompt: 'Zeta',
+        prompt: { file: 'fixture-prompt-8.md' },
         transitions: { back: 'alpha' },
       },
       alpha: {
-        prompt: 'Alpha',
+        prompt: { file: 'fixture-prompt-9.md' },
         transitions: { forward: 'zeta' },
       },
     };
@@ -159,15 +159,15 @@ describe('when diagnosing workflow liveness', () => {
     first.start = 'start';
     first.steps = {
       start: {
-        prompt: 'Start',
+        prompt: { file: 'fixture-prompt-10.md' },
         transitions: { handoff: 'start', finish: 'finish' },
       },
       finish: {
-        prompt: 'Finish',
+        prompt: { file: 'fixture-prompt-11.md' },
         transitions: { ready: '$done' },
       },
       unused: {
-        prompt: 'Unused',
+        prompt: { file: 'fixture-prompt-12.md' },
         transitions: { back: 'unused' },
       },
     };
@@ -175,15 +175,15 @@ describe('when diagnosing workflow liveness', () => {
     reordered.start = 'start';
     reordered.steps = {
       unused: {
-        prompt: 'Unused',
+        prompt: { file: 'fixture-prompt-13.md' },
         transitions: { back: 'unused' },
       },
       finish: {
-        prompt: 'Finish',
+        prompt: { file: 'fixture-prompt-14.md' },
         transitions: { ready: '$done' },
       },
       start: {
-        prompt: 'Start',
+        prompt: { file: 'fixture-prompt-15.md' },
         transitions: { finish: 'finish', handoff: 'start' },
       },
     };

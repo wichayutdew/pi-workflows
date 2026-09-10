@@ -24,7 +24,7 @@ export function baseWorkflow(): Record<string, unknown> {
     maxStepVisits: 3,
     steps: {
       inspect: {
-        prompt: 'Inspect {{workflow.input}}',
+        prompt: { file: 'inspect.md' },
         agent: 'scout',
         permissions: {
           tools: ['read', 'bash'],
@@ -33,16 +33,13 @@ export function baseWorkflow(): Record<string, unknown> {
             allow: [{ executable: 'git', argsPrefix: ['status'] }],
           },
         },
-        requires: {
-          tools: ['read'],
-        },
         transitions: {
           ready: 'implement',
           blocked: '$pause',
         },
       },
       implement: {
-        prompt: 'Implement',
+        prompt: { file: 'implement.md' },
         agent: 'worker',
         permissions: {
           tools: ['read', 'edit'],
@@ -62,7 +59,7 @@ export function loadedWorkflow(raw = baseWorkflow()): LoadedWorkflow {
   const prompts = Object.fromEntries(
     Object.entries(definition.steps).map(([stepId, step]) => [
       stepId,
-      'inline' in step.prompt ? step.prompt.inline : `prompt:${stepId}`,
+      `prompt:${stepId}`, 
     ]),
   );
   const stepDigests = Object.fromEntries(

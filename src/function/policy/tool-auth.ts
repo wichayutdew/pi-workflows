@@ -5,7 +5,6 @@ import type {
 } from '../../domain/index.ts';
 import { authorizeBash } from './bash.ts';
 import { authorizeMcpProxy } from './mcp-authorization.ts';
-import { isAllowedExtensionTool } from './tool-selection.ts';
 
 const reject = (reason: string): ToolAuthorization => ({
   allowed: false,
@@ -34,12 +33,8 @@ export const authorizeToolCall = (
     return authorizeMcpProxy(input, step.permissions.mcp);
   }
 
-  const tool = inventory.find((candidate) => candidate.name === toolName);
   const isAllowedByName = step.permissions.tools.includes(toolName);
-  const isAllowedByExtension =
-    tool !== undefined &&
-    isAllowedExtensionTool(tool, step.permissions.extensions);
-  if (!isAllowedByName && !isAllowedByExtension) {
+  if (!isAllowedByName) {
     return reject(`tool "${toolName}" is not allowed for this workflow step`);
   }
   if (toolName !== 'bash') return { allowed: true };

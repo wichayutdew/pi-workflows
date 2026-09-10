@@ -73,15 +73,13 @@ describe('when testing main step runtime', () => {
         workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: ['read'],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
           transitions: { ready: '$done' },
           workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         },
@@ -248,15 +246,13 @@ describe('when testing main step runtime', () => {
         summaryMaxChars: 1_000,
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: ['read'],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
           transitions: { ready: '$done' },
         },
         onTrace: (lines, _context, usage) => {
@@ -472,15 +468,13 @@ describe('when testing main step runtime', () => {
         summaryMaxChars: 1_000,
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: [],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
           transitions: { ready: '$done' },
         },
         onTrace: () => undefined,

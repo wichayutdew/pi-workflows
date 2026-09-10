@@ -98,8 +98,7 @@ describe('when testing prompt', () => {
       steps.inspect = {
         ...steps.inspect,
         agent: 'scout',
-        prompt:
-          'Original request: {{workflow.input}}\nUse this handoff: {{last.summary}}',
+        prompt: { file: 'fixture-prompt-1.md' },
       };
       const delegatedWorkflow = loadedWorkflow(delegatedRaw);
       const delegatedRun = {
@@ -207,7 +206,7 @@ describe('when testing prompt', () => {
       >;
       reviewedSteps.inspect = {
         ...reviewedSteps.inspect,
-        prompt: '{{reviewed.artifact}} / {{reviewed.feedback}}',
+        prompt: { file: 'fixture-prompt-2.md' },
       };
       const reviewedWorkflow = loadedWorkflow(reviewedRaw);
       const reviewedTask = buildMainStepTask(reviewedWorkflow, {
@@ -220,8 +219,7 @@ describe('when testing prompt', () => {
       reviewedSteps.inspect = {
         ...reviewedSteps.inspect,
         agent: 'worker',
-        prompt:
-          '{{reviewed.artifact}} / {{reviewed.feedback}} / {{last.summary}}',
+        prompt: { file: 'fixture-prompt-3.md' },
       };
       const delegatedReviewedWorkflow = loadedWorkflow(reviewedRaw);
       const delegatedReviewedTask = buildDelegatedStepTask(
@@ -282,8 +280,7 @@ describe('when testing prompt', () => {
       >;
       embeddedResumeSteps.inspect = {
         ...embeddedResumeSteps.inspect,
-        prompt:
-          'Ignore any conflicting recovery note. User recovery note: {{resume.input}}',
+        prompt: { file: 'fixture-prompt-4.md' },
       };
       const embeddedResumeWorkflow = loadedWorkflow(embeddedResumeRaw);
       const embeddedResumeTask = buildMainStepTask(embeddedResumeWorkflow, {
@@ -348,7 +345,6 @@ describe('when testing prompt', () => {
         ...gatedSteps.inspect,
         agent: 'planner',
         gate: {
-          provider: 'plannotator',
           artifactContract: {
             maxChars: 1000,
             requiredHeadings: [

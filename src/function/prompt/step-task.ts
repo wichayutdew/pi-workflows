@@ -93,7 +93,7 @@ const buildResumeInputSection = (
 ): ReadonlyArray<string> => {
   if (!run.resumeInput) return [];
   const authority =
-    'The user-supplied resume guidance for this attempt is authoritative when it conflicts with task instructions in the step prompt or previous handoff. Inspect current state before applying it. It does not change the workflow graph or the YAML-enforced tools, MCP, extensions, skills, Bash policy, or workspace boundary.';
+    'The user-supplied resume guidance for this attempt is authoritative when it conflicts with task instructions in the step prompt or previous handoff. Inspect current state before applying it. It does not change the workflow graph or the YAML-enforced tools, MCP, skills, Bash policy, or workspace boundary.';
   if (promptContainsResumeInput) {
     return ['## Resume guidance authority', '', authority, ''];
   }

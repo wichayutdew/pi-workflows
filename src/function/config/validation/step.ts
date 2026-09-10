@@ -11,7 +11,7 @@ import {
   AGENT_PROFILE_NAME_PATTERN,
   type StepAgent,
 } from '../../../domain/index.ts';
-import { parsePermissions, parseRequirements } from './permissions.ts';
+import { parsePermissions } from './permissions.ts';
 import {
   isJsonObject,
   OUTCOME_PATTERN,
@@ -27,12 +27,8 @@ function parsePrompt(
   path: string,
   errors: ValidationErrors,
 ): PromptSpec | undefined {
-  if (typeof value === 'string') {
-    const inline = readString(value, path, errors);
-    return inline ? { inline } : undefined;
-  }
   if (!isJsonObject(value)) {
-    errors.push(`${path}: expected a string or an object`);
+    errors.push(`${path}: expected an object`);
     return undefined;
   }
   rejectUnknownKeys(value, ['file'], path, errors);
@@ -276,7 +272,6 @@ export function parseWorkflowStep(
       'agent',
       'maxToolCalls',
       'permissions',
-      'requires',
       'transitions',
       'gate',
       'workspace',
@@ -309,12 +304,6 @@ export function parseWorkflowStep(
   const permissions = parsePermissions(
     value.permissions,
     `${path}.permissions`,
-    errors,
-  );
-  const requires = parseRequirements(
-    value.requires,
-    permissions,
-    `${path}.requires`,
     errors,
   );
   const transitions = parseTransitions(
@@ -375,7 +364,6 @@ export function parseWorkflowStep(
     ...(agent ? { agent } : {}),
     ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
     permissions,
-    requires,
     transitions,
     ...(gate ? { gate } : {}),
     ...(workspace ? { workspace } : {}),

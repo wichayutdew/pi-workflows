@@ -13,7 +13,7 @@ function workspaceWorkflow() {
   raw.start = 'prepare';
   raw.steps = {
     prepare: {
-      prompt: 'Select a workspace',
+      prompt: { file: 'fixture-prompt-1.md' },
       agent: 'worker',
       workspace: {
         bindOn: ['ready'],
@@ -26,7 +26,7 @@ function workspaceWorkflow() {
       },
     },
     implement: {
-      prompt: 'Implement',
+      prompt: { file: 'fixture-prompt-2.md' },
       agent: 'worker',
       transitions: {
         ready: 'verify',
@@ -35,7 +35,7 @@ function workspaceWorkflow() {
       },
     },
     verify: {
-      prompt: 'Verify',
+      prompt: { file: 'fixture-prompt-3.md' },
       agent: 'reviewer',
       transitions: {
         ready: '$done',
@@ -188,7 +188,7 @@ describe('when persisting a workflow workspace binding', () => {
       },
     };
     steps.plan = {
-      prompt: 'Inspect the prepared workspace',
+      prompt: { file: 'fixture-prompt-4.md' },
       agent: 'planner',
       transitions: {
         ready: 'implement',
@@ -283,7 +283,7 @@ describe('when persisting a workflow workspace binding', () => {
     >;
     laterSteps.implement = {
       ...laterSteps.implement,
-      prompt: 'Changed implementation',
+      prompt: { file: 'fixture-prompt-5.md' },
     };
     const retained = reconcileRun(run, loadedWorkflow(laterChange), 4);
     expect(retained.restartedStep).toBe('implement');
@@ -297,7 +297,7 @@ describe('when persisting a workflow workspace binding', () => {
     >;
     bindingSteps.prepare = {
       ...bindingSteps.prepare,
-      prompt: 'Changed workspace preparation',
+      prompt: { file: 'fixture-prompt-6.md' },
     };
     const rolledBack = reconcileRun(run, loadedWorkflow(bindingChange), 5);
     expect(rolledBack.restartedStep).toBe('prepare');

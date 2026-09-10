@@ -305,9 +305,8 @@ describe('when testing workflow status', () => {
       const raw = baseWorkflow();
       raw.steps = {
         review: {
-          prompt: 'Review',
+          prompt: { file: 'fixture-prompt-1.md' },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: '$done',
@@ -380,7 +379,7 @@ describe('when testing workflow status', () => {
       const raw = baseWorkflow();
       (raw.steps as Record<string, unknown>).verify = {
         title: 'Verify changes',
-        prompt: 'Verify',
+        prompt: { file: 'fixture-prompt-2.md' },
         transitions: { ready: '$done' },
       };
       const workflow = loadedWorkflow(raw);

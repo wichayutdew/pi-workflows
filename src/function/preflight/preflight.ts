@@ -27,31 +27,6 @@ const sourceMatches = (resource: NamedResource, selector: string): boolean => {
   return source.toLowerCase().includes(selector.toLowerCase());
 };
 
-type ResourceKind = 'extension' | 'skill' | 'tool';
-
-const MISSING_RESOURCE_STATE = {
-  extension: 'detectable',
-  skill: 'loaded',
-  tool: 'installed',
-} as const satisfies Record<ResourceKind, string>;
-
-type MissingRequiredResourcesOptions = {
-  readonly requiredNames: ReadonlyArray<string>;
-  readonly hasResource: (name: string) => boolean;
-  readonly resourceKind: ResourceKind;
-};
-
-const missingRequiredResources = ({
-  requiredNames,
-  hasResource,
-  resourceKind,
-}: MissingRequiredResourcesOptions): ReadonlyArray<string> =>
-  requiredNames
-    .filter((name) => !hasResource(name))
-    .map(
-      (name) =>
-        `required ${resourceKind} "${name}" is not ${MISSING_RESOURCE_STATE[resourceKind]}`,
-    );
 
 /**
  * Checks that resources required by a workflow step are available before
@@ -65,33 +40,11 @@ export function preflightStep(
   step: WorkflowStep,
   inventory: PreflightInventory,
 ): Array<string> {
-  const toolNames = new Set(inventory.tools.map((tool) => tool.name));
   const extensionResources = [...inventory.tools, ...inventory.commands];
-  const hasExtension = (extension: string): boolean =>
-    extensionResources.some((resource) => sourceMatches(resource, extension));
-  const isPlannotatorRequired =
-    step.gate !== undefined && !step.requires.extensions.includes('plannotator');
-
-  return [
-    ...missingRequiredResources({
-      requiredNames: step.requires.tools,
-      hasResource: (toolName) => toolNames.has(toolName),
-      resourceKind: 'tool',
-    }),
-    ...(isPlannotatorRequired && !hasExtension('plannotator')
-      ? [
-          'Plannotator is required by this gate, but its extension is not installed or detectable',
-        ]
-      : []),
-    ...missingRequiredResources({
-      requiredNames: step.requires.extensions,
-      hasResource: hasExtension,
-      resourceKind: 'extension',
-    }),
-    ...missingRequiredResources({
-      requiredNames: step.requires.skills,
-      hasResource: (skillName) => inventory.skills.has(skillName),
-      resourceKind: 'skill',
-    }),
-  ];
+  const hasPlannotator = extensionResources.some((resource) =>
+    sourceMatches(resource, 'plannotator'),
+  );
+  return step.gate !== undefined && !hasPlannotator
+    ? ['Plannotator is required by this gate, but its extension is not installed or detectable']
+    : [];
 }

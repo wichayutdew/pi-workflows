@@ -43,12 +43,3 @@ export type PlannotatorReviewResult = {
   readonly feedback: string;
 };
 
-export type PromptGateReviewResult =
-  | {
-      readonly status: 'resolved';
-      readonly approved: boolean;
-      readonly feedback: string;
-    }
-  | {
-      readonly status: 'dismissed';
-    };

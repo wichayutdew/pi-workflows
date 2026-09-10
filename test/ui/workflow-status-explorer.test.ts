@@ -227,7 +227,7 @@ describe('when exploring workflow step evidence', () => {
     raw.maxStepVisits = 40;
     raw.steps = {
       loop: {
-        prompt: 'Loop',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: { handoff: 'loop', ready: '$done' },
       },
     };
@@ -342,7 +342,7 @@ describe('when exploring workflow step evidence', () => {
     raw.maxStepVisits = 100;
     raw.steps = {
       loop: {
-        prompt: 'Loop',
+        prompt: { file: 'fixture-prompt-2.md' },
         transitions: { handoff: 'loop', ready: '$done' },
       },
     };
@@ -521,7 +521,7 @@ describe('when exploring workflow step evidence', () => {
     raw.start = 'review';
     raw.steps = {
       review: {
-        prompt: 'Review',
+        prompt: { file: 'fixture-prompt-3.md' },
         gate: {
         },
         transitions: { ready: '$done', handoff: 'review' },

@@ -113,7 +113,7 @@ describe('when testing engine', () => {
       const steps = raw.steps as Record<string, Record<string, unknown>>;
       steps.implement = {
         ...steps.implement,
-        prompt: 'Implement {{last.summary}}',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: {
           ready: '$done',
           blocked: '$pause',
@@ -156,12 +156,8 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-2.md' },
           permissions: {
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -199,14 +195,9 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt:
-            'Rejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
+          prompt: { file: 'fixture-prompt-101.md' },
           agent: 'planner',
           permissions: {
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -257,20 +248,15 @@ describe('when testing engine', () => {
       raw.maxStepVisits = 1;
       raw.steps = {
         prepare: {
-          prompt: 'Prepare',
+          prompt: { file: 'fixture-prompt-3.md' },
           transitions: {
             ready: 'plan',
           },
         },
         plan: {
-          prompt:
-            'Handoff:\n{{last.summary}}\nRejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
+          prompt: { file: 'fixture-prompt-102.md' },
           agent: 'planner',
           permissions: {
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -281,7 +267,14 @@ describe('when testing engine', () => {
         },
       };
       raw.start = 'prepare';
-      const workflow = loadedWorkflow(raw);
+      const loaded = loadedWorkflow(raw);
+      const workflow = {
+        ...loaded,
+        prompts: {
+          ...loaded.prompts,
+          plan: 'Handoff:\n{{last.summary}}\nRejected artifact:\n{{gate.artifact}}\nFeedback:\n{{gate.feedback}}',
+        },
+      };
       let run = createRun(workflow, '', [], 'iterative-gate', 1);
       let now = 2;
       run = advanceRun(
@@ -383,12 +376,8 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-4.md' },
           permissions: {
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -473,7 +462,7 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-5.md' },
           gate: {
           },
           transitions: {
@@ -518,9 +507,7 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
-          permissions: { extensions: ['plannotator'] },
-          requires: { extensions: ['plannotator'] },
+          prompt: { file: 'fixture-prompt-6.md' },
           gate: {
           },
           transitions: {
@@ -529,7 +516,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-7.md' },
           transitions: {
             gaps: 'plan',
             ready: '$done',
@@ -597,12 +584,8 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-8.md' },
           permissions: {
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -612,7 +595,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-9.md' },
           transitions: {
             ready: '$done',
           },
@@ -646,7 +629,7 @@ describe('when testing engine', () => {
       >;
       changedSteps.implement = {
         ...changedSteps.implement,
-        prompt: 'Changed implementation',
+        prompt: { file: 'fixture-prompt-10.md' },
       };
       // when
       const changed = loadedWorkflow(changedRaw);
@@ -663,7 +646,7 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-11.md' },
           gate: {},
           transitions: {
             ready: 'implement',
@@ -671,7 +654,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-12.md' },
           transitions: {
             ready: '$done',
           },
@@ -705,7 +688,7 @@ describe('when testing engine', () => {
       >;
       retainedSteps.implement = {
         ...retainedSteps.implement,
-        prompt: 'Changed implementation',
+        prompt: { file: 'fixture-prompt-13.md' },
       };
 
       const invalidatedRaw = structuredClone(raw);
@@ -739,7 +722,7 @@ describe('when testing engine', () => {
       raw.start = 'gate-a';
       raw.steps = {
         'gate-a': {
-          prompt: 'First gate',
+          prompt: { file: 'fixture-prompt-14.md' },
           gate: {},
           transitions: {
             ready: 'middle',
@@ -747,13 +730,13 @@ describe('when testing engine', () => {
           },
         },
         middle: {
-          prompt: 'Middle',
+          prompt: { file: 'fixture-prompt-15.md' },
           transitions: {
             ready: 'gate-b',
           },
         },
         'gate-b': {
-          prompt: 'Second gate',
+          prompt: { file: 'fixture-prompt-16.md' },
           gate: {},
           transitions: {
             ready: 'implement',
@@ -761,7 +744,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-17.md' },
           transitions: {
             ready: '$done',
           },
@@ -814,7 +797,7 @@ describe('when testing engine', () => {
       >;
       changedSteps.middle = {
         ...changedSteps.middle,
-        prompt: 'Changed middle',
+        prompt: { file: 'fixture-prompt-18.md' },
       };
 
       // when
@@ -839,7 +822,7 @@ describe('when testing engine', () => {
 
       const changedRaw = baseWorkflow();
       const steps = changedRaw.steps as Record<string, Record<string, unknown>>;
-      steps.inspect = { ...steps.inspect, prompt: 'Changed inspection prompt' };
+      steps.inspect = { ...steps.inspect, prompt: { file: 'fixture-prompt-19.md' } };
       const changed = loadedWorkflow(changedRaw);
       // when
       const result = reconcileRun(run, changed, 3);
@@ -857,9 +840,7 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
-          permissions: { extensions: ['plannotator'] },
-          requires: { extensions: ['plannotator'] },
+          prompt: { file: 'fixture-prompt-20.md' },
           gate: {
           },
           transitions: {
@@ -868,7 +849,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-21.md' },
           transitions: {
             ready: '$done',
             blocked: '$pause',
@@ -901,7 +882,7 @@ describe('when testing engine', () => {
       >;
       changedSteps.plan = {
         ...changedSteps.plan,
-        prompt: 'Updated completion instructions',
+        prompt: { file: 'fixture-prompt-22.md' },
       };
       const changed = loadedWorkflow(changedRaw);
 
@@ -931,13 +912,9 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-23.md' },
           permissions: {
             tools: ['read'],
-            extensions: ['plannotator'],
-          },
-          requires: {
-            extensions: ['plannotator'],
           },
           gate: {
           },
@@ -947,13 +924,13 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-24.md' },
           transitions: {
             ready: '$done',
           },
         },
         audit: {
-          prompt: 'Audit',
+          prompt: { file: 'fixture-prompt-25.md' },
           transitions: {
             ready: '$done',
           },
@@ -1020,7 +997,6 @@ describe('when testing engine', () => {
         ...permissionSteps.plan,
         permissions: {
           tools: ['read', 'grep'],
-          extensions: ['plannotator'],
         },
       };
 
@@ -1097,7 +1073,7 @@ describe('when testing engine', () => {
       >;
       changedSteps.inspect = {
         ...changedSteps.inspect,
-        prompt: 'Changed current step',
+        prompt: { file: 'fixture-prompt-26.md' },
       };
       const changed = loadedWorkflow(changedRaw);
 
@@ -1215,7 +1191,7 @@ describe('when testing engine', () => {
       raw.start = 'plan';
       raw.steps = {
         plan: {
-          prompt: 'Plan',
+          prompt: { file: 'fixture-prompt-27.md' },
           gate: {
           },
           transitions: {
@@ -1224,7 +1200,7 @@ describe('when testing engine', () => {
           },
         },
         implement: {
-          prompt: 'Implement',
+          prompt: { file: 'fixture-prompt-28.md' },
           transitions: { ready: '$done' },
         },
       };
@@ -1290,7 +1266,7 @@ describe('when testing engine', () => {
         transitions: { ready: 'verify' },
       };
       originalSteps.verify = {
-        prompt: 'Verify',
+        prompt: { file: 'fixture-prompt-29.md' },
         transitions: { ready: '$done' },
       };
       const original = loadedWorkflow(originalRaw);
@@ -1301,11 +1277,11 @@ describe('when testing engine', () => {
       const changedRaw = baseWorkflow();
       changedRaw.steps = {
         inspect: {
-          prompt: 'Changed inspection',
+          prompt: { file: 'fixture-prompt-30.md' },
           transitions: { ready: 'replacement' },
         },
         replacement: {
-          prompt: 'Replacement',
+          prompt: { file: 'fixture-prompt-31.md' },
           transitions: { ready: '$done' },
         },
       };
@@ -1323,9 +1299,7 @@ describe('when testing engine', () => {
       const raw = baseWorkflow();
       raw.steps = {
         plan: {
-          prompt: 'Plan',
-          permissions: { extensions: ['plannotator'] },
-          requires: { extensions: ['plannotator'] },
+          prompt: { file: 'fixture-prompt-32.md' },
           gate: {
           },
           transitions: { ready: '$done', handoff: 'plan' },
@@ -1526,7 +1500,7 @@ describe('when testing engine', () => {
       const gatedRaw = baseWorkflow();
       gatedRaw.steps = {
         inspect: {
-          prompt: 'Inspect',
+          prompt: { file: 'fixture-prompt-33.md' },
           gate: {},
           transitions: {
             ready: '$done',
@@ -1670,7 +1644,7 @@ describe('when testing engine', () => {
       >;
       changedSteps.inspect = {
         ...changedSteps.inspect,
-        prompt: 'Changed inspection prompt',
+        prompt: { file: 'fixture-prompt-34.md' },
       };
       const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 5);
       if (!reconciled.run) throw new Error('reconciliation should restart');
