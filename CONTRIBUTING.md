@@ -61,6 +61,29 @@ Pi Workflows follows a strict **purely functional architecture** partitioned int
 - Favor closures, factory functions (`create*`), and immutable records over stateful classes.
 - Public class facades (such as `WorkflowHarness` and `WorkflowStatusView`) are thin, delegating wrappers maintained solely for backward compatibility with external consumers and TUI interfaces.
 
+## Closed outcome invariants
+
+Changes to workflow completion must preserve one protocol across configuration,
+prompts, main and child runtimes, persistence, and schemas:
+
+- Only `ready`, `blocked`, `handoff`, and `gaps` are valid workflow outcomes.
+- `ready` targets another step or `$done`; its sole `remaining` item is exactly `No active-step work remains.`.
+- `blocked` targets only `$pause` and includes a user question ending in `?` in `remaining`.
+- `handoff` targets only the same step and contains non-question actionable remaining work.
+- `gaps` targets only an earlier ordinary step and contains non-question actionable requirements.
+- Models author only `completed` and `remaining` handoff content. They do not author summary Markdown, state labels, headings, bullets, question fields, retry fields, or checkpoint progress.
+- The extension owns canonical Markdown formatting and persists the generated `summary`.
+- Gated steps submit an artifact only with `ready`; approval follows `ready`, and rejection follows the same step's `handoff` transition.
+- Workspace binding is `ready`-only and remains constrained by the configured allowed roots.
+
+When changing this contract, keep these surfaces synchronized:
+
+- Domain types: `src/domain/config.ts`, `src/domain/step-result.ts`, and `src/domain/subagent.ts`.
+- Validation and schema: `src/function/config/validation/`, `src/function/step-result/`, and `schemas/workflow.schema.json`.
+- Routing: `src/function/engine/` and `src/infrastructure/harness/`.
+- Model interfaces: `src/function/prompt/` and `src/infrastructure/runtime/`.
+- Examples and documentation: `examples/starter-kit/`, `README.md`, `GETTING_STARTED.md`, and `openwiki/`.
+
 ## Test Organization
 
 Tests in `test/` mirror the source structure:
@@ -77,8 +100,9 @@ Keep each pull request focused:
 1. Update the implementation, tests, and documentation together when a behavior or public contract changes.
 2. Put domain types in `src/domain/`, pure logic in `src/function/`, I/O and adapters in `src/infrastructure/`, and view formatting in `src/ui/`.
 3. Place tests in the corresponding `test/<layer>/` directory.
-4. Ensure all unit and integration tests pass and test coverage remains ≥ 90.00%.
-5. Preserve existing checkpoints and recovery semantics: workflow safety, bounded execution, and durable recovery are core guarantees.
+4. Add or update tests for config targets, outcome-specific result semantics, main and child completion schemas, gate routing, workspace binding, persisted child results, and E2E execution when those surfaces change.
+5. Ensure `bun run check` passes, including unit tests, ≥ 90.00% line and function coverage, E2E execution, and production bundling.
+6. Preserve existing checkpoints and recovery semantics: workflow safety, bounded execution, and durable recovery are core guarantees.
 
 Relevant references:
 - [Development and testing](./openwiki/development/testing.md)

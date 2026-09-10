@@ -5,9 +5,9 @@
 **Make repeatable Pi agent work explicit, durable, and safe to continue.**
 
 Pi Workflows is a declarative, pauseable workflow harness for Pi. Define steps,
-tools, prompts, approvals, and outcomes in YAML; it provides bounded execution,
-durable checkpoints, main-session step policy, and a live status view without
-dictating your language, framework, or delivery process.
+tools, prompts, approvals, and closed outcome transitions in YAML; it provides
+bounded execution, durable checkpoints, main-session step policy, and a live
+status view without dictating your language, framework, or delivery process.
 
 ## See it in action
 
@@ -28,12 +28,28 @@ dictating your language, framework, or delivery process.
 
 ## Why Pi Workflows
 
-- **Declarative & Structured**: Turn multi-step agent tasks into clear, reviewable workflow definitions with predictable transitions.
+- **Declarative & Structured**: Turn multi-step agent tasks into clear, reviewable workflow definitions with predictable `ready`, `blocked`, `handoff`, and `gaps` transitions.
+- **Typed Handoffs**: Models provide only concrete `completed` and `remaining` items; the extension validates their outcome semantics and renders canonical Markdown.
 - **Durable Checkpoints**: Pause for human approval or feedback and resume seamlessly without repeating completed steps.
 - **Safe Worktree Iterations**: Keep worktree-bound iterations isolated and carry forward verified changes for follow-up enhancements.
 - **Resource & Loop Guarding**: Enforce strict tool and Bash allowlists and halt runaway loops before they exceed step limits.
 - **Role Profiles**: Assign workflow-owned roles (`scout`, `planner`, `worker`, `reviewer`) with custom model and thinking overrides.
 - **Live Terminal UI**: Interactive status board, execution path visualization, step transcript inspection, and real-time cost ledger.
+
+## Closed outcome protocol
+
+Every step chooses one of four outcomes:
+
+- `ready`: the active step is complete; transition to another step or `$done`.
+- `blocked`: user input is required; transition only to `$pause` and put the question in `remaining`.
+- `handoff`: actionable active-step work remains; transition only back to the same step.
+- `gaps`: an earlier step must refresh requirements or work; transition only to an earlier ordinary step.
+
+Completion calls contain `outcome`, `completed`, and `remaining`. A `ready`
+result uses exactly `No active-step work remains.` as its sole remaining item.
+The extension—not the model—formats these fields into the durable Markdown
+handoff. Gate artifacts and ready-only workspace bindings remain separate,
+conditionally permitted completion fields.
 
 ## Quick Installation
 

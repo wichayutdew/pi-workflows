@@ -28,7 +28,7 @@ stateDiagram-v2
   [*] --> inspect
   inspect --> implement: ready
   inspect --> paused: blocked
-  implement --> completed: done
+  implement --> completed: ready
   implement --> paused: blocked
 ```
 
@@ -63,16 +63,17 @@ steps:
           - executable: project-check
             argsPrefix: [test]
     transitions:
-      done: $done
+      ready: $done
       blocked: $pause
 ```
 
 Workflow definitions use YAML with either the `.yaml` or `.yml` suffix. The
 bundled JSON Schema provides structural editor feedback, including safe
-relative prompt paths. The runtime loader is authoritative for relationships
-that standard JSON Schema cannot derive from user-defined keys: transition and
-gate outcomes, workspace binding outcomes, permission/requirement subsets,
-Bash-tool coupling, and budget ordering.
+relative prompt paths and the closed outcome set. The runtime loader is
+authoritative for relationships that standard JSON Schema cannot derive from
+user-defined keys: transition targets, gate requirements, workspace binding
+targets, permission/requirement subsets, Bash-tool coupling, and budget
+ordering.
 
 ## Liveness Contract
 
@@ -95,8 +96,8 @@ bounded.
 
 ## Verification Repair Loops
 
-Make a verifier return an actionable outcome to the mutation step, rather than
-using `$pause` for a definite repairable finding:
+Make a verifier return `gaps` to the mutation step, rather than using `$pause`
+for a definite repairable finding:
 
 ```yaml
 implement:
@@ -106,16 +107,17 @@ implement:
 
 verify:
   transitions:
-    passed: $done
-    failed: implement
-    retry: verify
+    ready: $done
+    gaps: implement
     blocked: $pause
+    handoff: verify
 ```
 
-The verifier's `failed` summary becomes the next implementor's
-`{{last.summary}}` handoff. It should name the exact evidence and smallest
-safe fix; the implementor should return to `verify` only after applying that
-fix. Keep `blocked` for stale, ambiguous, or unsafe situations. This loop is
+The verifier's `gaps` summary becomes the next implementor's
+`{{last.summary}}` handoff. It should name the exact evidence and smallest safe
+fix; the implementor should return `ready` to `verify` only after applying that
+fix. Keep `blocked` for stale, ambiguous, or unsafe situations. Use `handoff`
+only when the verifier itself has incomplete active-step work. This loop is
 still bounded by `maxStepVisits`; resume the durable checkpoint or raise that
 workflow-specific limit when more repair rounds are appropriate.
 
@@ -241,9 +243,9 @@ the agent determines command syntax from its own context.
 Gate artifacts are opaque data. An approved artifact is available through
 `{{reviewed.artifact}}`; the latest rejected artifact is available to its
 configured transition target through `{{gate.artifact}}`. Their format and
-downstream meaning belong to the workflow prompt. Outcome names are also opaque
-labels whose only engine-level behavior is the transition
-target declared beside them.
+downstream meaning belong to the workflow prompt. Outcome domain meaning is
+also prompt-owned, but the accepted outcome names are closed to `ready`,
+`blocked`, `handoff`, and `gaps`.
 
 ## Compact Bash Rules
 
@@ -296,7 +298,7 @@ workspace:
   allowedRoots: ['..']
 ```
 
-On a listed outcome, the structured result must include
+On `ready`, the structured result must include
 `workspace: { cwd: "/absolute/directory" }`; every other outcome must omit it.
 The harness canonicalizes the existing directory, requires it to remain under
 one allowed root (relative to the run-start directory, absolute, or
@@ -341,26 +343,25 @@ profiles into `~/.agents/agents/` before customizing them.
 stateDiagram-v2
   [*] --> intake
   intake --> plan: ready
-  intake --> intake: retry
   intake --> paused: blocked
-  plan --> prepare-workspace: approved
-  plan --> paused: changes-requested
-  plan --> plan: retry
+  intake --> intake: handoff
+  plan --> prepare-workspace: ready
   plan --> paused: blocked
+  plan --> plan: handoff
   prepare-workspace --> implement: ready
-  prepare-workspace --> plan: workspace-refresh
-  prepare-workspace --> prepare-workspace: retry
+  prepare-workspace --> plan: gaps
   prepare-workspace --> paused: blocked
+  prepare-workspace --> prepare-workspace: handoff
   implement --> verify: ready
-  implement --> implement: retry
   implement --> paused: blocked
-  verify --> publish: passed
-  verify --> implement: failed
-  verify --> verify: retry
-  verify --> verify: blocked
-  publish --> completed: published
-  publish --> publish: retry
+  implement --> implement: handoff
+  verify --> publish: ready
+  verify --> implement: gaps
+  verify --> paused: blocked
+  verify --> verify: handoff
+  publish --> completed: ready
   publish --> paused: blocked
+  publish --> publish: handoff
 ```
 
 Business intent: normalize a requirement or optional Jira key, create and

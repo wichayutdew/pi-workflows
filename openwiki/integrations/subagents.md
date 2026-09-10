@@ -187,7 +187,7 @@ While blocked, the harness keeps main tools isolated and refuses resume because 
 For a child that settles without `result.json`, Pi Workflows first sends one
 same-session completion-only repair follow-up. If repair also produces no
 result, diagnostics must prove the attempt settled, was not truncated, and
-completed only read-only tools: `read`, `ls`, `grep`, or `structured_output`.
+completed only read-only tools: `read`, `ls`, `rg`, or `structured_output`.
 Only that evidence permits one fresh child retry. Missing diagnostics,
 truncated evidence, failed or still-started calls, Bash, edit/write, MCP, or
 any unknown tool class pauses the workflow.

@@ -1,7 +1,7 @@
 # Get Started with Pi Workflows
 
-This guide installs Pi Workflows and bootstraps the four ready-to-customize
-workflows in [`examples/starter-kit`](./examples/starter-kit).
+This guide installs Pi Workflows and bootstraps the ready-to-customize `/work`
+workflow in [`examples/starter-kit`](./examples/starter-kit).
 
 ## 1. Install Pi Workflows
 
@@ -71,7 +71,57 @@ The copy provides these commands:
 | --- | --- |
 | `/work` | Prepare a dedicated worktree, approve a plan, implement a local change, and verify it. |
 
-## 4. Tailor the starter kit
+## 4. Understand the workflow contract
+
+A step may declare only these transitions:
+
+| Outcome | Meaning | Required target | `remaining` rule |
+| --- | --- | --- | --- |
+| `ready` | Active-step work is complete | another step or `$done` | exactly `No active-step work remains.` |
+| `blocked` | A user answer or authority is required | `$pause` | include at least one question ending in `?` |
+| `handoff` | Autonomous active-step work remains | the same step | non-question actionable work |
+| `gaps` | Requirements or work must be refreshed | an earlier ordinary step | non-question actionable gaps |
+
+The completion tool accepts `outcome`, `completed`, and `remaining`. Do not ask
+the model to author a `summary`, `state`, headings, bullets, retry metadata, or
+checkpoint progress object; Pi Workflows validates the typed content and owns
+the persisted Markdown formatting.
+
+A minimal workflow looks like this:
+
+```yaml
+version: 1
+id: example
+command: example
+description: Inspect and verify a repository
+start: inspect
+steps:
+  inspect:
+    prompt: Inspect the request.
+    transitions:
+      ready: verify
+      blocked: $pause
+      handoff: inspect
+  verify:
+    prompt: Verify the inspected evidence.
+    transitions:
+      ready: $done
+      gaps: inspect
+      blocked: $pause
+      handoff: verify
+```
+
+Gated steps submit their complete artifact with `ready`; gate outcome names are
+not configurable. Approval follows the step's `ready` transition, while
+rejection returns through its self-looping `handoff` transition. A workspace
+producer must declare `workspace.bindOn: [ready]`; only its `ready` result may
+include `workspace.cwd`.
+
+Legacy custom outcomes such as `retry`, `checkpoint`, `submit`, `approved`,
+`failed`, and `published` are rejected. Use `handoff` for same-step continuation
+and `gaps` for rework in an earlier step.
+
+## 5. Tailor the starter kit
 
 Before using a workflow, make its authority explicit for your environment:
 
@@ -81,7 +131,7 @@ Before using a workflow, make its authority explicit for your environment:
 2. Configure or replace issue-tracker, forge, code-search, and observability integrations for your environment. No endpoint, organization, or credential is bundled.
 3. Review every prompt and unrestricted Bash permission before allowing it to run against a repository.
 
-## 5. Reload, validate, and run
+## 6. Reload, validate, and run
 
 Reload Pi and validate every copied workflow before the first execution:
 

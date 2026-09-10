@@ -6,9 +6,9 @@
 stateDiagram-v2
   [*] --> running: createRun
   running --> running: step outcome to next step
-  running --> awaiting_gate: gate submitOutcome
-  awaiting_gate --> running: rejected or approved to another step
-  awaiting_gate --> completed: approved to $done
+  running --> awaiting_gate: ready outcome on gated step
+  awaiting_gate --> running: rejection handoff or approval ready to another step
+  awaiting_gate --> completed: approval ready to $done
   running --> completed: outcome to $done
   running --> paused: outcome to $pause
   running --> paused: manual pause or failure
@@ -159,7 +159,7 @@ active-step context, the previous checkpoint, diagnostic state, and repository
 state, and does not mark new work as confirmed complete. Without that
 transition, `delegation-recovery.ts` permits one fresh child retry only for the
 first subagent attempt and only when diagnostics prove the attempt was settled,
-untruncated, and used completed read-only calls: `read`, `ls`, `grep`, or
+untruncated, and used completed read-only calls: `read`, `ls`, `rg`, or
 `structured_output`. Missing diagnostics, truncated evidence, failed/started
 calls, Bash, edit/write, MCP, or any other tool class pause the workflow.
 

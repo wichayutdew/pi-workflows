@@ -13,10 +13,10 @@ parsing it or turning it into execution authority.
 
 ```mermaid
 stateDiagram-v2
-  running --> awaiting_gate: step outcome = submitOutcome
-  awaiting_gate --> running: rejectedOutcome
-  awaiting_gate --> running: approvedOutcome to next step
-  awaiting_gate --> completed: approvedOutcome to $done
+  running --> awaiting_gate: step outcome = ready with artifact
+  awaiting_gate --> running: rejection follows handoff
+  awaiting_gate --> running: approval follows ready to next step
+  awaiting_gate --> completed: approval follows ready to $done
   awaiting_gate --> paused: manual pause
   paused --> running: resume applies stored rejection
   paused --> running: resume applies stored approval to next step
@@ -32,14 +32,10 @@ flowchart TD
   Provider -- plannotator --> Detect{extension detectable?}
   Provider -- other --> Reject[reject workflow]
   Detect -- no --> Preflight[block step preflight]
-  Detect -- yes --> Outcomes{approved != rejected?}
-  Prompt --> Outcomes
-  Outcomes -- no --> Reject
-  Outcomes -- yes --> Transitions{approved and rejected transitions exist?}
+  Detect -- yes --> Transitions{ready and handoff transitions exist?}
+  Prompt --> Transitions
   Transitions -- no --> Reject
-  Transitions -- yes --> Submit{submitOutcome absent from transitions?}
-  Submit -- no --> Reject
-  Submit -- yes --> Accept[valid gated step]
+  Transitions -- yes --> Accept[valid gated step]
 ```
 
 ## Review Submission
@@ -51,7 +47,7 @@ sequenceDiagram
   participant Pi as Pi event bus
   participant Review as Plannotator
 
-  Child->>Harness: result outcome submit plus summary plus artifact
+  Child->>Harness: result outcome ready plus handoff fields plus artifact
   Harness->>Harness: beginGate and persist awaiting-gate
   Harness->>Pi: plannotator:request action plan-review
   Pi->>Review: review request with opaque artifact
@@ -73,8 +69,8 @@ flowchart TD
   Paused -- no --> Awaiting{run awaiting-gate?}
   Awaiting -- no --> Ignore
   Awaiting -- yes --> Approved{approved?}
-  Approved -- yes --> ApprovedTransition[use approvedOutcome]
-  Approved -- no --> RejectedTransition[use rejectedOutcome and gate.feedback]
+  Approved -- yes --> ApprovedTransition[follow ready transition]
+  Approved -- no --> RejectedTransition[follow handoff transition and gate.feedback]
   ApprovedTransition --> Settle[settleAfterTransition]
   RejectedTransition --> Settle
 ```
@@ -114,16 +110,14 @@ flowchart LR
   Rejected --> GateFeedback[gate.feedback template value]
 ```
 
-Approval and rejection outcome names are opaque transition labels. The
-extension does not infer planning, retry, replan, or implementation semantics
-from them. The approved artifact remains separate from the compact summary, and
-neither value changes permissions or the run's captured working directory.
+Gate outcome names are fixed: `ready` submits the artifact and is reused after
+approval, while rejection follows the step's self-looping `handoff` transition.
+The approved artifact remains separate from the compact summary, and neither
+value changes permissions or the run's captured working directory.
 Plannotator's `approved` boolean is authoritative; annotation labels and
-feedback text are never parsed as decisions. If a rejected outcome targets the
-same gated step, the harness starts a fresh attempt with `{{gate.feedback}}`
-and the opaque rejected draft in `{{gate.artifact}}`, while preserving the
-step's original incoming handoff, then waits at a new review. These explicitly
-human-mediated transitions bypass the visit-limit check and can continue until
-approval. Each visit remains recorded, so later automatic entries are still
-guarded. A same-step retry produced by the revision agent keeps the rejected
-artifact and feedback available but remains subject to the normal limit.
+feedback text are never parsed as decisions. On rejection, the harness starts a
+fresh same-step attempt with `{{gate.feedback}}` and the opaque rejected draft
+in `{{gate.artifact}}`, while preserving the step's original incoming handoff,
+then waits at a new review. These explicitly human-mediated transitions bypass
+the visit-limit check and can continue until approval. Each visit remains
+recorded, so later automatic same-step handoffs are still guarded.
