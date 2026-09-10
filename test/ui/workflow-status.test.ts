@@ -219,7 +219,7 @@ describe('when testing workflow status', () => {
           {
             stepId: 'implement',
             stepDigest: workflow.stepDigests.implement ?? '',
-            outcome: 'done',
+            outcome: 'ready',
             summary: 'Implemented',
             completedAt: 3_000,
           },
@@ -237,7 +237,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/\[COMPLETED\]/);
       expect(output).toMatch(/2 completed attempts/);
       expect(output).toMatch(/COMPLETED · ready/);
-      expect(output).toMatch(/COMPLETED · done/);
+      expect(output.match(/COMPLETED · ready/g)).toHaveLength(2);
       expect(output).toMatch(/✓ implement/);
       expect(output).not.toMatch(/\bRUNNING\b/);
     });
@@ -265,7 +265,7 @@ describe('when testing workflow status', () => {
       // given
       const workflow = loadedWorkflow();
       const running = createRun(workflow, '', [], 'run-long-failure', 1_000);
-      const reason = `Subagent failed: ${'very long diagnostic context '.repeat(200)}TAIL`;
+      const reason = `Subagent gaps: ${'very long diagnostic context '.repeat(200)}TAIL`;
       const run = pauseRun(running, reason, 4_000);
 
       // when
@@ -308,13 +308,10 @@ describe('when testing workflow status', () => {
           prompt: 'Review',
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: '$done',
-            rejected: 'review',
+            ready: '$done',
+            handoff: 'review',
           },
         },
       };
@@ -324,7 +321,7 @@ describe('when testing workflow status', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan',
         'request-review',
         2_000,
@@ -384,7 +381,7 @@ describe('when testing workflow status', () => {
       (raw.steps as Record<string, unknown>).verify = {
         title: 'Verify changes',
         prompt: 'Verify',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       };
       const workflow = loadedWorkflow(raw);
       const initial = createRun(workflow, '', [], 'run-progress-widget', 1_000);

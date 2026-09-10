@@ -563,9 +563,6 @@
               "maxLength": 1024
             }
           }
-        },
-        "onValidationFailure": {
-          "const": "retry"
         }
       }
     },
@@ -574,20 +571,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["submitOutcome", "approvedOutcome", "rejectedOutcome"],
           "properties": {
             "provider": {
               "const": "prompt",
               "default": "prompt"
-            },
-            "submitOutcome": {
-              "$ref": "#/$defs/identifier"
-            },
-            "approvedOutcome": {
-              "$ref": "#/$defs/identifier"
-            },
-            "rejectedOutcome": {
-              "$ref": "#/$defs/identifier"
             },
             "artifactContract": {
               "$ref": "#/$defs/artifactContract"
@@ -597,24 +584,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "provider",
-            "submitOutcome",
-            "approvedOutcome",
-            "rejectedOutcome"
-          ],
+          "required": ["provider"],
           "properties": {
             "provider": {
               "const": "plannotator"
-            },
-            "submitOutcome": {
-              "$ref": "#/$defs/identifier"
-            },
-            "approvedOutcome": {
-              "$ref": "#/$defs/identifier"
-            },
-            "rejectedOutcome": {
-              "$ref": "#/$defs/identifier"
             },
             "timeoutMs": {
               "type": "integer",
@@ -639,7 +612,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "$ref": "#/$defs/identifier"
+            "const": "ready"
           }
         },
         "allowedRoots": {
@@ -684,7 +657,7 @@
           "type": "object",
           "minProperties": 1,
           "propertyNames": {
-            "$ref": "#/$defs/identifier"
+            "enum": ["ready", "blocked", "handoff", "gaps"]
           },
           "additionalProperties": {
             "type": "string",

@@ -21,7 +21,7 @@ function workspaceWorkflow() {
     verify: {
       prompt: 'Verify',
       agent: 'reviewer',
-      transitions: { passed: '$done', blocked: '$pause' },
+      transitions: { ready: '$done', blocked: '$pause' },
     },
   };
   return loadedWorkflow(raw);
@@ -47,7 +47,7 @@ describe('when restarting a completed workflow iteration', () => {
     completed = advanceRun(
       workflow,
       completed,
-      'passed',
+      'ready',
       'Verified first work',
       4,
     );
@@ -118,7 +118,7 @@ describe('when restarting a completed workflow iteration', () => {
       workspaceCwd: '/repository/worktrees/task',
     });
     completed = advanceRun(workflow, completed, 'ready', 'Implemented', 3);
-    completed = advanceRun(workflow, completed, 'passed', 'Verified', 4);
+    completed = advanceRun(workflow, completed, 'ready', 'Verified', 4);
 
     const restarted = restartRun(
       workflow,

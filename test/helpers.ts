@@ -48,7 +48,7 @@ export function baseWorkflow(): Record<string, unknown> {
           tools: ['read', 'edit'],
         },
         transitions: {
-          done: '$done',
+          ready: '$done',
         },
       },
     },

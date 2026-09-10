@@ -34,10 +34,11 @@ function gatedWorkflow(provider: 'prompt' | 'plannotator'): LoadedWorkflow {
   }
   inspect.gate = {
     provider,
-    submitOutcome: 'submit',
-    approvedOutcome: 'ready',
-    rejectedOutcome: 'blocked',
     ...(provider === 'plannotator' ? { timeoutMs: 1_000 } : {}),
+  };
+  inspect.transitions = {
+    ...(inspect.transitions as Record<string, string>),
+    handoff: 'inspect',
   };
   return loadedWorkflow(raw);
 }
@@ -57,7 +58,7 @@ function pausedGateRun(
   let run = beginGate(
     workflow,
     createRun(workflow, 'request', ['read'], 'run-1', 1),
-    'submit',
+    'ready',
     '# Plan',
     'gate-request',
     2,
@@ -274,16 +275,12 @@ describe('when testing resume actions', () => {
     );
   });
 
-  test('refuses to resume a workflow with a reachable completion trap', async () => {
+  test('resumes a workflow with a bounded handoff and completion path', async () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
         prompt: 'Choose',
-        transitions: { finish: '$done', trap: 'trap' },
-      },
-      trap: {
-        prompt: 'Trap',
-        transitions: { wait: '$pause' },
+        transitions: { ready: '$done', handoff: 'choose' },
       },
     };
     raw.start = 'choose';
@@ -296,14 +293,9 @@ describe('when testing resume actions', () => {
       command.context,
     );
 
-    expect(fixture.fixture.run?.status).toBe('paused');
-    expect(fixture.calls.launched).toBe(0);
-    expect(command.notices.at(-1)?.message).toContain(
-      '/workflow-doctor example',
-    );
-    expect(command.notices.at(-1)?.message).toContain(
-      'reachable step trap cannot reach $done',
-    );
+    expect(fixture.fixture.run?.status).toBe('running');
+    expect(fixture.calls.launched).toBe(1);
+    expect(command.notices).toEqual([]);
   });
 
   test('resumes a runnable step and enforces its preflight', async () => {
@@ -453,14 +445,15 @@ describe('when testing resume actions', () => {
     );
 
     expect(fixture.run).toMatchObject({
-      status: 'paused',
+      status: 'running',
       gateFeedback: 'revise the plan',
+      currentStepId: 'inspect',
     });
     expect(calls.restoredTools).toBe(1);
     expect(calls.settled).toEqual([
       {
         stepId: 'inspect',
-        outcome: 'blocked',
+        outcome: 'handoff',
         summary: 'Gate rejected: revise the plan',
       },
     ]);

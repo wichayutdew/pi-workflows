@@ -7,4 +7,4 @@ Use `publication.sourceBranch` at `repositories[0].baseHead`. Branch is `<type>/
 
 On restart, rebind that exact worktree and branch. Preserve unrelated work. If source HEAD moved past `baseHead`, return `workspace-refresh` with no mutation.
 
-`ready`: bound `workspace.cwd` plus manifest. `retry`: transient failure. `blocked`: unsafe state.
+`ready`: bound `workspace.cwd` plus manifest. `gaps`: source state changed and the plan must be refreshed. `handoff`: transient work remains. `blocked`: unsafe state.

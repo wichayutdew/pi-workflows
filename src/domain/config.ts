@@ -54,13 +54,15 @@ export type ArtifactContract = {
   readonly requiredSubstrings: ReadonlyArray<string>;
   readonly forbiddenSubstrings: ReadonlyArray<string>;
   readonly equalOccurrenceGroups: ReadonlyArray<ReadonlyArray<string>>;
-  readonly onValidationFailure?: 'retry';
 };
 
 type GateDefinition = {
-  readonly submitOutcome: string;
-  readonly approvedOutcome: string;
-  readonly rejectedOutcome: string;
+  /** Gates accept only the model's `ready` result. */
+  readonly submitOutcome: 'ready';
+  /** Approval follows the step's `ready` transition. */
+  readonly approvedOutcome: 'ready';
+  /** Rejection revisits the active step through its `handoff` transition. */
+  readonly rejectedOutcome: 'handoff';
   readonly artifactContract?: ArtifactContract;
 };
 
@@ -76,7 +78,7 @@ export type PlannotatorGate = GateDefinition & {
 export type WorkflowGate = PromptGate | PlannotatorGate;
 
 export type StepWorkspaceBinding = {
-  /** Outcomes whose result establishes the workspace for later steps. */
+  /** Must contain only `ready`; retained in the persisted schema for compatibility. */
   readonly bindOn: ReadonlyArray<string>;
   /** Relative, absolute, or ~/ home-relative paths that may contain the workspace. */
   readonly allowedRoots: ReadonlyArray<string>;

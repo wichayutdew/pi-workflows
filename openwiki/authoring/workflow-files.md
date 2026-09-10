@@ -177,18 +177,16 @@ Supported variables:
 | `{{resume.input}}`       | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
 | `{{restart.workspace}}`  | Exact prior workspace that a restarted iteration must rebind; empty for a first iteration.                                 |
 
-Every step completion must provide typed handoff fields, not model-authored
-summary Markdown. The common fields are plain-text `state`, `completed`, and
-`remaining`; `completed` and `remaining` must each contain one or more items.
-Completed items must cite concrete evidence such as a path, command, identifier,
-or user decision; placeholder, generic, Markdown-formatted, or list-marker text
-is rejected. The parser formats the persisted compact summary from those typed
-fields. A `blocked` result must also include plain-text `question` ending in
-`?`, `action`, and `next`; a `retry` result must instead include
-`transientFailure` and `retryWhen`. Delegated steps choose an outcome using only
-the active step's instructions: later workflow steps do not count as unfinished
-work, and a completed delegated step should use `No active-step work remains.`
-as its remaining item.
+Every step completion must provide `outcome`, `completed`, and `remaining`,
+not model-authored summary Markdown. `completed` and `remaining` must each
+contain one or more plain-text evidence items; the extension formats the
+persisted compact summary. The only outcomes are `ready`, `blocked`, `handoff`,
+and `gaps`. `ready` uses exactly `No active-step work remains.` as its sole
+remaining item. `blocked` includes a user question ending in `?` in `remaining`.
+`handoff` has non-question actionable remaining work and must self-loop. `gaps`
+has non-question actionable requirements and targets an earlier step. Delegated
+steps choose an outcome only from the active step's instructions: later workflow
+steps do not count as unfinished work.
 
 ## Prompt File Safety
 

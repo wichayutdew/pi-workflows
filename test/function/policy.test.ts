@@ -151,7 +151,7 @@ describe('when testing policy', () => {
               tools: ['read'],
               extensions: ['plannotator'],
             },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -193,7 +193,7 @@ describe('when testing policy', () => {
             permissions: {
               extensions: ['pi-mcp-adapter'],
             },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -281,7 +281,7 @@ describe('when testing policy', () => {
           run: {
             prompt: 'Run',
             permissions: { extensions: ['annotator'] },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });

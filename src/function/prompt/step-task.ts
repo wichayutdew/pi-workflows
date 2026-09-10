@@ -171,7 +171,7 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     contract.gateLine,
     ...contract.workspaceLines,
     '',
-    'Provide `state`, `completed`, and `remaining` fields for a self-contained compact handoff; this is the only step context passed to the next fresh child.',
+    'Provide only `completed` and `remaining` fields for the self-contained compact handoff; the extension owns all Markdown formatting and metadata.',
     ...(isDelegated
       ? [
           "Evaluate completion and choose an outcome using only this delegated step's instructions.",
@@ -180,14 +180,24 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
         ]
       : []),
     'Do not write Markdown in completion fields. Provide one or more plain-text completed and remaining items; each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
-    ...(contract.outcomes.includes('blocked')
+    ...(contract.outcomes.includes('ready')
       ? [
-          'For `blocked`, also provide plain-text `question` (ending in `?`), `action`, and `next` fields.',
+          'For `ready`, `remaining` must be exactly `No active-step work remains.`.',
         ]
       : []),
-    ...(contract.outcomes.includes('retry')
+    ...(contract.outcomes.includes('blocked')
       ? [
-          'For `retry`, also provide plain-text `transientFailure` and `retryWhen` fields.',
+          'For `blocked`, put at least one user question ending in `?` in `remaining`.',
+        ]
+      : []),
+    ...(contract.outcomes.includes('handoff')
+      ? [
+          'For `handoff`, `remaining` must contain non-question actionable work for this same step.',
+        ]
+      : []),
+    ...(contract.outcomes.includes('gaps')
+      ? [
+          'For `gaps`, `remaining` must contain non-question actionable requirements to refresh in the configured earlier step.',
         ]
       : []),
     'Format all human-facing output—including summaries, gate artifacts, Markdown plans, reports, comments, and replies—for scanning: short headings, then one distinct fact, action, or metadata value per bullet or paragraph. Never pack unrelated values into one line or dense prose.',

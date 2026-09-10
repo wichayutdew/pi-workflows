@@ -26,7 +26,7 @@ describe('when testing preflight', () => {
               extensions: ['plannotator'],
               skills: ['planning'],
             },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -74,14 +74,10 @@ describe('when testing preflight', () => {
         steps: {
           plan: {
             prompt: 'Plan',
-            gate: {
-              submitOutcome: 'submit',
-              approvedOutcome: 'approved',
-              rejectedOutcome: 'rejected',
-            },
+            gate: {},
             transitions: {
-              approved: '$done',
-              rejected: 'plan',
+              ready: '$done',
+              handoff: 'plan',
             },
           },
         },
@@ -110,13 +106,10 @@ describe('when testing preflight', () => {
             prompt: 'Plan',
             gate: {
               provider: 'plannotator',
-              submitOutcome: 'submit',
-              approvedOutcome: 'approved',
-              rejectedOutcome: 'rejected',
             },
             transitions: {
-              approved: '$done',
-              rejected: 'plan',
+              ready: '$done',
+              handoff: 'plan',
             },
           },
         },
@@ -144,7 +137,7 @@ describe('when testing preflight', () => {
           run: {
             prompt: 'Run',
             permissions: { mcp: ['gitlab/get_merge_request'] },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -170,7 +163,7 @@ describe('when testing preflight', () => {
             prompt: 'Run',
             permissions: { mcp: ['gitlab/get_merge_request'] },
             requires: { tools: ['mcp'] },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -193,11 +186,8 @@ describe('when testing preflight', () => {
             prompt: 'Run',
             gate: {
               provider: 'plannotator',
-              submitOutcome: 'submit',
-              approvedOutcome: 'approved',
-              rejectedOutcome: 'rejected',
             },
-            transitions: { approved: '$done', rejected: 'run' },
+            transitions: { ready: '$done', handoff: 'run' },
           },
         },
       });

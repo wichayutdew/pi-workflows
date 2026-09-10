@@ -44,6 +44,8 @@ function parsePrompt(
   return { file };
 }
 
+const WORKFLOW_OUTCOMES = new Set(['ready', 'blocked', 'handoff', 'gaps']);
+
 function parseTransitions(
   value: unknown,
   path: string,
@@ -57,6 +59,10 @@ function parseTransitions(
     (result, [outcome, targetValue]) => {
       if (!OUTCOME_PATTERN.test(outcome)) {
         errors.push(`${path}: invalid outcome "${outcome}"`);
+        return result;
+      }
+      if (!WORKFLOW_OUTCOMES.has(outcome)) {
+        errors.push(`${path}: unsupported outcome "${outcome}"`);
         return result;
       }
       const target = readString(targetValue, `${path}.${outcome}`, errors);
@@ -87,7 +93,6 @@ function parseArtifactContract(
       'requiredSubstrings',
       'forbiddenSubstrings',
       'equalOccurrenceGroups',
-      'onValidationFailure',
     ],
     path,
     errors,
@@ -150,23 +155,11 @@ function parseArtifactContract(
       [],
     );
   })();
-  const onValidationFailure =
-    value.onValidationFailure === undefined
-      ? undefined
-      : readString(
-          value.onValidationFailure,
-          `${path}.onValidationFailure`,
-          errors,
-        );
-  if (onValidationFailure !== undefined && onValidationFailure !== 'retry') {
-    errors.push(`${path}.onValidationFailure: expected retry`);
-  }
   return {
     maxChars,
     requiredSubstrings: parseSubstrings('requiredSubstrings'),
     forbiddenSubstrings: parseSubstrings('forbiddenSubstrings'),
     equalOccurrenceGroups,
-    ...(onValidationFailure === 'retry' ? { onValidationFailure } : {}),
   };
 }
 
@@ -182,14 +175,7 @@ function parseGate(
   }
   rejectUnknownKeys(
     value,
-    [
-      'provider',
-      'submitOutcome',
-      'approvedOutcome',
-      'rejectedOutcome',
-      'timeoutMs',
-      'artifactContract',
-    ],
+    ['provider', 'timeoutMs', 'artifactContract'],
     path,
     errors,
   );
@@ -205,24 +191,6 @@ function parseGate(
   if (!provider) {
     errors.push(`${path}.provider: expected prompt or plannotator`);
   }
-  const submitOutcome = readString(
-    value.submitOutcome,
-    `${path}.submitOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
-  const approvedOutcome = readString(
-    value.approvedOutcome,
-    `${path}.approvedOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
-  const rejectedOutcome = readString(
-    value.rejectedOutcome,
-    `${path}.rejectedOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
   const artifactContract = parseArtifactContract(
     value.artifactContract,
     `${path}.artifactContract`,
@@ -231,26 +199,21 @@ function parseGate(
   if (provider === 'prompt' && value.timeoutMs !== undefined) {
     errors.push(`${path}.timeoutMs: only valid with provider "plannotator"`);
   }
-  if (!submitOutcome || !approvedOutcome || !rejectedOutcome || !provider) {
-    return undefined;
-  }
-  if (approvedOutcome === rejectedOutcome) {
-    errors.push(`${path}: approvedOutcome and rejectedOutcome must differ`);
-  }
+  if (!provider) return undefined;
 
   return provider === 'prompt'
     ? {
         provider,
-        submitOutcome,
-        approvedOutcome,
-        rejectedOutcome,
+        submitOutcome: 'ready',
+        approvedOutcome: 'ready',
+        rejectedOutcome: 'handoff',
         ...(artifactContract ? { artifactContract } : {}),
       }
     : {
         provider,
-        submitOutcome,
-        approvedOutcome,
-        rejectedOutcome,
+        submitOutcome: 'ready',
+        approvedOutcome: 'ready',
+        rejectedOutcome: 'handoff',
         ...(artifactContract ? { artifactContract } : {}),
         timeoutMs: readInteger(
           value.timeoutMs,
@@ -331,8 +294,8 @@ function parseWorkspace(
     errors,
     OUTCOME_PATTERN,
   );
-  if (bindOn.length === 0) {
-    errors.push(`${path}.bindOn: at least one outcome is required`);
+  if (bindOn.length !== 1 || bindOn[0] !== 'ready') {
+    errors.push(`${path}.bindOn: must contain only "ready"`);
   }
   const allowedRoots = parseWorkspaceRoots(
     value.allowedRoots,
@@ -414,6 +377,18 @@ export function parseWorkflowStep(
     errors,
   );
 
+  if (transitions.blocked && transitions.blocked !== '$pause') {
+    errors.push(`${path}.transitions.blocked: must target "$pause"`);
+  }
+  if (transitions.handoff && transitions.handoff !== stepId) {
+    errors.push(`${path}.transitions.handoff: must target "${stepId}"`);
+  }
+  if (transitions.ready === '$pause' || transitions.ready === stepId) {
+    errors.push(
+      `${path}.transitions.ready: must target another step or "$done"`,
+    );
+  }
+
   if (gate) {
     if (!Object.hasOwn(transitions, gate.approvedOutcome)) {
       errors.push(
@@ -423,19 +398,6 @@ export function parseWorkflowStep(
     if (!Object.hasOwn(transitions, gate.rejectedOutcome)) {
       errors.push(
         `${path}.transitions: missing gate outcome "${gate.rejectedOutcome}"`,
-      );
-    }
-    if (Object.hasOwn(transitions, gate.submitOutcome)) {
-      errors.push(
-        `${path}.transitions: submitOutcome is handled by the gate and must not be a transition`,
-      );
-    }
-    if (
-      gate.artifactContract?.onValidationFailure === 'retry' &&
-      !Object.hasOwn(transitions, 'retry')
-    ) {
-      errors.push(
-        `${path}.transitions: artifact-contract retry requires a "retry" transition`,
       );
     }
   }
@@ -450,14 +412,8 @@ export function parseWorkflowStep(
       );
     }
   }
-  if (workspace) {
-    workspace.bindOn.forEach((outcome) => {
-      if (!Object.hasOwn(transitions, outcome)) {
-        errors.push(
-          `${path}.workspace.bindOn: unknown transition outcome "${outcome}"`,
-        );
-      }
-    });
+  if (workspace && !Object.hasOwn(transitions, 'ready')) {
+    errors.push(`${path}.workspace: requires a "ready" transition`);
   }
 
   if (!title || !prompt) return undefined;

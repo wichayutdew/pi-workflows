@@ -49,6 +49,40 @@ describe('when testing config', () => {
       expect(result.value?.steps.inspect?.agent).toEqual({ name: 'scout' });
     });
 
+    test('rejects outcomes outside ready, blocked, handoff, and gaps', () => {
+      const invalid = baseWorkflow();
+      const step = (invalid.steps as Record<string, Record<string, unknown>>)
+        .inspect!;
+      step.transitions = { planned: '$done' };
+
+      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
+        /unsupported outcome "planned"/,
+      );
+
+      const invalidTargets = baseWorkflow();
+      (
+        invalidTargets.steps as Record<string, Record<string, unknown>>
+      ).inspect!.transitions = {
+        ready: '$pause',
+        blocked: '$done',
+        handoff: 'other',
+      };
+      const errors = validateWorkflow(invalidTargets).errors.join('\n');
+      expect(errors).toMatch(
+        /transitions\.ready: must target another step or "\$done"/,
+      );
+      expect(errors).toMatch(/transitions\.blocked: must target "\$pause"/);
+      expect(errors).toMatch(/transitions\.handoff: must target "inspect"/);
+
+      const forwardGaps = baseWorkflow();
+      (
+        forwardGaps.steps as Record<string, Record<string, unknown>>
+      ).implement!.transitions = { ready: '$done', gaps: 'implement' };
+      expect(validateWorkflow(forwardGaps).errors.join('\n')).toMatch(
+        /transitions\.gaps: must target an earlier step/,
+      );
+    });
+
     test('preserves valid per-step tool budgets and rejects invalid values', () => {
       const valid = baseWorkflow();
       const validStep = (valid.steps as Record<string, Record<string, unknown>>)
@@ -104,21 +138,17 @@ describe('when testing config', () => {
         .inspect!;
       inspect.gate = {
         provider: 'prompt',
-        submitOutcome: 'submit',
-        approvedOutcome: 'ready',
-        rejectedOutcome: 'blocked',
         artifactContract: {
           maxChars: 100,
           requiredSubstrings: ['# Plan', '## Evidence'],
           forbiddenSubstrings: ['saved at /'],
           equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
-          onValidationFailure: 'retry',
         },
       };
       inspect.transitions = {
         ready: 'implement',
         blocked: '$pause',
-        retry: 'inspect',
+        handoff: 'inspect',
       };
 
       expect(validateWorkflow(raw).errors).toEqual([]);
@@ -175,7 +205,7 @@ describe('when testing config', () => {
       >;
       defaultSteps.implement = {
         ...defaultSteps.implement,
-        transitions: { retry: 'inspect', done: '$done' },
+        transitions: { ready: '$done', handoff: 'implement' },
       };
 
       const defaultResult = validateWorkflow(withDefaultRoot);
@@ -246,12 +276,12 @@ describe('when testing config', () => {
       >;
       gatedSteps.inspect = {
         ...gatedSteps.inspect,
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
+        gate: {},
+        transitions: {
+          ready: 'implement',
+          blocked: '$pause',
+          handoff: 'inspect',
         },
-        transitions: { ready: 'implement', blocked: '$pause' },
       };
 
       const downstreamMain = workspaceWorkflow();
@@ -268,13 +298,13 @@ describe('when testing config', () => {
       >;
       multipleSteps.implement = {
         ...multipleSteps.implement,
-        transitions: { done: 'finish' },
-        workspace: { bindOn: ['done'] },
+        transitions: { ready: 'finish' },
+        workspace: { bindOn: ['ready'] },
       };
       multipleSteps.finish = {
         prompt: 'Finish',
         agent: 'reviewer',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       };
 
       const messages = [
@@ -291,7 +321,7 @@ describe('when testing config', () => {
 
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/duplicate value "missing"/);
-      expect(messages).toMatch(/unknown transition outcome "missing"/);
+      expect(messages).toMatch(/bindOn: must contain only "ready"/);
       expect(messages).toMatch(/at least one workspace path is required/);
       expect(messages).toMatch(
         /expected a relative, absolute, or home-relative path/,
@@ -520,19 +550,12 @@ describe('when testing config', () => {
         withStep({
           gate: {
             provider: 'prompt',
-            submitOutcome: 'submit',
-            approvedOutcome: 'same',
-            rejectedOutcome: 'same',
             timeoutMs: 1_000,
           },
           transitions: { same: '$done' },
         }),
         withStep({
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'ready',
-            rejectedOutcome: 'blocked',
-          },
+          gate: {},
           transitions: { submit: '$done' },
         }),
         withStep({
@@ -630,7 +653,7 @@ describe('when testing config', () => {
               allow: [{ executable: 'git', argsPrefix: ['status'] }],
             },
           },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         }),
       );
 
@@ -776,10 +799,11 @@ describe('when testing config', () => {
       const steps = raw.steps as Record<string, Record<string, unknown>>;
       steps.inspect = {
         ...steps.inspect,
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
+        gate: {},
+        transitions: {
+          ready: 'implement',
+          blocked: '$pause',
+          handoff: 'inspect',
         },
       };
       // when
@@ -795,12 +819,7 @@ describe('when testing config', () => {
       >;
       plannotatorSteps.inspect = {
         ...plannotatorSteps.inspect,
-        gate: {
-          provider: 'plannotator',
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
-        },
+        gate: { provider: 'plannotator' },
       };
       const plannotatorResult = validateWorkflow(plannotator);
       expect(plannotatorResult.errors).toEqual([]);
@@ -820,9 +839,6 @@ describe('when testing config', () => {
         ...invalidSteps.inspect,
         gate: {
           provider: 'unknown',
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
         },
       };
       expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
@@ -913,7 +929,7 @@ describe('when testing config', () => {
           '          - executable: git',
           '            argsPrefixes: [[status], [diff, --stat]]',
           '    transitions:',
-          '      done: $done',
+          '      ready: $done',
           '      handoff: inspect',
         ].join('\n'),
         'utf8',
@@ -929,7 +945,7 @@ describe('when testing config', () => {
           'steps:',
           '  inspect:',
           '    prompt: Inspect',
-          '    transitions: { done: $done }',
+          '    transitions: { ready: $done }',
         ].join('\n'),
         'utf8',
       );
@@ -946,7 +962,7 @@ describe('when testing config', () => {
           'steps:',
           '  inspect:',
           '    prompt: Inspect',
-          '    transitions: { done: $done }',
+          '    transitions: { ready: $done }',
         ].join('\n'),
         'utf8',
       );
@@ -1001,7 +1017,7 @@ describe('when testing config', () => {
         'steps:',
         '  inspect:',
         '    prompt: Inspect',
-        '    transitions: { done: $done }',
+        '    transitions: { ready: $done }',
       ];
       await writeFile(
         join(userDirectory, 'multiple.workflow.yaml'),
@@ -1201,7 +1217,7 @@ describe('when testing config', () => {
         steps: {
           run: {
             prompt: { file: 'linked.md' },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',
@@ -1213,7 +1229,7 @@ describe('when testing config', () => {
         steps: {
           run: {
             prompt: 'Use {{unknown.variable}}',
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',
@@ -1230,7 +1246,7 @@ describe('when testing config', () => {
         steps: {
           run: {
             prompt: { file: 'local.md' },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',

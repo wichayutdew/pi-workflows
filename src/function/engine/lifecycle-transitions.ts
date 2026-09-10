@@ -27,15 +27,7 @@ export const allowedOutcomes = (
   const step = currentStep(workflow, run);
   if (!step) return [];
 
-  const gateResolutionOutcomes = step.gate
-    ? new Set([step.gate.approvedOutcome, step.gate.rejectedOutcome])
-    : undefined;
-  return [
-    ...Object.keys(step.transitions).filter(
-      (outcome) => !gateResolutionOutcomes?.has(outcome),
-    ),
-    ...(step.gate ? [step.gate.submitOutcome] : []),
-  ];
+  return Object.keys(step.transitions);
 };
 
 /**

@@ -137,21 +137,21 @@ validation; it never infers an outcome from prose. If repair also produces no
 result and the step declares a self-looping `handoff` transition, the parent
 records a durable fallback handoff from available active-step context, prior
 checkpoint, diagnostic state, and repository state, then revisits the same
-step. Without that transition, complete bounded terminal evidence can permit
-one fresh retry only when all completed calls were read-only: `read`, `ls`,
-`grep`, or `structured_output`. Any Bash, edit, write, MCP, unknown, failed,
-started, malformed, missing, or truncated evidence pauses the workflow with
-diagnostics.
+step. Without that transition, complete bounded terminal evidence may permit
+one extension-owned recovery attempt only when all completed calls were
+read-only: `read`, `ls`, `rg`, or `structured_output`. Any Bash, edit, write,
+MCP, unknown, failed, started, malformed, missing, or truncated evidence pauses
+the workflow with diagnostics.
 
 When a delegated step has a productive tool-call budget, the warning at two
 productive calls remaining tells the child to finish the active delegated step
 with its applicable configured outcome when possible; otherwise it prepares a
 handoff for incomplete active-step work. After the productive budget is
 exhausted, work tools are locked and the completion reserve accepts the
-configured outcome that accurately reflects the active delegated step state,
-including `handoff` when active-step work is incomplete. A handoff must cite
-evidence for completed or in-progress active-step work and identify the first
-action for the next child.
+configured outcome that accurately reflects the active delegated step state.
+The model supplies only `completed` and `remaining`: `handoff` remaining work
+is non-question actionable work for the same step, while `gaps` remaining work
+is for the configured earlier step. The extension renders the Markdown summary.
 
 ## Result Path
 

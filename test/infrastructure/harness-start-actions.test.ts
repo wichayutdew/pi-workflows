@@ -230,11 +230,7 @@ describe('when testing start actions', () => {
     edited.steps = {
       choose: {
         prompt: 'Choose',
-        transitions: { finish: '$done', trap: 'trap' },
-      },
-      trap: {
-        prompt: 'Trap',
-        transitions: { wait: '$pause' },
+        transitions: { ready: '$done', handoff: 'choose' },
       },
     };
     edited.start = 'choose';
@@ -256,8 +252,8 @@ describe('when testing start actions', () => {
     expect(calls.doctorLoads).toBe(1);
     const content = (calls.sentMessages.at(-1) as { readonly content: string })
       .content;
-    expect(content).toContain('Result: ERROR');
-    expect(content).toContain('reachable step trap cannot reach $done');
+    expect(content).toContain('Result: WARNING');
+    expect(content).toContain('reachable cyclic component');
   });
 
   test('reports diagnostics from the freshly loaded catalog', async () => {
@@ -410,16 +406,12 @@ describe('when testing start actions', () => {
     );
   });
 
-  test('refuses a workflow with a reachable non-completing branch', async () => {
+  test('starts a workflow with a bounded self-handoff and completion path', async () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
         prompt: 'Choose',
-        transitions: { finish: '$done', trap: 'trap' },
-      },
-      trap: {
-        prompt: 'Trap',
-        transitions: { wait: '$pause' },
+        transitions: { ready: '$done', handoff: 'choose' },
       },
     };
     raw.start = 'choose';
@@ -436,14 +428,10 @@ describe('when testing start actions', () => {
       3,
     );
 
-    expect(fixture.run).toBeUndefined();
-    expect(calls.persisted).toBe(0);
-    expect(command.notices.at(-1)?.message).toContain(
-      '/workflow-doctor example',
+    expect((fixture as unknown as HarnessActionContext).run?.status).toBe(
+      'running',
     );
-    expect(command.notices.at(-1)?.message).toContain(
-      'reachable step trap cannot reach $done',
-    );
+    expect(calls.persisted).toBe(1);
   });
 
   test('carries a configured tool budget into the signed child policy', () => {
@@ -540,7 +528,7 @@ describe('when testing start actions', () => {
       '/workspace/run',
     );
     completed = advanceRun(workflow, completed, 'ready', 'Inspected', 2);
-    completed = advanceRun(workflow, completed, 'done', 'Completed', 3);
+    completed = advanceRun(workflow, completed, 'ready', 'Completed', 3);
     fixture.run = completed as never;
 
     await actions.restartNow.call(

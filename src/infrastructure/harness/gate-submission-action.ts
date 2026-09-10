@@ -3,7 +3,6 @@ import type { WorkflowRun } from '../../domain/index.ts';
 import { validateArtifactContract } from '../../function/index.ts';
 import {
   attachGateReviewId,
-  advanceRun,
   beginGate,
   failGate,
   failRun,
@@ -70,27 +69,7 @@ async function submitGate(
     artifact,
     step.gate.artifactContract,
   );
-  if (contractError) {
-    if (step.gate.artifactContract?.onValidationFailure !== 'retry') {
-      throw new Error(contractError);
-    }
-    const retrySummary = `Artifact contract failed: ${contractError}`;
-    this.run = advanceRun(
-      workflow,
-      originalRun,
-      'retry',
-      retrySummary,
-      this.dependencies.now(),
-    );
-    this.persist();
-    this.updateStatus();
-    this.settleAfterTransition(workflow, {
-      stepId: originalRun.currentStepId,
-      outcome: 'retry',
-      summary: retrySummary,
-    });
-    return;
-  }
+  if (contractError) throw new Error(contractError);
 
   this.run = beginGate(
     workflow,

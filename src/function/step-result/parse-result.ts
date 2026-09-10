@@ -4,7 +4,6 @@ import {
   MAX_WORKSPACE_PATH_CHARS,
   RESULT_KEYS,
   type StepResultPolicy,
-  type WorkflowCheckpointProgress,
   type WorkflowHandoffInput,
   type WorkflowResultWorkspace,
   type WorkflowStepResult,
@@ -60,63 +59,19 @@ function parseItems(
   return items;
 }
 
-function parseHandoff(
-  value: Record<string, unknown>,
-  outcome: string,
-): WorkflowHandoffInput {
-  const state = parseText(value.state, 'state');
-  const completed = parseItems(
-    value.completed,
-    'completed',
-    isSpecificCompletedItem,
-  );
-  const remaining = parseItems(
-    value.remaining,
-    'remaining',
-    isSpecificRemainingItem,
-  );
-  const hasBlockedFields = ['question', 'action', 'next'].some(
-    (key) => value[key] !== undefined,
-  );
-  const hasRetryFields = ['transientFailure', 'retryWhen'].some(
-    (key) => value[key] !== undefined,
-  );
-
-  if (outcome === 'blocked') {
-    if (hasRetryFields)
-      throw new Error('workflow step blocked result has retry-only fields');
-    const question = parseText(value.question, 'question');
-    if (!question.endsWith('?')) {
-      throw new Error('workflow step blocked question must end in "?"');
-    }
-    return {
-      state,
-      completed,
-      remaining,
-      question,
-      action: parseText(value.action, 'action'),
-      next: parseText(value.next, 'next'),
-    };
-  }
-
-  if (outcome === 'retry') {
-    if (hasBlockedFields)
-      throw new Error('workflow step retry result has blocked-only fields');
-    return {
-      state,
-      completed,
-      remaining,
-      transientFailure: parseText(value.transientFailure, 'transientFailure'),
-      retryWhen: parseText(value.retryWhen, 'retryWhen'),
-    };
-  }
-
-  if (hasBlockedFields || hasRetryFields) {
-    throw new Error(
-      'workflow step result has outcome-incompatible handoff fields',
-    );
-  }
-  return { state, completed, remaining };
+function parseHandoff(value: Record<string, unknown>): WorkflowHandoffInput {
+  return {
+    completed: parseItems(
+      value.completed,
+      'completed',
+      isSpecificCompletedItem,
+    ),
+    remaining: parseItems(
+      value.remaining,
+      'remaining',
+      isSpecificRemainingItem,
+    ),
+  };
 }
 
 export function formatWorkflowStepSummary(
@@ -125,52 +80,12 @@ export function formatWorkflowStepSummary(
 ): string {
   const heading = outcome.charAt(0).toUpperCase() + outcome.slice(1);
   return [
-    `# ${heading}: ${handoff.state}`,
+    `# ${heading}`,
     '**Completed:**',
     ...handoff.completed.map((item) => `- ${item}`),
     '**Remaining:**',
     ...handoff.remaining.map((item) => `- ${item}`),
-    ...(handoff.question ? [`**Question:** ${handoff.question}`] : []),
-    ...(handoff.action ? [`**Action:** ${handoff.action}`] : []),
-    ...(handoff.next ? [`**Next:** ${handoff.next}`] : []),
-    ...(handoff.transientFailure
-      ? [`**Transient failure:** ${handoff.transientFailure}`]
-      : []),
-    ...(handoff.retryWhen ? [`**Retry when:** ${handoff.retryWhen}`] : []),
   ].join('\n');
-}
-
-function parseCheckpointProgress(
-  value: unknown,
-  outcome: string,
-): WorkflowCheckpointProgress | undefined {
-  if (outcome !== 'checkpoint') return undefined;
-  if (!isObject(value)) throw new Error('checkpoint outcome requires progress');
-  const { feature, commit, changedFiles, verification, remaining } = value;
-  if (
-    typeof feature !== 'string' ||
-    !feature.trim() ||
-    typeof commit !== 'string' ||
-    !commit.trim() ||
-    !Array.isArray(changedFiles) ||
-    changedFiles.length === 0 ||
-    !changedFiles.every((item) => typeof item === 'string' && item) ||
-    !Array.isArray(verification) ||
-    verification.length === 0 ||
-    !verification.every((item) => typeof item === 'string' && item) ||
-    !Array.isArray(remaining) ||
-    !remaining.every((item) => typeof item === 'string' && item)
-  )
-    throw new Error(
-      'checkpoint progress must identify feature, commit, changed files, verification, and remaining work',
-    );
-  return {
-    feature: feature.trim(),
-    commit: commit.trim(),
-    changedFiles,
-    verification,
-    remaining,
-  };
 }
 
 function parseResultWorkspace(
@@ -178,7 +93,8 @@ function parseResultWorkspace(
   outcome: string,
   policy: StepResultPolicy,
 ): WorkflowResultWorkspace | undefined {
-  const requiresWorkspace = policy.workspace?.bindOn.includes(outcome) === true;
+  const requiresWorkspace =
+    policy.workspace !== undefined && outcome === 'ready';
   if (!requiresWorkspace) {
     if (value !== undefined)
       throw new Error('workflow step workspace is forbidden for this outcome');
@@ -230,7 +146,26 @@ export function parseWorkflowStepResult(
     );
   }
 
-  const handoff = parseHandoff(value, value.outcome);
+  const handoff = parseHandoff(value);
+  if (
+    value.outcome === 'ready' &&
+    (handoff.remaining.length !== 1 ||
+      handoff.remaining[0] !== 'No active-step work remains.')
+  ) {
+    throw new Error('ready result must have no active-step work remaining');
+  }
+  if (
+    value.outcome === 'blocked' &&
+    !handoff.remaining.some((item) => item.endsWith('?'))
+  ) {
+    throw new Error('blocked result must include a user question in remaining');
+  }
+  if (
+    (value.outcome === 'handoff' || value.outcome === 'gaps') &&
+    handoff.remaining.some((item) => item.endsWith('?'))
+  ) {
+    throw new Error(`${value.outcome} result must not include a user question`);
+  }
   const summary = formatWorkflowStepSummary(value.outcome, handoff);
   if (summary.length > policy.summaryMaxChars) {
     throw new Error(
@@ -247,10 +182,7 @@ export function parseWorkflowStepResult(
       `workflow step artifact exceeds ${MAX_ARTIFACT_CHARS} characters`,
     );
   }
-  if (
-    value.outcome === policy.gateSubmitOutcome &&
-    (!artifact || !artifact.trim())
-  ) {
+  if (policy.gateSubmitOutcome === 'ready' && (!artifact || !artifact.trim())) {
     throw new Error('workflow gate outcome requires a non-empty artifact');
   }
   const workspace = parseResultWorkspace(
@@ -258,7 +190,6 @@ export function parseWorkflowStepResult(
     value.outcome,
     policy,
   );
-  const progress = parseCheckpointProgress(value.progress, value.outcome);
   return {
     version: 1,
     policyDigest: policy.policyDigest,
@@ -266,6 +197,5 @@ export function parseWorkflowStepResult(
     summary,
     ...(artifact !== undefined ? { artifact } : {}),
     ...(workspace ? { workspace } : {}),
-    ...(progress ? { progress } : {}),
   };
 }

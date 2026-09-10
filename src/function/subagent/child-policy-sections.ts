@@ -80,7 +80,10 @@ const parseOutcomes = (
   if (
     !isStringArray(outcomes) ||
     outcomes.length === 0 ||
-    new Set(outcomes).size !== outcomes.length
+    new Set(outcomes).size !== outcomes.length ||
+    outcomes.some(
+      (outcome) => !['ready', 'blocked', 'handoff', 'gaps'].includes(outcome),
+    )
   ) {
     throw new Error('child policy outcomes are invalid');
   }
@@ -88,7 +91,9 @@ const parseOutcomes = (
   if (
     !isStringArray(pauseOutcomes) ||
     new Set(pauseOutcomes).size !== pauseOutcomes.length ||
-    pauseOutcomes.some((outcome) => !outcomes.includes(outcome))
+    pauseOutcomes.some(
+      (outcome) => outcome !== 'blocked' || !outcomes.includes(outcome),
+    )
   ) {
     throw new Error('child policy pause outcomes are invalid');
   }
@@ -105,6 +110,7 @@ const parseOutcomes = (
   if (
     gateSubmitOutcome !== undefined &&
     (typeof gateSubmitOutcome !== 'string' ||
+      gateSubmitOutcome !== 'ready' ||
       !outcomes.includes(gateSubmitOutcome))
   ) {
     throw new Error('child policy gate outcome is invalid');

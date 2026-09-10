@@ -105,13 +105,11 @@ context; the YAML rule only defines executable scope.
 flowchart TD
   Complete[completion params] --> Outcome{outcome in policy.outcomes?}
   Outcome -- no --> Reject[throw]
-  Outcome -- yes --> Handoff{state, completed, and remaining plain and specific?}
+  Outcome -- yes --> Handoff{completed and remaining plain and specific?}
   Handoff -- no --> Reject
-  Handoff -- yes --> BlockedOutcome{outcome is blocked?}
-  BlockedOutcome -- no --> Gate{outcome is gateSubmitOutcome?}
-  BlockedOutcome -- yes --> BlockedFields{question/action/next present?}
-  BlockedFields -- no --> Reject
-  BlockedFields -- yes --> Gate
+  Handoff -- yes --> Semantics{outcome-specific remaining rules hold?}
+  Semantics -- no --> Reject
+  Semantics -- yes --> Gate{outcome is ready on a gated step?}
   Gate -- yes --> Artifact{artifact non-empty?}
   Artifact -- no --> Reject
   Artifact -- yes --> Summary[format compact summary]
@@ -126,13 +124,13 @@ flowchart TD
 For a delegated step, pi-subagents 0.36 supplies `structured_output`; for a
 main-agent step, the harness registers `workflow_complete_step`. Both paths
 feed the same outcome, typed handoff fields, artifact, sole-call, and
-policy-digest validation. Completion payloads provide plain-text `state`,
-`completed`, and `remaining` fields; the parser rejects placeholder, generic,
-Markdown-formatted, and outcome-incompatible fields before formatting the
-persisted compact summary. `blocked` payloads must also provide `question`,
-`action`, and `next`; `retry` payloads must instead provide `transientFailure`
-and `retryWhen`. The
-workflow step permissions become the sole active-tool allow-list after the
+policy-digest validation. Completion payloads contain `outcome`, plain-text
+`completed`, and `remaining` only; the extension generates persisted Markdown.
+The permitted outcomes are `ready`, `blocked`, `handoff`, and `gaps`. `ready`
+requires the exact remaining item `No active-step work remains.`; `blocked`
+requires a user question ending in `?`; `handoff` is non-question active work
+for the same step; and `gaps` carries non-question requirements for a configured
+earlier step. The workflow step permissions become the sole active-tool allow-list after the
 child capability is verified. The selected workflow `agent` profile supplies
 role instructions plus optional model/thinking overrides; unavailable tools or
 extension providers fail closed.

@@ -23,7 +23,7 @@ describe('starter-kit sanitization', () => {
     }
   });
 
-  test('configures bounded retrying artifact contracts for every gated workflow', async () => {
+  test('configures ready-gated artifact contracts for every gated workflow', async () => {
     const glob = new Bun.Glob('*.workflow.yaml');
     for await (const path of glob.scan({ cwd: root, onlyFiles: true })) {
       const workflow = YAML.parse(await readFile(join(root, path), 'utf8')) as {
@@ -40,8 +40,8 @@ describe('starter-kit sanitization', () => {
         const contract = step.gate.artifactContract;
         expect(contract).toBeDefined();
         expect(contract?.maxChars).toEqual(expect.any(Number));
-        expect(contract?.onValidationFailure).toBe('retry');
-        expect(step.transitions.retry).toBeDefined();
+        expect(step.transitions.ready).toBeDefined();
+        expect(step.transitions.handoff).toBeDefined();
       }
     }
   });

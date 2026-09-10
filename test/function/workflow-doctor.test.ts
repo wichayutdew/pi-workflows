@@ -3,6 +3,7 @@ import {
   analyzeWorkflow,
   formatWorkflowDoctor,
 } from '../../src/function/doctor/workflow-doctor.ts';
+import type { WorkflowDefinition } from '../../src/domain/index.ts';
 import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
 
 describe('when diagnosing workflow liveness', () => {
@@ -27,11 +28,11 @@ describe('when diagnosing workflow liveness', () => {
       },
       unused: {
         prompt: 'Unused',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       },
     };
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(report.issues).toMatchObject([
       {
@@ -71,13 +72,13 @@ describe('when diagnosing workflow liveness', () => {
     steps.inspect = {
       ...steps.inspect,
       transitions: {
-        retry: 'inspect',
+        handoff: 'inspect',
         ready: 'implement',
         blocked: '$pause',
       },
     };
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(report.issues).toMatchObject([
       {
@@ -100,7 +101,7 @@ describe('when diagnosing workflow liveness', () => {
       },
       finish: {
         prompt: 'Finish',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       },
       trap: {
         prompt: 'Trap',
@@ -109,7 +110,7 @@ describe('when diagnosing workflow liveness', () => {
     };
     raw.start = 'choose';
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(
       report.issues.some((issue) => issue.code === 'no-completion-path'),
@@ -128,7 +129,7 @@ describe('when diagnosing workflow liveness', () => {
     raw.steps = {
       finish: {
         prompt: 'Finish',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       },
       zeta: {
         prompt: 'Zeta',
@@ -141,7 +142,7 @@ describe('when diagnosing workflow liveness', () => {
     };
     raw.start = 'finish';
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
     const cycle = report.issues.find((issue) => issue.code === 'cycle');
 
     expect(cycle).toMatchObject({
@@ -159,11 +160,11 @@ describe('when diagnosing workflow liveness', () => {
     first.steps = {
       start: {
         prompt: 'Start',
-        transitions: { retry: 'start', finish: 'finish' },
+        transitions: { handoff: 'start', finish: 'finish' },
       },
       finish: {
         prompt: 'Finish',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       },
       unused: {
         prompt: 'Unused',
@@ -179,16 +180,16 @@ describe('when diagnosing workflow liveness', () => {
       },
       finish: {
         prompt: 'Finish',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       },
       start: {
         prompt: 'Start',
-        transitions: { finish: 'finish', retry: 'start' },
+        transitions: { finish: 'finish', handoff: 'start' },
       },
     };
 
-    expect(analyzeWorkflow(loadedWorkflow(first).definition)).toEqual(
-      analyzeWorkflow(loadedWorkflow(reordered).definition),
+    expect(analyzeWorkflow(first as unknown as WorkflowDefinition)).toEqual(
+      analyzeWorkflow(reordered as unknown as WorkflowDefinition),
     );
   });
 });

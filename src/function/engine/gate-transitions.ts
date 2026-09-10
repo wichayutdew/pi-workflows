@@ -248,6 +248,7 @@ export const resolveGate = (
     {},
     {
       sameStepHumanGateRevision: isSameStepHumanRevision,
+      gateResolution: true,
     },
   );
   const completedApprovedGate =

@@ -52,7 +52,7 @@ export default function e2eFauxPlannotator(pi: ExtensionAPI): void {
     setTimeout(() => {
       pi.events.emit(PLANNOTATOR_RESULT_CHANNEL, {
         reviewId,
-        approved: currentIteration === 2,
+        ready: currentIteration === 2,
         feedback:
           currentIteration === 1 ? E2E_GATE_FEEDBACK : 'Approved in E2E',
       });

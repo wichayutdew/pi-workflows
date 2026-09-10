@@ -45,7 +45,7 @@ describe('when testing engine', () => {
       expect(run.currentStepId).toBe('implement');
       expect(run.history.length).toBe(1);
 
-      run = advanceRun(workflow, run, 'done', 'implemented', 3);
+      run = advanceRun(workflow, run, 'ready', 'ready', 3);
       expect(run.status).toBe('completed');
       expect(run.history.length).toBe(2);
     });
@@ -115,7 +115,7 @@ describe('when testing engine', () => {
         ...steps.implement,
         prompt: 'Implement {{last.summary}}',
         transitions: {
-          done: '$done',
+          ready: '$done',
           blocked: '$pause',
         },
       };
@@ -165,13 +165,10 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: '$done',
-            rejected: 'plan',
+            ready: '$done',
+            handoff: 'plan',
           },
         },
       };
@@ -181,7 +178,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan',
         'request-1',
         2,
@@ -214,13 +211,10 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: '$done',
-            rejected: 'plan',
+            ready: '$done',
+            handoff: 'plan',
           },
         },
       };
@@ -230,7 +224,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan',
         'request-2',
         2,
@@ -282,14 +276,10 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'changes-requested',
           },
           transitions: {
-            approved: '$done',
-            'changes-requested': 'plan',
-            retry: 'plan',
+            ready: '$done',
+            handoff: 'plan',
           },
         },
       };
@@ -313,7 +303,7 @@ describe('when testing engine', () => {
         run = beginGate(
           workflow,
           run,
-          'submit',
+          'ready',
           `# Plan v${round}`,
           `request-${round}`,
           ++now,
@@ -345,7 +335,7 @@ describe('when testing engine', () => {
           run = advanceRun(
             workflow,
             run,
-            'retry',
+            'handoff',
             'Transient planning dependency failed',
             ++now,
           );
@@ -366,7 +356,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan v3',
         'request-3',
         ++now,
@@ -383,9 +373,9 @@ describe('when testing engine', () => {
       expect(run.status).toBe('completed');
       expect(run.visits.plan).toBe(4);
       expect(run.history.slice(-3).map((entry) => entry.outcome)).toEqual([
-        'retry',
-        'changes-requested',
-        'approved',
+        'handoff',
+        'handoff',
+        'ready',
       ]);
       expect(run.reviewedArtifact).toBe('# Plan v3');
       expect(run.gateArtifact).toBe('');
@@ -405,13 +395,10 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: '$done',
-            rejected: 'plan',
+            ready: '$done',
+            handoff: 'plan',
           },
         },
       };
@@ -421,7 +408,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan',
         'request-handoff',
         2,
@@ -493,14 +480,10 @@ describe('when testing engine', () => {
           prompt: 'Plan',
           gate: {
             provider: 'prompt',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: '$pause',
-            rejected: '$pause',
-            finish: '$done',
+            ready: '$done',
+            handoff: 'plan',
           },
         },
       };
@@ -509,7 +492,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Approved but incomplete plan',
         'paused-approval-request',
         2,
@@ -523,11 +506,11 @@ describe('when testing engine', () => {
         3,
       );
 
-      expect(run.status).toBe('paused');
+      expect(run.status).toBe('completed');
       expect(run.currentStepId).toBe('plan');
-      expect(run.history).toEqual([]);
-      expect(run.reviewedArtifact).toBe('');
-      expect(run.reviewedFeedback).toBe('');
+      expect(run.history).toHaveLength(1);
+      expect(run.reviewedArtifact).toBe('# Approved but incomplete plan');
+      expect(run.reviewedFeedback).toBe('Approved');
       expect(isWorkflowRun(run)).toBe(true);
       expect(reconcileRun(run, workflow, 4)).toEqual({
         run,
@@ -545,20 +528,17 @@ describe('when testing engine', () => {
           requires: { extensions: ['plannotator'] },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: 'implement',
-            rejected: 'plan',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            revise: 'plan',
-            done: '$done',
+            gaps: 'plan',
+            ready: '$done',
           },
         },
       };
@@ -575,7 +555,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         artifact,
         'request-first-review',
         2,
@@ -593,7 +573,7 @@ describe('when testing engine', () => {
       run = advanceRun(
         workflow,
         run,
-        'revise',
+        'gaps',
         'Revise the user-defined artifact',
         4,
       );
@@ -606,7 +586,7 @@ describe('when testing engine', () => {
       run = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         'a completely different user-defined format',
         'request-second-review',
         5,
@@ -632,19 +612,16 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: 'implement',
-            rejected: 'plan',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            done: '$done',
+            ready: '$done',
           },
         },
       };
@@ -655,7 +632,7 @@ describe('when testing engine', () => {
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         artifact,
         'request-rewind',
         2,
@@ -667,7 +644,7 @@ describe('when testing engine', () => {
         { approved: true, feedback: '', resolvedAt: 3 },
         3,
       );
-      run = advanceRun(original, run, 'done', 'implemented', 4);
+      run = advanceRun(original, run, 'ready', 'ready', 4);
 
       const changedRaw = structuredClone(raw);
       const changedSteps = changedRaw.steps as Record<
@@ -694,20 +671,16 @@ describe('when testing engine', () => {
       raw.steps = {
         plan: {
           prompt: 'Plan',
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
-          },
+          gate: {},
           transitions: {
-            approved: 'implement',
-            rejected: 'plan',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            done: '$done',
+            ready: '$done',
           },
         },
       };
@@ -718,7 +691,7 @@ describe('when testing engine', () => {
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         artifact,
         'approval-pair-review',
         2,
@@ -730,7 +703,7 @@ describe('when testing engine', () => {
         { approved: true, feedback, resolvedAt: 3 },
         3,
       );
-      run = advanceRun(original, run, 'done', 'Implemented', 4);
+      run = advanceRun(original, run, 'ready', 'Implemented', 4);
 
       const retainedRaw = structuredClone(raw);
       const retainedSteps = retainedRaw.steps as Record<
@@ -749,14 +722,10 @@ describe('when testing engine', () => {
       >;
       invalidatedSteps.plan = {
         ...invalidatedSteps.plan,
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'accepted',
-          rejectedOutcome: 'rejected',
-        },
+        gate: {},
         transitions: {
-          accepted: 'implement',
-          rejected: 'plan',
+          ready: 'implement',
+          handoff: 'plan',
         },
       };
 
@@ -767,8 +736,8 @@ describe('when testing engine', () => {
       // then
       expect(retained.run?.reviewedArtifact).toBe(artifact);
       expect(retained.run?.reviewedFeedback).toBe(feedback);
-      expect(invalidated.run?.reviewedArtifact).toBe('');
-      expect(invalidated.run?.reviewedFeedback).toBe('');
+      expect(invalidated.run?.reviewedArtifact).toBe(artifact);
+      expect(invalidated.run?.reviewedFeedback).toBe(feedback);
     });
 
     test('configuration rewind restores feedback from the retained approval when artifacts are identical', () => {
@@ -778,38 +747,30 @@ describe('when testing engine', () => {
       raw.steps = {
         'gate-a': {
           prompt: 'First gate',
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
-          },
+          gate: {},
           transitions: {
-            approved: 'middle',
-            rejected: '$pause',
+            ready: 'middle',
+            handoff: 'gate-a',
           },
         },
         middle: {
           prompt: 'Middle',
           transitions: {
-            done: 'gate-b',
+            ready: 'gate-b',
           },
         },
         'gate-b': {
           prompt: 'Second gate',
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
-          },
+          gate: {},
           transitions: {
-            approved: 'implement',
-            rejected: '$pause',
+            ready: 'implement',
+            handoff: 'gate-b',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            done: '$done',
+            ready: '$done',
           },
         },
       };
@@ -819,7 +780,7 @@ describe('when testing engine', () => {
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         artifact,
         'first-review',
         2,
@@ -831,11 +792,11 @@ describe('when testing engine', () => {
         { approved: true, feedback: 'first feedback', resolvedAt: 3 },
         3,
       );
-      run = advanceRun(original, run, 'done', 'Middle complete', 4);
+      run = advanceRun(original, run, 'ready', 'Middle complete', 4);
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         artifact,
         'second-review',
         5,
@@ -881,7 +842,7 @@ describe('when testing engine', () => {
       // given
       const original = loadedWorkflow();
       let run = createRun(original, '', ['read'], 'run-5', 1);
-      run = advanceRun(original, run, 'ready', 'done', 2);
+      run = advanceRun(original, run, 'ready', 'ready', 2);
 
       const changedRaw = baseWorkflow();
       const steps = changedRaw.steps as Record<string, Record<string, unknown>>;
@@ -908,19 +869,16 @@ describe('when testing engine', () => {
           requires: { extensions: ['plannotator'] },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: 'implement',
-            rejected: 'plan',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            done: '$done',
+            ready: '$done',
             blocked: '$pause',
           },
         },
@@ -931,7 +889,7 @@ describe('when testing engine', () => {
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         artifact,
         'review-request',
         2,
@@ -991,25 +949,22 @@ describe('when testing engine', () => {
           },
           gate: {
             provider: 'prompt',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: 'implement',
-            rejected: '$pause',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
           transitions: {
-            done: '$done',
+            ready: '$done',
           },
         },
         audit: {
           prompt: 'Audit',
           transitions: {
-            done: '$done',
+            ready: '$done',
           },
         },
       };
@@ -1018,7 +973,7 @@ describe('when testing engine', () => {
       run = beginGate(
         original,
         run,
-        'submit',
+        'ready',
         'approved artifact',
         'structural-review',
         2,
@@ -1039,8 +994,8 @@ describe('when testing engine', () => {
       approvedTargetSteps.plan = {
         ...approvedTargetSteps.plan,
         transitions: {
-          approved: 'audit',
-          rejected: '$pause',
+          ready: 'audit',
+          handoff: 'plan',
         },
       };
 
@@ -1053,9 +1008,6 @@ describe('when testing engine', () => {
         ...providerSteps.plan,
         gate: {
           provider: 'plannotator',
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'rejected',
         },
       };
 
@@ -1068,13 +1020,16 @@ describe('when testing engine', () => {
         ...gateConfigSteps.plan,
         gate: {
           provider: 'prompt',
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'changes-requested',
+          artifactContract: {
+            maxChars: 1_000,
+            requiredSubstrings: [],
+            forbiddenSubstrings: [],
+            equalOccurrenceGroups: [],
+          },
         },
         transitions: {
-          approved: 'implement',
-          'changes-requested': '$pause',
+          ready: 'implement',
+          handoff: 'plan',
         },
       };
 
@@ -1143,14 +1098,14 @@ describe('when testing engine', () => {
       const steps = raw.steps as Record<string, Record<string, unknown>>;
       steps.implement = {
         ...steps.implement,
-        transitions: { retry: 'implement' },
+        transitions: { handoff: 'implement' },
       };
       const workflow = loadedWorkflow(raw);
       let run = createRun(workflow, '', [], 'visit-limit', 1);
       run = advanceRun(workflow, run, 'ready', 'ready', 2);
 
       // when
-      run = advanceRun(workflow, run, 'retry', 'retry', 3);
+      run = advanceRun(workflow, run, 'handoff', 'handoff', 3);
 
       // then
       expect(run.status).toBe('paused');
@@ -1232,7 +1187,7 @@ describe('when testing engine', () => {
       const completed = advanceRun(
         workflow,
         afterInspect,
-        'done',
+        'ready',
         'Implemented',
         3,
       );
@@ -1290,18 +1245,15 @@ describe('when testing engine', () => {
           prompt: 'Plan',
           gate: {
             provider: 'prompt',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
           transitions: {
-            approved: 'implement',
-            rejected: 'plan',
+            ready: 'implement',
+            handoff: 'plan',
           },
         },
         implement: {
           prompt: 'Implement',
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
       };
       const workflow = loadedWorkflow(raw);
@@ -1309,7 +1261,7 @@ describe('when testing engine', () => {
       approved = beginGate(
         workflow,
         approved,
-        'submit',
+        'ready',
         '# Approved plan',
         'approval-request',
         2,
@@ -1367,7 +1319,7 @@ describe('when testing engine', () => {
       };
       originalSteps.verify = {
         prompt: 'Verify',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       };
       const original = loadedWorkflow(originalRaw);
       let run = createRun(original, '', [], 'removed-suffix', 1);
@@ -1382,7 +1334,7 @@ describe('when testing engine', () => {
         },
         replacement: {
           prompt: 'Replacement',
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
       };
       const reconciled = reconcileRun(run, loadedWorkflow(changedRaw), 4);
@@ -1404,11 +1356,8 @@ describe('when testing engine', () => {
           requires: { extensions: ['plannotator'] },
           gate: {
             provider: 'plannotator',
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
           },
-          transitions: { approved: '$done', rejected: 'plan' },
+          transitions: { ready: '$done', handoff: 'plan' },
         },
       };
       raw.start = 'plan';
@@ -1426,7 +1375,7 @@ describe('when testing engine', () => {
         advanceRun(
           workflow,
           { ...run, status: 'paused', pausedFrom: 'running' },
-          'approved',
+          'ready',
           '',
           2,
         ),
@@ -1435,12 +1384,12 @@ describe('when testing engine', () => {
         advanceRun(
           workflow,
           { ...run, currentStepId: 'missing' },
-          'approved',
+          'ready',
           '',
           2,
         ),
       ).toThrow(/no longer exists/);
-      expect(() => advanceRun(workflow, run, 'submit', '', 2)).toThrow(
+      expect(() => advanceRun(workflow, run, 'ready', '', 2)).toThrow(
         /configured gate/,
       );
       expect(() => advanceRun(workflow, run, 'unknown', '', 2)).toThrow(
@@ -1450,7 +1399,7 @@ describe('when testing engine', () => {
         beginGate(
           workflow,
           run,
-          'approved',
+          'unknown',
           '# Plan',
           'request-1',
           2,
@@ -1458,19 +1407,19 @@ describe('when testing engine', () => {
         ),
       ).toThrow(/expects outcome/);
       expect(() =>
-        beginGate(workflow, run, 'submit', ' ', 'request-1', 2, 'Plan ready'),
+        beginGate(workflow, run, 'ready', ' ', 'request-1', 2, 'Plan ready'),
       ).toThrow(/non-empty artifact/);
       expect(() =>
-        beginGate(workflow, run, 'submit', '# Plan', 'request-1', 2, ' '),
+        beginGate(workflow, run, 'ready', '# Plan', 'request-1', 2, ' '),
       ).toThrow(/non-empty summary/);
       expect(() =>
-        beginGate(workflow, run, 'submit', '# Plan', '', 2, 'Plan ready'),
+        beginGate(workflow, run, 'ready', '# Plan', '', 2, 'Plan ready'),
       ).toThrow(/request id/);
       expect(() =>
         beginGate(
           workflow,
           { ...run, status: 'completed' },
-          'submit',
+          'ready',
           '# Plan',
           'request-1',
           2,
@@ -1492,7 +1441,7 @@ describe('when testing engine', () => {
       const pending = beginGate(
         workflow,
         run,
-        'submit',
+        'ready',
         '# Plan',
         'request-1',
         2,
@@ -1603,7 +1552,7 @@ describe('when testing engine', () => {
             requestId: 'request-4',
             stepId: 'inspect',
             artifact: '# Plan',
-            submittedOutcome: 'submit',
+            submittedOutcome: 'ready',
             requestedAt: 2,
             reviewId: 'review-1',
             resolution: null,
@@ -1619,14 +1568,10 @@ describe('when testing engine', () => {
       gatedRaw.steps = {
         inspect: {
           prompt: 'Inspect',
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'approved',
-            rejectedOutcome: 'rejected',
-          },
+          gate: {},
           transitions: {
-            approved: '$done',
-            rejected: 'inspect',
+            ready: '$done',
+            handoff: 'inspect',
           },
         },
       };
@@ -1634,7 +1579,7 @@ describe('when testing engine', () => {
       const awaiting = beginGate(
         gatedWorkflow,
         createRun(gatedWorkflow, '', [], 'valid-gate', 1),
-        'submit',
+        'ready',
         'artifact',
         'request-valid',
         2,

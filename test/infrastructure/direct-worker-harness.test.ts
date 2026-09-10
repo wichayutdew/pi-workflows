@@ -75,9 +75,9 @@ describe('when running a workflow through a direct Pi worker', () => {
         result = JSON.stringify({
           version: 1,
           policyDigest: policy.policy.policyDigest,
-          outcome: 'done',
+          outcome: 'ready',
           summary:
-            '# Done: Worker completed the step.\n**Completed:**\n- Completed the delegated work in `src/example.ts`.\n**Remaining:**\n- None; workflow is complete.',
+            '# Ready\n**Completed:**\n- Completed the delegated work in `src/example.ts`.\n**Remaining:**\n- No active-step work remains.',
         });
         return {
           requestId: request.requestId,
@@ -182,7 +182,7 @@ describe('when running a workflow through a direct Pi worker', () => {
           '    requires:',
           '      tools: [read]',
           '    transitions:',
-          '      done: $done',
+          '      ready: $done',
         ].join('\n'),
       );
       new WorkflowHarness(pi, 'ctrl+alt+w', dependencies);

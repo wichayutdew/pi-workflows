@@ -11,9 +11,8 @@ import { WORKFLOW_COMPLETION_TOOL } from '../../src/infrastructure/runtime/compl
 
 describe('when testing main step runtime', () => {
   const doneSummary =
-    '# Done: Implementation is complete.\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- No active-step work remains.';
+    '# Ready\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- No active-step work remains.';
   const doneHandoff = {
-    state: 'Implementation is complete.',
     completed: ['Implemented `src/example.ts` and ran `bun test`.'],
     remaining: ['No active-step work remains.'],
   };
@@ -69,9 +68,9 @@ describe('when testing main step runtime', () => {
         stepDigest: 'step-digest',
         policyDigest: 'policy-digest',
         task: 'Do exact work',
-        outcomes: ['done'],
+        outcomes: ['ready'],
         summaryMaxChars: 1_000,
-        workspace: { bindOn: ['done'], allowedRoots: ['.'] },
+        workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         step: {
           title: 'Step',
           prompt: { inline: 'Do work' },
@@ -83,8 +82,8 @@ describe('when testing main step runtime', () => {
             bash: { mode: 'deny', allow: [] },
           },
           requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
-          workspace: { bindOn: ['done'], allowedRoots: ['.'] },
+          transitions: { ready: '$done' },
+          workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         },
         onTrace: () => undefined,
         onSettled: (result) => {
@@ -135,19 +134,19 @@ describe('when testing main step runtime', () => {
         }),
       ).toBe(undefined);
       const result = await completion!.execute('complete-1', {
-        outcome: 'done',
+        outcome: 'ready',
         ...doneHandoff,
         workspace: { cwd: '/tmp/worktree' },
       });
       expect(result).toEqual({
         content: [
-          { type: 'text', text: 'Captured workflow step outcome "done".' },
+          { type: 'text', text: 'Captured workflow step outcome "ready".' },
         ],
         details: {
           workflowId: 'workflow',
           runId: 'run',
           stepId: 'step',
-          outcome: 'done',
+          outcome: 'ready',
         },
         terminate: true,
       });
@@ -156,7 +155,7 @@ describe('when testing main step runtime', () => {
         {
           version: 1,
           policyDigest: 'policy-digest',
-          outcome: 'done',
+          outcome: 'ready',
           summary: doneSummary,
           workspace: { cwd: '/tmp/worktree' },
         },
@@ -258,7 +257,7 @@ describe('when testing main step runtime', () => {
             bash: { mode: 'deny', allow: [] },
           },
           requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
         onTrace: (lines, _context, usage) => {
           turns.push(lines);
@@ -482,7 +481,7 @@ describe('when testing main step runtime', () => {
             bash: { mode: 'deny', allow: [] },
           },
           requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
         onTrace: () => undefined,
         onSettled: () => undefined,

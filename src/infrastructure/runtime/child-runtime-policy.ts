@@ -30,25 +30,35 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     'Perform only this delegated step. Its child-side tool policy is enforced.',
     'Do not launch subagents while executing this declarative workflow step.',
     'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
-    'Use `retry` only for a transient failure that can be retried without new user input.',
+    'Use `handoff` when actionable work remains without a user question; use `gaps` when an earlier configured step must refresh requirements.',
     'Do not open a skill unless this step YAML lists that skill.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
-    'Pass the workflow result as its `value`: outcome, state, completed, remaining, optional outcome-specific fields, artifact, and workspace only when required below.',
+    'Pass the workflow result as its `value`: outcome, completed, remaining, plus artifact or workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     "Evaluate completion and choose an outcome using only this delegated step's instructions.",
     'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
     'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
-    'For every outcome, provide plain-text `state`, `completed`, and `remaining` fields; each completed item must cite a concrete path, command, identifier, or user decision. Do not use Markdown, list markers, or placeholders.',
-    ...(policy.outcomes.includes('blocked')
+    'For every outcome, provide only plain-text `completed` and `remaining` fields; each completed item must cite a concrete path, command, identifier, or user decision. Do not use Markdown, list markers, placeholders, or extra handoff fields.',
+    ...(policy.outcomes.includes('ready')
       ? [
-          'For `blocked`, also provide plain-text `question` ending in `?`, `action`, and `next` fields.',
+          'For `ready`, remaining must be exactly `No active-step work remains.`.',
         ]
       : []),
-    ...(policy.outcomes.includes('retry')
+    ...(policy.outcomes.includes('blocked')
       ? [
-          'For `retry`, also provide plain-text `transientFailure` and `retryWhen` fields.',
+          'For `blocked`, include at least one user question ending in `?` in remaining.',
+        ]
+      : []),
+    ...(policy.outcomes.includes('handoff')
+      ? [
+          'For `handoff`, remaining must be non-question actionable work for this step.',
+        ]
+      : []),
+    ...(policy.outcomes.includes('gaps')
+      ? [
+          'For `gaps`, remaining must be non-question actionable requirements for the configured earlier step.',
         ]
       : []),
     ...(policy.maxToolCalls === undefined
@@ -70,8 +80,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
       : []),
     ...(policy.workspace
       ? [
-          `Workspace-binding outcomes: ${policy.workspace.bindOn.join(', ')}`,
-          `For those outcomes, include workspace.cwd as an absolute directory under one allowed root relative to the run-start directory: ${policy.workspace.allowedRoots.join(', ')}`,
+          `For the ready outcome, include workspace.cwd as an absolute directory under one allowed root relative to the run-start directory: ${policy.workspace.allowedRoots.join(', ')}`,
           'For every other outcome, omit workspace.',
         ]
       : ['This step cannot bind a workspace; omit workspace.']),

@@ -83,7 +83,7 @@ describe('when testing prompt', () => {
       ).toBe('Hello Pi ');
       const mainTask = buildMainStepTask(workflow, run);
       expect(mainTask).toMatch(/Main-agent declarative workflow step/);
-      expect(mainTask).not.toContain('No active-step work remains.');
+      expect(mainTask).toContain('No active-step work remains.');
       expect(buildDelegatedStepTask(workflow, run, 'policy envelope')).toMatch(
         /policy envelope/,
       );
@@ -150,7 +150,7 @@ describe('when testing prompt', () => {
       );
       expect(delegatedTask).toContain('## Human-readable non-success results');
       expect(delegatedTask).toContain(
-        'Use plain-text `state`, `completed`, and `remaining` fields. Do not include Markdown, headings, or list markers.',
+        'Use only plain-text `completed` and `remaining` fields. Do not include Markdown, headings, list markers, or additional handoff fields.',
       );
       expect(delegatedTask).toContain(
         'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes',
@@ -316,8 +316,8 @@ describe('when testing prompt', () => {
         ...recoverableSteps.inspect,
         agent: 'scout',
         transitions: {
-          retry: 'inspect',
-          replan: 'inspect',
+          ready: '$done',
+          handoff: 'inspect',
           blocked: '$pause',
         },
       };
@@ -329,10 +329,10 @@ describe('when testing prompt', () => {
         'policy envelope',
       );
       expect(recoverableTask).toContain(
-        'Valid outcomes: retry, replan, blocked',
+        'Valid outcomes: ready, handoff, blocked',
       );
-      expect(recoverableTask).toContain('- retry: inspect');
-      expect(recoverableTask).toContain('- replan: inspect');
+      expect(recoverableTask).toContain('- handoff: inspect');
+      expect(recoverableTask).toContain('- ready: $done');
       expect(recoverableTask).toContain('- blocked: $pause');
       expect(recoverableTask).not.toMatch(
         /execution contract remains valid|recovery requires a material change|permitted alternatives/i,
@@ -348,13 +348,10 @@ describe('when testing prompt', () => {
         agent: 'planner',
         gate: {
           provider: 'plannotator',
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'changes-requested',
         },
         transitions: {
-          approved: 'implement',
-          'changes-requested': 'inspect',
+          ready: 'implement',
+          handoff: 'inspect',
           blocked: '$pause',
         },
       };
@@ -365,7 +362,7 @@ describe('when testing prompt', () => {
         'policy envelope',
       );
       expect(gatedTask).toContain(
-        '- submit: submit the artifact to plannotator; include the full artifact argument',
+        '- ready: submit the artifact to plannotator; include the full artifact argument',
       );
       expect(gatedTask).not.toMatch(
         /decision-ready|machine-readable contract|review focus|caveman/i,
@@ -378,7 +375,7 @@ describe('when testing prompt', () => {
         createRun(mainGatedWorkflow, '', [], 'run-main-gated', 1),
       );
       expect(mainGatedTask).toContain(
-        '- submit: submit the artifact to plannotator; include the full artifact argument',
+        '- ready: submit the artifact to plannotator; include the full artifact argument',
       );
       expect(mainGatedTask).not.toMatch(/decision-ready/i);
       expect(mainGatedTask).toContain(
@@ -395,7 +392,7 @@ describe('when testing prompt', () => {
       noPauseSteps.inspect = {
         ...noPauseSteps.inspect,
         agent: 'worker',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       };
       delete noPauseSteps.implement;
       const noPauseWorkflow = loadedWorkflow(noPauseRaw);
@@ -411,7 +408,7 @@ describe('when testing prompt', () => {
         noPauseRun,
         'policy envelope',
       );
-      expect(noPauseTask).toContain('Valid outcomes: done');
+      expect(noPauseTask).toContain('Valid outcomes: ready');
       expect(noPauseTask).toContain(
         'outcome names have no built-in domain meaning',
       );

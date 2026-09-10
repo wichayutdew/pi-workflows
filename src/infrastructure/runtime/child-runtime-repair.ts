@@ -4,7 +4,7 @@ import type { SubagentChildRuntimeDependencies } from './child-runtime-types.ts'
 export const COMPLETION_REPAIR_PROMPT = [
   'The delegated step settled without its required correlated result.',
   'Do not repeat completed work and do not execute work tools.',
-  'Call `structured_output` exactly once, alone, with one configured outcome and the required state, completed, remaining, outcome-specific, artifact, and workspace fields.',
+  'Call `structured_output` exactly once, alone, with one configured outcome, completed, remaining, and any permitted artifact or workspace field.',
 ].join('\n');
 
 export const toolBudgetWarningPrompt = ({
@@ -27,7 +27,7 @@ export const toolBudgetWarningPrompt = ({
 export const TOOL_BUDGET_HANDOFF_PROMPT = [
   'The productive tool-call budget is exhausted.',
   'Work tools are locked; do not execute further work.',
-  'Call `structured_output` exactly once, alone, with the configured outcome plus plain-text state, completed, remaining, and required outcome-specific fields that accurately reflect the active delegated step state.',
+  'Call `structured_output` exactly once, alone, with the configured outcome plus plain-text completed and remaining fields that accurately reflect the active delegated step.',
   'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
   'Use the active-step instructions and previous handoff to identify its completed, in-progress, and not-started work.',
   'Cite evidence for completed or in-progress work and name the exact first action for the next child to continue this active step.',

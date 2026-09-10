@@ -109,7 +109,7 @@ async function waitForTerminalCheckpoint(
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
   throw new Error(
-    `Timed out waiting for workflow completion. Last checkpoint: ${JSON.stringify(checkpoint)}\nPi stderr:\n${client.getStderr()}`,
+    `Timed out waiting for workflow completion. Last handoff: ${JSON.stringify(checkpoint)}\nPi stderr:\n${client.getStderr()}`,
   );
 }
 
@@ -174,7 +174,11 @@ describe('direct Pi workflow workers', () => {
             agent: 'worker',
             prompt: E2E_BOOTSTRAP_MARKER,
             workspace: { bindOn: ['ready'], allowedRoots: ['..'] },
-            transitions: { ready: 'plan', blocked: '$pause' },
+            transitions: {
+              ready: 'plan',
+              blocked: '$pause',
+              handoff: 'bootstrap',
+            },
           },
           plan: {
             title: 'Plan',
@@ -184,16 +188,19 @@ describe('direct Pi workflow workers', () => {
               'Workflow input: {{workflow.input}}',
               'PRIVATE_PLAN_PADDING '.repeat(500),
             ].join('\n'),
-            transitions: { planned: 'implement', blocked: '$pause' },
+            transitions: {
+              ready: 'implement',
+              blocked: '$pause',
+              handoff: 'plan',
+            },
           },
           implement: {
             title: 'Implement',
             agent: 'worker',
             prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
             transitions: {
-              checkpoint: 'implement',
+              ready: 'verify',
               handoff: 'implement',
-              implemented: 'verify',
               blocked: '$pause',
             },
           },
@@ -201,7 +208,11 @@ describe('direct Pi workflow workers', () => {
             title: 'Verify',
             agent: 'reviewer',
             prompt: `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
-            transitions: { done: '$done', blocked: '$pause' },
+            transitions: {
+              ready: '$done',
+              blocked: '$pause',
+              handoff: 'verify',
+            },
           },
         },
       };
@@ -212,7 +223,7 @@ describe('direct Pi workflow workers', () => {
         defaultProjectTrust: 'never',
         quietStartup: true,
         enableInstallTelemetry: false,
-        retry: { enabled: false },
+        handoff: { enabled: false },
         extensions: [workflowExtensionPath, providerExtensionPath],
       };
       const launcherPath = join(launcherDirectory, 'pi');
@@ -288,19 +299,19 @@ describe('direct Pi workflow workers', () => {
           },
           {
             stepId: 'plan',
-            outcome: 'planned',
+            outcome: 'ready',
             summary: E2E_PLAN_HANDOFF,
             workspaceCwd: undefined,
           },
           {
             stepId: 'implement',
-            outcome: 'implemented',
+            outcome: 'ready',
             summary: E2E_IMPLEMENT_HANDOFF,
             workspaceCwd: undefined,
           },
           {
             stepId: 'verify',
-            outcome: 'done',
+            outcome: 'ready',
             summary: E2E_FINAL_SUMMARY,
             workspaceCwd: undefined,
           },

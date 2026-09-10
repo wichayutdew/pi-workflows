@@ -20,11 +20,10 @@ import { expectTruthy } from '../helpers.ts';
 describe('when testing subagent child runtime', () => {
   type Handler = (event: Record<string, unknown>) => unknown;
   const readySummary =
-    '# Ready: Inspection is complete.\n**Completed:**\n- Inspected `README.md`.\n**Remaining:**\n- Continue with the next workflow step.';
+    '# Ready\n**Completed:**\n- Inspected `README.md`.\n**Remaining:**\n- No active-step work remains.';
   const readyHandoff = {
-    state: 'Inspection is complete.',
     completed: ['Inspected `README.md`.'],
-    remaining: ['Continue with the next workflow step.'],
+    remaining: ['No active-step work remains.'],
   };
 
   function childPolicy(
@@ -186,7 +185,7 @@ describe('when testing subagent child runtime', () => {
         'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
       );
       expect(prompt).toContain(
-        'Use `retry` only for a transient failure that can be retried without new user input.',
+        'Use `handoff` when actionable work remains without a user question; use `gaps` when an earlier configured step must refresh requirements.',
       );
     });
 
@@ -277,7 +276,7 @@ describe('when testing subagent child runtime', () => {
           'Call `structured_output` exactly once',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
-          'Call `structured_output` exactly once, alone, with the configured outcome plus plain-text state, completed, remaining, and required outcome-specific fields that accurately reflect the active delegated step state.',
+          'Call `structured_output` exactly once, alone, with the configured outcome plus plain-text completed and remaining fields that accurately reflect the active delegated step.',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
           'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
@@ -458,7 +457,7 @@ describe('when testing subagent child runtime', () => {
           'Follow the supplied step instructions when choosing one valid outcome',
         );
         expect(started.systemPrompt).toContain(
-          'Workspace-binding outcomes: ready',
+          'For the ready outcome, include workspace.cwd',
         );
         expect(started.systemPrompt).not.toMatch(/reviewed repository|replan/i);
         await expect(readFile(policy.capabilityPath, 'utf8')).rejects.toThrow(
@@ -775,11 +774,11 @@ describe('when testing subagent child runtime', () => {
       }
     });
 
-    test('does not invent outcome semantics when the workflow has no pause target', async () => {
+    test('permits a ready-only workflow policy', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, {
-        outcomes: ['done'],
+        outcomes: ['ready'],
         pauseOutcomes: [],
       });
       const rig = runtime(policy.agent);
@@ -797,21 +796,20 @@ describe('when testing subagent child runtime', () => {
         }) as { systemPrompt: string };
 
         // then
-        expect(started.systemPrompt).toContain('Valid outcomes: done');
+        expect(started.systemPrompt).toContain('Valid outcomes: ready');
         expect(started.systemPrompt).toContain(
-          'outcome names have no built-in domain meaning',
+          'For `ready`, remaining must be exactly `No active-step work remains.`.',
         );
-        expect(started.systemPrompt).not.toMatch(/fabricate success|replan/i);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
     });
 
-    test('treats retry and replan as opaque user-defined outcome names', async () => {
+    test('accepts gaps as the sole cross-step rework outcome', async () => {
       // given
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, {
-        outcomes: ['ready', 'retry', 'replan', 'blocked'],
+        outcomes: ['ready', 'gaps', 'blocked'],
         pauseOutcomes: ['blocked'],
       });
       const rig = runtime(policy.agent);
@@ -830,11 +828,9 @@ describe('when testing subagent child runtime', () => {
 
         // then
         expect(started.systemPrompt).toContain(
-          'Valid outcomes: ready, retry, replan, blocked',
+          'Valid outcomes: ready, gaps, blocked',
         );
-        expect(started.systemPrompt).not.toMatch(
-          /missing, stale, or contradictory|contract remains valid/i,
-        );
+        expect(started.systemPrompt).not.toMatch(/retry|replan/i);
         const toolCall = rig.handlers.get('tool_call')?.[0];
         expectTruthy(toolCall);
         expect(

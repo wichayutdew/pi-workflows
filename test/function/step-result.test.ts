@@ -3,166 +3,95 @@ import { parseWorkflowStepResult } from '../../src/domain/index.ts';
 
 const policy = {
   policyDigest: 'policy-1',
-  outcomes: ['done', 'submit', 'bind'],
+  outcomes: ['ready', 'blocked', 'handoff', 'gaps'],
   summaryMaxChars: 1_000,
-  gateSubmitOutcome: 'submit',
-  workspace: { bindOn: ['bind'], allowedRoots: ['../worktrees'] },
-};
-
-const handoff = {
-  state: 'Implementation is complete.',
-  completed: ['Implemented and verified `src/example.ts` with `bun test`.'],
-  remaining: ['No active-step work remains.'],
 };
 
 const result = (overrides: Record<string, unknown> = {}) => ({
   version: 1,
   policyDigest: 'policy-1',
-  outcome: 'done',
-  ...handoff,
+  outcome: 'ready',
+  completed: ['Implemented and verified `src/example.ts` with `bun test`.'],
+  remaining: ['No active-step work remains.'],
   ...overrides,
 });
 
 describe('when testing step result', () => {
-  test('canonicalizes trimmed typed handoff fields', () => {
-    expect(
-      parseWorkflowStepResult(
-        result({
-          state: ' Implementation is complete. ',
-          completed: [
-            ' Implemented and verified `src/example.ts` with `bun test`. ',
-          ],
-          remaining: [' No active-step work remains. '],
-          artifact: 'artifact',
-        }),
-        policy,
-      ),
-    ).toEqual({
+  test('canonicalizes only outcome, completed, and remaining', () => {
+    expect(parseWorkflowStepResult(result(), policy)).toEqual({
       version: 1,
       policyDigest: 'policy-1',
-      outcome: 'done',
+      outcome: 'ready',
       summary:
-        '# Done: Implementation is complete.\n**Completed:**\n- Implemented and verified `src/example.ts` with `bun test`.\n**Remaining:**\n- No active-step work remains.',
-      artifact: 'artifact',
+        '# Ready\n**Completed:**\n- Implemented and verified `src/example.ts` with `bun test`.\n**Remaining:**\n- No active-step work remains.',
     });
   });
 
-  test('rejects legacy and malformed handoff fields', () => {
-    const invalid: Array<[Record<string, unknown>, RegExp]> = [
-      [{ summary: 'legacy text' }, /unknown property "summary"/],
-      [{ state: '' }, /state must be plain non-placeholder text/],
-      [{ completed: [] }, /completed must contain one or more items/],
-      [
-        { remaining: ['- nested list'] },
-        /remaining item must be plain non-placeholder text/,
-      ],
-      [
-        { completed: ['│ malformed `src/example.ts`'] },
-        /completed item must be plain non-placeholder text/,
-      ],
-      [
-        { completed: ['# heading `src/example.ts`'] },
-        /completed item must be plain non-placeholder text/,
-      ],
-      [
-        { completed: ['placeholder'] },
-        /completed item must be plain non-placeholder text/,
-      ],
-      [
-        { completed: ['Implemented `src/example.ts`\n- injected item'] },
-        /completed item must be plain non-placeholder text/,
-      ],
-    ];
-    for (const [overrides, message] of invalid) {
-      expect(() => parseWorkflowStepResult(result(overrides), policy)).toThrow(
-        message,
-      );
+  test('rejects legacy model-authored handoff fields', () => {
+    for (const key of [
+      'summary',
+      'state',
+      'question',
+      'action',
+      'next',
+      'transientFailure',
+      'retryWhen',
+      'progress',
+    ]) {
+      expect(() =>
+        parseWorkflowStepResult(result({ [key]: 'legacy' }), policy),
+      ).toThrow(new RegExp(`unknown property "${key}"`));
     }
   });
 
-  test('requires typed blocked and retry fields and formats them', () => {
-    const nonSuccessPolicy = {
-      policyDigest: 'policy-1',
-      outcomes: ['blocked', 'retry'],
-      summaryMaxChars: 1_000,
-    };
+  test('enforces outcome-specific remaining semantics', () => {
     expect(() =>
-      parseWorkflowStepResult(result({ outcome: 'blocked' }), nonSuccessPolicy),
-    ).toThrow(/question must be a string/);
+      parseWorkflowStepResult(
+        result({ remaining: ['Continue implementation.'] }),
+        policy,
+      ),
+    ).toThrow(/ready result must have no active-step work remaining/);
     expect(() =>
-      parseWorkflowStepResult(result({ outcome: 'retry' }), nonSuccessPolicy),
-    ).toThrow(/transientFailure must be a string/);
+      parseWorkflowStepResult(
+        result({ outcome: 'blocked', remaining: ['Await input.'] }),
+        policy,
+      ),
+    ).toThrow(/blocked result must include a user question in remaining/);
+    expect(() =>
+      parseWorkflowStepResult(
+        result({
+          outcome: 'handoff',
+          remaining: ['Which branch should be used?'],
+        }),
+        policy,
+      ),
+    ).toThrow(/handoff result must not include a user question/);
     expect(
       parseWorkflowStepResult(
         result({
           outcome: 'blocked',
-          state: 'Authorization matrix is missing.',
-          completed: ['Reviewed `docs/authorization.md`.'],
-          remaining: ['Apply the supplied role matrix to endpoint policy.'],
-          question: 'Which roles may access each endpoint?',
-          action:
-            'Product owner must provide the endpoint authorization matrix.',
-          next: 'Provide the authorization matrix and run `/workflow-resume`.',
+          remaining: ['Which branch should be used?'],
         }),
-        nonSuccessPolicy,
-      ),
-    ).toMatchObject({
-      summary: expect.stringContaining(
-        '**Question:** Which roles may access each endpoint?',
-      ),
-    });
-    expect(() =>
-      parseWorkflowStepResult(
-        result({
-          outcome: 'retry',
-          transientFailure: 'The provider returned HTTP 429.',
-          retryWhen: 'Retry after the rate-limit window expires.',
-          question: 'Should I retry?',
-        }),
-        nonSuccessPolicy,
-      ),
-    ).toThrow(/retry result has blocked-only fields/);
-  });
-
-  test('preserves artifact, workspace, and checkpoint validation', () => {
-    expect(
-      parseWorkflowStepResult(
-        result({ outcome: 'bind', workspace: { cwd: '/tmp/worktree' } }),
         policy,
-      ).workspace,
-    ).toEqual({ cwd: '/tmp/worktree' });
-    expect(() =>
-      parseWorkflowStepResult(
-        result({ workspace: { cwd: '/tmp/worktree' } }),
-        policy,
-      ),
-    ).toThrow(/workspace is forbidden/);
-
-    const checkpointPolicy = {
-      policyDigest: 'policy-1',
-      outcomes: ['checkpoint'],
-      summaryMaxChars: 1_000,
-    };
-    expect(() =>
-      parseWorkflowStepResult(
-        result({ outcome: 'checkpoint' }),
-        checkpointPolicy,
-      ),
-    ).toThrow(/checkpoint outcome requires progress/);
+      ).summary,
+    ).toContain('# Blocked');
     expect(
       parseWorkflowStepResult(
         result({
-          outcome: 'checkpoint',
-          progress: {
-            feature: 'auth feature',
-            commit: 'abcdef1 implement auth feature',
-            changedFiles: ['src/auth.ts'],
-            verification: ['bun test: passed'],
-            remaining: ['implement profile feature'],
-          },
+          outcome: 'handoff',
+          remaining: ['Run `bun test` and repair failures.'],
         }),
-        checkpointPolicy,
-      ).progress?.feature,
-    ).toBe('auth feature');
+        policy,
+      ).summary,
+    ).toContain('# Handoff');
+    expect(
+      parseWorkflowStepResult(
+        result({
+          outcome: 'gaps',
+          remaining: ['Refresh the acceptance criteria in `PLAN.md`.'],
+        }),
+        policy,
+      ).summary,
+    ).toContain('# Gaps');
   });
 });

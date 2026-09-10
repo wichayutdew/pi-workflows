@@ -5,7 +5,7 @@ import type {
 } from '../../domain/index.ts';
 import {
   advanceRun,
-  parseDelegatedStepResult,
+  parsePersistedDelegatedStepResult,
   recordCurrentStepResult,
   recordCurrentStepUsage,
   usageAggregateFromModels,
@@ -267,7 +267,7 @@ async function finishDelegation(
     }
 
     const rawResult: unknown = JSON.parse(serializedResult);
-    const result: WorkflowStepResult = parseDelegatedStepResult(
+    const result: WorkflowStepResult = parsePersistedDelegatedStepResult(
       rawResult,
       active.policy,
     );

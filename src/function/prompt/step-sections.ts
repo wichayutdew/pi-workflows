@@ -96,7 +96,7 @@ export function buildNonSuccessSummaryInstructions(
   outcomes: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   const nonSuccessOutcomes = outcomes.filter((outcome) =>
-    ['blocked', 'failed', 'retry'].includes(outcome),
+    ['blocked', 'handoff'].includes(outcome),
   );
   if (nonSuccessOutcomes.length === 0) return [];
 
@@ -105,8 +105,8 @@ export function buildNonSuccessSummaryInstructions(
     '',
     `For ${nonSuccessOutcomes.map((outcome) => `\`${outcome}\``).join(', ')}, provide a decision-first typed handoff. The extension formats it for the operator and fresh child.`,
     '',
-    'Use plain-text `state`, `completed`, and `remaining` fields. Do not include Markdown, headings, or list markers.',
-    'For `blocked`, include `question`, `action`, and `next`; for `retry`, include `transientFailure` and `retryWhen`.',
+    'Use only plain-text `completed` and `remaining` fields. Do not include Markdown, headings, list markers, or additional handoff fields.',
+    'For `blocked`, include at least one user question ending in `?` in `remaining`. For `handoff`, list only non-question actionable work in `remaining`. `ready` requires exactly `No active-step work remains.`.',
     '',
     'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes, or statements that merely say the child lacks authority. Mention a passed check only when it directly explains the remaining issue. Name the missing prerequisite and who can supply it. Keep only details needed to make the decision or complete the next action.',
     '',

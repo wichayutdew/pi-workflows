@@ -35,11 +35,12 @@ function gatedWorkflow(
   }
   inspect.gate = {
     provider,
-    submitOutcome: 'submit',
-    approvedOutcome: 'ready',
-    rejectedOutcome: 'blocked',
     ...(provider === 'plannotator' ? { timeoutMs: 1_000 } : {}),
     ...(artifactContract ? { artifactContract } : {}),
+  };
+  inspect.transitions = {
+    ...(inspect.transitions as Record<string, string>),
+    handoff: 'inspect',
   };
   return loadedWorkflow(raw);
 }
@@ -51,7 +52,7 @@ function awaitingGateRun(
   let run = beginGate(
     workflow,
     createRun(workflow, 'request', ['read'], 'run-1', 1),
-    'submit',
+    'ready',
     '# Plan',
     'gate-request',
     2,
@@ -176,7 +177,7 @@ describe('when testing gate actions', () => {
         fixture as unknown as HarnessActionContext,
         workflow,
         originalRun,
-        'submit',
+        'ready',
         'Plan ready',
         'The complete gate artifact is the exact Markdown saved at /tmp/plan.md',
       ),
@@ -203,7 +204,7 @@ describe('when testing gate actions', () => {
         fixture as unknown as HarnessActionContext,
         workflow,
         originalRun,
-        'submit',
+        'ready',
         'Plan ready',
         '# Plan\n**Question:**\n**Answer:**\n'.repeat(2),
       ),
@@ -212,27 +213,23 @@ describe('when testing gate actions', () => {
     expect(calls.plannotatorRequests).toBe(0);
   });
 
-  test('retries a configured artifact-contract failure without opening review', async () => {
+  test('rejects an artifact-contract failure without opening review', async () => {
     const raw = baseWorkflow();
     const steps = raw.steps as Record<string, Record<string, unknown>>;
     steps.inspect!.gate = {
       provider: 'plannotator',
-      submitOutcome: 'submit',
-      approvedOutcome: 'ready',
-      rejectedOutcome: 'blocked',
       timeoutMs: 1_000,
       artifactContract: {
         maxChars: 1_000,
         requiredSubstrings: ['# Plan'],
         forbiddenSubstrings: [],
         equalOccurrenceGroups: [],
-        onValidationFailure: 'retry',
       },
     };
     steps.inspect!.transitions = {
       ready: 'implement',
       blocked: '$pause',
-      retry: 'inspect',
+      handoff: 'inspect',
     };
     const retryWorkflow = loadedWorkflow(raw);
     const originalRun = createRun(
@@ -244,21 +241,23 @@ describe('when testing gate actions', () => {
     );
     const { calls, fixture } = createGateFixture(originalRun, retryWorkflow);
 
-    await createGateSubmissionAction().submitGate.call(
-      fixture as unknown as HarnessActionContext,
-      retryWorkflow,
-      originalRun,
-      'submit',
-      'Plan ready',
-      'missing plan heading',
-    );
+    await expect(
+      createGateSubmissionAction().submitGate.call(
+        fixture as unknown as HarnessActionContext,
+        retryWorkflow,
+        originalRun,
+        'ready',
+        'Plan ready',
+        'missing plan heading',
+      ),
+    ).rejects.toThrow(/missing required text/);
 
     expect(fixture.run).toMatchObject({
       status: 'running',
       currentStepId: 'inspect',
     });
     expect(calls.plannotatorRequests).toBe(0);
-    expect(calls.persisted).toBe(1);
+    expect(calls.persisted).toBe(0);
   });
 
   test('fails a Plannotator submission when the provider is unavailable', async () => {
@@ -272,7 +271,7 @@ describe('when testing gate actions', () => {
         fixture as unknown as HarnessActionContext,
         workflow,
         originalRun,
-        'submit',
+        'ready',
         'Plan ready',
         '# Plan',
       ),
@@ -304,7 +303,7 @@ describe('when testing gate actions', () => {
         fixture as unknown as HarnessActionContext,
         workflow,
         originalRun,
-        'submit',
+        'ready',
         'Plan ready',
         '# Plan',
       ),
