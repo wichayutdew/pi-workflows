@@ -154,54 +154,27 @@ function parseGate(
   }
   rejectUnknownKeys(
     value,
-    ['provider', 'timeoutMs', 'artifactContract'],
+    ['timeoutMs', 'artifactContract'],
     path,
     errors,
   );
 
-  const providerValue =
-    value.provider === undefined
-      ? 'prompt'
-      : readString(value.provider, `${path}.provider`, errors);
-  const provider =
-    providerValue === 'prompt' || providerValue === 'plannotator'
-      ? providerValue
-      : undefined;
-  if (!provider) {
-    errors.push(`${path}.provider: expected prompt or plannotator`);
-  }
   const artifactContract = parseArtifactContract(
     value.artifactContract,
     `${path}.artifactContract`,
     errors,
   );
-  if (provider === 'prompt' && value.timeoutMs !== undefined) {
-    errors.push(`${path}.timeoutMs: only valid with provider "plannotator"`);
-  }
-  if (!provider) return undefined;
 
-  return provider === 'prompt'
-    ? {
-        provider,
-        submitOutcome: 'ready',
-        approvedOutcome: 'ready',
-        rejectedOutcome: 'handoff',
-        ...(artifactContract ? { artifactContract } : {}),
-      }
-    : {
-        provider,
-        submitOutcome: 'ready',
-        approvedOutcome: 'ready',
-        rejectedOutcome: 'handoff',
-        ...(artifactContract ? { artifactContract } : {}),
-        timeoutMs: readInteger(
-          value.timeoutMs,
-          30_000,
-          `${path}.timeoutMs`,
-          errors,
-          { min: 1_000, max: 30_000 },
-        ),
-      };
+  return {
+    submitOutcome: 'ready',
+    approvedOutcome: 'ready',
+    rejectedOutcome: 'handoff',
+    ...(artifactContract ? { artifactContract } : {}),
+    timeoutMs: readInteger(value.timeoutMs, 30_000, `${path}.timeoutMs`, errors, {
+      min: 1_000,
+      max: 30_000,
+    }),
+  };
 }
 
 function parseWorkspaceRoots(
