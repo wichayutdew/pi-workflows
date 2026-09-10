@@ -20,15 +20,15 @@ const reject = (reason: string): ToolAuthorization => ({
  * @param toolName - Requested tool name.
  * @param input - Requested tool input.
  * @param step - Active workflow step.
- * @param inventory - Registered tool inventory.
  * @returns The authorization decision.
  */
 export const authorizeToolCall = (
   toolName: string,
   input: Readonly<Record<string, unknown>>,
   step: WorkflowStep,
-  inventory: ReadonlyArray<ToolInventoryItem>,
+  _inventory: ReadonlyArray<ToolInventoryItem>,
 ): ToolAuthorization => {
+  void _inventory;
   if (toolName === 'mcp') {
     return authorizeMcpProxy(input, step.permissions.mcp);
   }

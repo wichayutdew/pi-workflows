@@ -306,8 +306,7 @@ describe('when testing workflow status', () => {
       raw.steps = {
         review: {
           prompt: { file: 'fixture-prompt-1.md' },
-          gate: {
-          },
+          gate: {},
           transitions: {
             ready: '$done',
             handoff: 'review',
@@ -342,7 +341,7 @@ describe('when testing workflow status', () => {
 
       // then
       expect(output).toMatch(/\[AWAITING REVIEW\]/);
-      expect(output).toMatch(/plannotator · review-status-42/);
+      expect(output).toMatch(/review review-status-42/);
     });
 
     test('the text fallback preserves checkpoint and execution details', () => {

@@ -186,9 +186,15 @@ describe('when testing config', () => {
       const messages = validateWorkflow(malformed).errors.join('\n');
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/expected an integer from 1 to 200000/);
-      expect(messages).toMatch(/requiredHeadings\[0\]\.level: expected 1, 2, or 3/);
-      expect(messages).toMatch(/requiredHeadings\[0\]\.title: must not be empty/);
-      expect(messages).toMatch(/requiredHeadings\[0\]\.guidance: must not be empty/);
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.level: expected 1, 2, or 3/,
+      );
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.title: must not be empty/,
+      );
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.guidance: must not be empty/,
+      );
       expect(messages).toMatch(/duplicate heading "# Plan"/);
 
       const withoutMax = structuredClone(raw);
@@ -468,7 +474,6 @@ describe('when testing config', () => {
       const malformedErrors = validateWorkflow(malformed).errors.join('\n');
       expect(malformedErrors).toMatch(/at least one argument is required/);
       expect(malformedErrors).toMatch(/duplicate argument prefix/);
-
     });
 
     test('rejects unknown properties and transition targets', () => {
@@ -503,8 +508,9 @@ describe('when testing config', () => {
       const inlinePrompt = baseWorkflow();
       const requiredResources = baseWorkflow();
       const extensionPermissions = baseWorkflow();
-      const inlineStep = (inlinePrompt.steps as Record<string, Record<string, unknown>>)
-        .inspect!;
+      const inlineStep = (
+        inlinePrompt.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
       const requiredStep = (
         requiredResources.steps as Record<string, Record<string, unknown>>
       ).inspect!;
@@ -783,7 +789,6 @@ describe('when testing config', () => {
       expect(plannotatorResult.value?.steps.inspect?.gate).toMatchObject({
         timeoutMs: 30_000,
       });
-
     });
 
     test('loader accepts YAML workflow files and rejects duplicate YAML keys', async () => {
@@ -832,8 +837,16 @@ describe('when testing config', () => {
         ].join('\n'),
         'utf8',
       );
-      await writeFile(join(userDirectory, 'compact.md'), 'Inspect safely', 'utf8');
-      await writeFile(join(userDirectory, 'short-extension.md'), 'Inspect', 'utf8');
+      await writeFile(
+        join(userDirectory, 'compact.md'),
+        'Inspect safely',
+        'utf8',
+      );
+      await writeFile(
+        join(userDirectory, 'short-extension.md'),
+        'Inspect',
+        'utf8',
+      );
 
       // when
       await writeFile(
@@ -994,8 +1007,8 @@ describe('when testing config', () => {
         join(userDirectory, 'settings.yaml'),
         [
           'version: 1',
-          'allowProjectWorkflows: false',
-          'allowProjectWorkflows: true',
+          'statusShortcut: ctrl+alt+w',
+          'statusShortcut: ctrl+shift+y',
         ].join('\n'),
         'utf8',
       );
@@ -1075,7 +1088,11 @@ describe('when testing config', () => {
       await Promise.all([
         writeFile(join(userDirectory, 'inspect.md'), 'Inspect', 'utf8'),
         writeFile(join(userDirectory, 'implement.md'), 'Implement', 'utf8'),
-        writeFile(join(userDirectory, 'invalid-prompt.md'), 'Use {{unknown.variable}}', 'utf8'),
+        writeFile(
+          join(userDirectory, 'invalid-prompt.md'),
+          'Use {{unknown.variable}}',
+          'utf8',
+        ),
         writeFile(join(userDirectory, 'settings.yaml'), 'version: 2\n', 'utf8'),
         writeFile(
           join(userDirectory, 'invalid.workflow.yaml'),
@@ -1156,6 +1173,5 @@ describe('when testing config', () => {
       else process.env.PI_CODING_AGENT_DIR = previousAgent;
       await rm(root, { recursive: true, force: true });
     });
-
   });
 });

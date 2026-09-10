@@ -27,7 +27,6 @@ const sourceMatches = (resource: NamedResource, selector: string): boolean => {
   return source.toLowerCase().includes(selector.toLowerCase());
 };
 
-
 /**
  * Checks that resources required by a workflow step are available before
  * execution begins.
@@ -45,6 +44,8 @@ export function preflightStep(
     sourceMatches(resource, 'plannotator'),
   );
   return step.gate !== undefined && !hasPlannotator
-    ? ['Plannotator is required by this gate, but its extension is not installed or detectable']
+    ? [
+        'Plannotator is required by this gate, but its extension is not installed or detectable',
+      ]
     : [];
 }

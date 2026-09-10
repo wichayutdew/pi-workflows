@@ -13,7 +13,6 @@ transitions, and parent-mode coordination.
 | `src/infrastructure/integrations/plannotator.ts`      | Stable facade for Plannotator requests, response normalization, result parsing, and types. |
 | `src/infrastructure/integrations/plannotator-requests.ts`  | Publishes start/status events and makes timeout scheduling injectable.                     |
 | `src/infrastructure/integrations/plannotator-responses.ts` | Normalizes unknown event replies and validates review-result payloads.                     |
-| `src/infrastructure/integrations/prompt-gate.ts`      | Runs the built-in review selector and feedback editor with abort-aware UI dependencies.    |
 
 ## Subagent Integration
 

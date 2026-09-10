@@ -54,10 +54,7 @@ async function handlePlannotatorResult(
   this: HarnessActionContext,
   data: unknown,
 ): Promise<void> {
-  if (
-    !this.isSessionActive ||
-    !this.run?.pendingGate?.reviewId
-  ) {
+  if (!this.isSessionActive || !this.run?.pendingGate?.reviewId) {
     return;
   }
   const result = parsePlannotatorResult(data);

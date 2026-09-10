@@ -6,10 +6,9 @@ import type { ChildStepPolicy, WorkflowStep } from '../../domain/index.ts';
  */
 export const childPolicyStep = (policy: ChildStepPolicy): WorkflowStep => ({
   title: policy.stepTitle,
-  prompt: { inline: 'Delegated workflow step' },
+  prompt: { file: 'delegated-step.md' },
   agent: { name: policy.agent },
   permissions: policy.permissions,
-  requires: { tools: [], extensions: [], skills: [] },
   transitions: {},
   ...(policy.workspace ? { workspace: policy.workspace } : {}),
 });

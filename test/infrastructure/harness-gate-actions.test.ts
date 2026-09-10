@@ -10,8 +10,8 @@ describe('when submitting a gate', () => {
       steps: {
         ...(baseWorkflow().steps as Record<string, unknown>),
         inspect: {
-          ...((baseWorkflow().steps as Record<string, Record<string, unknown>>)
-            .inspect!),
+          ...(baseWorkflow().steps as Record<string, Record<string, unknown>>)
+            .inspect!,
           gate: {
             timeoutMs: 1_000,
             artifactContract: {
@@ -27,7 +27,7 @@ describe('when submitting a gate', () => {
     };
     const workflow = loadedWorkflow(raw);
     const run = createRun(workflow, 'request', [], 'run-1', 1);
-    let currentRun = run;
+    const currentRun = run;
     let requestedArtifact = '';
     const context = {
       dependencies: {
@@ -39,7 +39,10 @@ describe('when submitting a gate', () => {
           artifact: string,
         ) => {
           requestedArtifact = artifact;
-          return { status: 'handled' as const, result: { reviewId: 'review-1' } };
+          return {
+            status: 'handled' as const,
+            result: { reviewId: 'review-1' },
+          };
         },
       },
       isSessionActive: true,

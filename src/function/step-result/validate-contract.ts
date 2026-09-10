@@ -6,16 +6,21 @@ function headingLine(heading: RequiredHeading): string {
 
 function artifactHeadings(artifact: string): ReadonlySet<string> {
   const headings = new Set<string>();
-  let fence: { readonly character: '`' | '~'; readonly length: number } | undefined;
+  let fence:
+    { readonly character: '`' | '~'; readonly length: number } | undefined;
 
   for (const line of artifact.split(/\r?\n/)) {
     const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fenceMatch) {
-      const marker = fenceMatch[1]!;
+      const marker = fenceMatch[1];
+      if (!marker) continue;
       const character = marker[0] as '`' | '~';
       if (!fence) {
         fence = { character, length: marker.length };
-      } else if (fence.character === character && marker.length >= fence.length) {
+      } else if (
+        fence.character === character &&
+        marker.length >= fence.length
+      ) {
         fence = undefined;
       }
       continue;

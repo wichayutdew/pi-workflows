@@ -165,7 +165,10 @@ describe('when running a workflow through a direct Pi worker', () => {
     };
 
     try {
-      await writeFile(join(directory, 'implement.md'), 'Complete {{workflow.input}}');
+      await writeFile(
+        join(directory, 'implement.md'),
+        'Complete {{workflow.input}}',
+      );
       await writeFile(
         join(directory, 'direct.workflow.yaml'),
         [

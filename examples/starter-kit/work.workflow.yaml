@@ -27,13 +27,37 @@ steps:
       artifactContract:
         maxChars: 10000
         requiredHeadings:
-          - { level: 2, title: Goal/Acceptance Criteria, guidance: Observable outcome and acceptance criteria. }
+          - {
+              level: 2,
+              title: Goal/Acceptance Criteria,
+              guidance: Observable outcome and acceptance criteria.,
+            }
           - { level: 2, title: Non Goal, guidance: Explicitly excluded work. }
-          - { level: 2, title: Implementation Steps and Tests, guidance: Scoped changes and assessable tests list as steps in TDD style. }
-          - { level: 2, title: Validation, guidance: Independent commands and expected proof. }
-          - { level: 2, title: Risks/Decisions Needed, guidance: Risks and unresolved decisions. }
-          - { level: 2, title: Publications Contract/Metadata, guidance: Observed publication metadata. }
-          - { level: 2, title: Execution appendix (machine-readable), guidance: Required execution JSON. }
+          - {
+              level: 2,
+              title: Implementation Steps and Tests,
+              guidance: Scoped changes and assessable tests list as steps in TDD style.,
+            }
+          - {
+              level: 2,
+              title: Validation,
+              guidance: Independent commands and expected proof.,
+            }
+          - {
+              level: 2,
+              title: Risks/Decisions Needed,
+              guidance: Risks and unresolved decisions.,
+            }
+          - {
+              level: 2,
+              title: Publications Contract/Metadata,
+              guidance: Observed publication metadata.,
+            }
+          - {
+              level: 2,
+              title: Execution appendix (machine-readable),
+              guidance: Required execution JSON.,
+            }
     transitions: { ready: prepare-workspace, blocked: $pause, handoff: plan }
   prepare-workspace:
     title: Create worktree and branch

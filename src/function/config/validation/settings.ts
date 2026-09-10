@@ -19,7 +19,12 @@ export function validateSettings(
   if (!isJsonObject(value)) {
     return { errors: ['settings: expected an object'] };
   }
-  rejectUnknownKeys(value, ['$schema', 'version', 'statusShortcut'], 'settings', errors);
+  rejectUnknownKeys(
+    value,
+    ['$schema', 'version', 'statusShortcut'],
+    'settings',
+    errors,
+  );
   if (value.$schema !== undefined && typeof value.$schema !== 'string') {
     errors.push('settings.$schema: expected a string');
   }

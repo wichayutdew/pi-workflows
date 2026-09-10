@@ -42,4 +42,3 @@ export type PlannotatorReviewResult = {
   readonly approved: boolean;
   readonly feedback: string;
 };
-

@@ -71,7 +71,6 @@ function createStartFixture() {
       workflows: new Map([[workflow.definition.id, workflow]]),
       settings: {
         version: 1 as const,
-        allowProjectWorkflows: false,
         statusShortcut: 'ctrl+alt+w' as const,
       },
       diagnostics: [] as Array<{

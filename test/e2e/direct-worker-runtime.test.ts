@@ -172,7 +172,7 @@ describe('direct Pi workflow workers', () => {
           bootstrap: {
             title: 'Bootstrap',
             agent: 'worker',
-            prompt: E2E_BOOTSTRAP_MARKER,
+            prompt: { file: 'bootstrap.md' },
             workspace: { bindOn: ['ready'], allowedRoots: ['..'] },
             transitions: {
               ready: 'plan',
@@ -183,11 +183,7 @@ describe('direct Pi workflow workers', () => {
           plan: {
             title: 'Plan',
             agent: 'planner',
-            prompt: [
-              E2E_PLAN_MARKER,
-              'Workflow input: {{workflow.input}}',
-              'PRIVATE_PLAN_PADDING '.repeat(500),
-            ].join('\n'),
+            prompt: { file: 'plan.md' },
             transitions: {
               ready: 'implement',
               blocked: '$pause',
@@ -197,7 +193,7 @@ describe('direct Pi workflow workers', () => {
           implement: {
             title: 'Implement',
             agent: 'worker',
-            prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+            prompt: { file: 'implement.md' },
             transitions: {
               ready: 'verify',
               handoff: 'implement',
@@ -207,7 +203,7 @@ describe('direct Pi workflow workers', () => {
           verify: {
             title: 'Verify',
             agent: 'reviewer',
-            prompt: `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+            prompt: { file: 'verify.md' },
             transitions: {
               ready: '$done',
               blocked: '$pause',
@@ -237,10 +233,32 @@ describe('direct Pi workflow workers', () => {
           join(workflowDirectory, 'settings.yaml'),
           'version: 1\n',
         );
-        await writeFile(
-          join(workflowDirectory, 'direct-worker-e2e.workflow.yaml'),
-          JSON.stringify(workflow),
-        );
+        await Promise.all([
+          writeFile(
+            join(workflowDirectory, 'bootstrap.md'),
+            E2E_BOOTSTRAP_MARKER,
+          ),
+          writeFile(
+            join(workflowDirectory, 'plan.md'),
+            [
+              E2E_PLAN_MARKER,
+              'Workflow input: {{workflow.input}}',
+              'PRIVATE_PLAN_PADDING '.repeat(500),
+            ].join('\n'),
+          ),
+          writeFile(
+            join(workflowDirectory, 'implement.md'),
+            `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+          ),
+          writeFile(
+            join(workflowDirectory, 'verify.md'),
+            `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+          ),
+          writeFile(
+            join(workflowDirectory, 'direct-worker-e2e.workflow.yaml'),
+            JSON.stringify(workflow),
+          ),
+        ]);
         await writeFile(tracePath, '');
         await writeFile(
           launcherPath,

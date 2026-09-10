@@ -251,10 +251,10 @@ proven-complete actions, and pause on ambiguity.
 
 Pause and resume are coordinated by
 `src/infrastructure/harness/pause-actions.ts`, `resume-action.ts`,
-`delegation-control-actions.ts`, `prompt-gate-actions.ts`, and
-`plannotator-result-actions.ts`. Engine helpers only produce the next
-checkpoint state; harness actions own effect cleanup, active-tool restoration,
-child cancellation, prompt review dismissal, and relaunching the current step.
+`delegation-control-actions.ts`, and `plannotator-result-actions.ts`. Engine
+helpers only produce the next checkpoint state; harness actions own effect
+cleanup, active-tool restoration, child cancellation, Plannotator review
+cancellation, and relaunching the current step.
 
 ## Session Restore
 

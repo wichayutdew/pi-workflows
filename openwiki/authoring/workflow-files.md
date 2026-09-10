@@ -11,13 +11,12 @@ flowchart TD
   Workflow --> Steps[steps map]
 
   Steps --> Step[WorkflowStep]
-  Step --> Prompt[inline prompt or prompt file]
+  Step --> Prompt[prompt file]
   Step --> Agent[optional workflow role profile]
   Step --> Budget[optional maxToolCalls]
   Step --> Permissions[permissions]
-  Step --> Requires[requires preflight]
   Step --> Transitions[outcome transitions]
-  Step --> Gate[optional prompt or Plannotator gate]
+  Step --> Gate[optional Plannotator gate]
   Step --> Workspace[optional immutable workspace binding]
 ```
 

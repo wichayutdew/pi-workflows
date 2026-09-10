@@ -16,7 +16,9 @@ export type StepContract = {
   readonly workspaceLines: ReadonlyArray<string>;
 };
 
-export function formatGateArtifactContract(step: WorkflowStep): ReadonlyArray<string> {
+export function formatGateArtifactContract(
+  step: WorkflowStep,
+): ReadonlyArray<string> {
   const headings = step.gate?.artifactContract?.requiredHeadings;
   if (!headings) return [];
   return headings.flatMap((heading) => [

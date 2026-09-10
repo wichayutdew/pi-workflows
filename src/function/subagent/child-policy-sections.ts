@@ -46,10 +46,7 @@ const isStepPermissions = (value: unknown): value is StepPermissions => {
         isStringArray(rule.argsPrefix),
     );
   return (
-    hasOnlyKeys(
-      value,
-      new Set(['tools', 'mcp', 'skills', 'bash']),
-    ) &&
+    hasOnlyKeys(value, new Set(['tools', 'mcp', 'skills', 'bash'])) &&
     hasOnlyKeys(bash, new Set(['mode', 'allow'])) &&
     isStringArray(value.tools) &&
     isStringArray(value.mcp) &&

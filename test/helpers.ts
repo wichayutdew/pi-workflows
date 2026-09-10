@@ -57,9 +57,9 @@ export function loadedWorkflow(raw = baseWorkflow()): LoadedWorkflow {
   expect(result.value).toBeTruthy();
   const definition = result.value as WorkflowDefinition;
   const prompts = Object.fromEntries(
-    Object.entries(definition.steps).map(([stepId, step]) => [
+    Object.entries(definition.steps).map(([stepId]) => [
       stepId,
-      `prompt:${stepId}`, 
+      `prompt:${stepId}`,
     ]),
   );
   const stepDigests = Object.fromEntries(

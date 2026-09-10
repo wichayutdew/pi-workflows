@@ -243,10 +243,7 @@ async function reloadCatalog(
 ): Promise<boolean> {
   const loadSequence = ++this.catalogLoadSequence;
   const sessionEpoch = this.sessionEpoch;
-  const catalog = await this.dependencies.loadCatalog({
-    cwd: context.cwd,
-    projectTrusted: context.isProjectTrusted(),
-  });
+  const catalog = await this.dependencies.loadCatalog({});
   if (
     loadSequence !== this.catalogLoadSequence ||
     sessionEpoch !== this.sessionEpoch

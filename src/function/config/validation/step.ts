@@ -104,37 +104,49 @@ function parseArtifactContract(
   if (value.requiredHeadings.length > 32) {
     errors.push(`${path}.requiredHeadings: at most 32 headings are allowed`);
   }
-  const requiredHeadings = value.requiredHeadings.reduce<Array<RequiredHeading>>(
-    (headings, item, index) => {
-      const headingPath = `${path}.requiredHeadings[${index}]`;
-      if (!isJsonObject(item)) {
-        errors.push(`${headingPath}: expected an object`);
-        return headings;
-      }
-      rejectUnknownKeys(item, ['level', 'title', 'guidance'], headingPath, errors);
-      const level = item.level;
-      const validLevel = level === 1 || level === 2 || level === 3;
-      if (!validLevel) {
-        errors.push(`${headingPath}.level: expected 1, 2, or 3`);
-      }
-      const title = readString(item.title, `${headingPath}.title`, errors);
-      const guidance = readString(item.guidance, `${headingPath}.guidance`, errors);
-      if (!validLevel || !title || !guidance) return headings;
-      if (title.length > 1_024) {
-        errors.push(`${headingPath}.title: exceeds 1024 characters`);
-      }
-      if (guidance.length > 1_024) {
-        errors.push(`${headingPath}.guidance: exceeds 1024 characters`);
-      }
-      const heading = { level, title, guidance } as const;
-      if (headings.some((other) => other.level === level && other.title === title)) {
-        errors.push(`${headingPath}: duplicate heading "${'#'.repeat(level)} ${title}"`);
-        return headings;
-      }
-      return [...headings, heading];
-    },
-    [],
-  );
+  const requiredHeadings = value.requiredHeadings.reduce<
+    Array<RequiredHeading>
+  >((headings, item, index) => {
+    const headingPath = `${path}.requiredHeadings[${index}]`;
+    if (!isJsonObject(item)) {
+      errors.push(`${headingPath}: expected an object`);
+      return headings;
+    }
+    rejectUnknownKeys(
+      item,
+      ['level', 'title', 'guidance'],
+      headingPath,
+      errors,
+    );
+    const level = item.level;
+    const validLevel = level === 1 || level === 2 || level === 3;
+    if (!validLevel) {
+      errors.push(`${headingPath}.level: expected 1, 2, or 3`);
+    }
+    const title = readString(item.title, `${headingPath}.title`, errors);
+    const guidance = readString(
+      item.guidance,
+      `${headingPath}.guidance`,
+      errors,
+    );
+    if (!validLevel || !title || !guidance) return headings;
+    if (title.length > 1_024) {
+      errors.push(`${headingPath}.title: exceeds 1024 characters`);
+    }
+    if (guidance.length > 1_024) {
+      errors.push(`${headingPath}.guidance: exceeds 1024 characters`);
+    }
+    const heading = { level, title, guidance } as const;
+    if (
+      headings.some((other) => other.level === level && other.title === title)
+    ) {
+      errors.push(
+        `${headingPath}: duplicate heading "${'#'.repeat(level)} ${title}"`,
+      );
+      return headings;
+    }
+    return [...headings, heading];
+  }, []);
   return { maxChars, requiredHeadings };
 }
 
@@ -148,12 +160,7 @@ function parseGate(
     errors.push(`${path}: expected an object`);
     return undefined;
   }
-  rejectUnknownKeys(
-    value,
-    ['timeoutMs', 'artifactContract'],
-    path,
-    errors,
-  );
+  rejectUnknownKeys(value, ['timeoutMs', 'artifactContract'], path, errors);
 
   const artifactContract = parseArtifactContract(
     value.artifactContract,
@@ -166,10 +173,16 @@ function parseGate(
     approvedOutcome: 'ready',
     rejectedOutcome: 'handoff',
     ...(artifactContract ? { artifactContract } : {}),
-    timeoutMs: readInteger(value.timeoutMs, 30_000, `${path}.timeoutMs`, errors, {
-      min: 1_000,
-      max: 30_000,
-    }),
+    timeoutMs: readInteger(
+      value.timeoutMs,
+      30_000,
+      `${path}.timeoutMs`,
+      errors,
+      {
+        min: 1_000,
+        max: 30_000,
+      },
+    ),
   };
 }
 

@@ -176,7 +176,6 @@ describe('when testing policy', () => {
       expect(selected).toEqual(['read', 'annotate', 'workflow_complete_step']);
     });
 
-
     test('covers restricted Bash tokenization and terminal policy modes', () => {
       // given
       const allowList = {

@@ -43,9 +43,7 @@ describe('when validating a gate artifact contract', () => {
         '```md\n# Report destination\n## Validation\n```',
         contract,
       ),
-    ).toBe(
-      'gate artifact is missing required heading: "# Report destination"',
-    );
+    ).toBe('gate artifact is missing required heading: "# Report destination"');
   });
 
   test('accepts an artifact containing every required Markdown heading', () => {

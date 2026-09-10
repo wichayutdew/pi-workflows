@@ -522,8 +522,7 @@ describe('when exploring workflow step evidence', () => {
     raw.steps = {
       review: {
         prompt: { file: 'fixture-prompt-3.md' },
-        gate: {
-        },
+        gate: {},
         transitions: { ready: '$done', handoff: 'review' },
       },
     };
