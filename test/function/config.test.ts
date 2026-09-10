@@ -137,7 +137,6 @@ describe('when testing config', () => {
       const inspect = (raw.steps as Record<string, Record<string, unknown>>)
         .inspect!;
       inspect.gate = {
-        provider: 'plannotator',
         artifactContract: {
           maxChars: 100,
           requiredHeadings: [
@@ -568,7 +567,6 @@ describe('when testing config', () => {
         withStep({ transitions: { 'Invalid!': '$done' } }),
         withStep({
           gate: {
-            provider: 'prompt',
             timeoutMs: 1_000,
           },
           transitions: { same: '$done' },
@@ -812,8 +810,7 @@ describe('when testing config', () => {
       expect(result.errors.join('\n')).toMatch(/reserved by Pi or the harness/);
     });
 
-    test('defaults gates to prompt and supports Plannotator without duplication', () => {
-      // given
+    test('defaults a gate timeout', () => {
       const raw = baseWorkflow();
       const steps = raw.steps as Record<string, Record<string, unknown>>;
       steps.inspect = {
@@ -825,44 +822,13 @@ describe('when testing config', () => {
           handoff: 'inspect',
         },
       };
-      // when
-      const promptResult = validateWorkflow(raw);
-      // then
-      expect(promptResult.errors).toEqual([]);
-      expect(promptResult.value?.steps.inspect?.gate?.provider).toBe('prompt');
 
-      const plannotator = structuredClone(raw);
-      const plannotatorSteps = plannotator.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      plannotatorSteps.inspect = {
-        ...plannotatorSteps.inspect,
-        gate: { provider: 'plannotator' },
-      };
-      const plannotatorResult = validateWorkflow(plannotator);
+      const plannotatorResult = validateWorkflow(raw);
       expect(plannotatorResult.errors).toEqual([]);
-      expect(plannotatorResult.value?.steps.inspect?.gate?.provider).toBe(
-        'plannotator',
-      );
       expect(plannotatorResult.value?.steps.inspect?.gate).toMatchObject({
         timeoutMs: 30_000,
       });
 
-      const invalid = structuredClone(raw);
-      const invalidSteps = invalid.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      invalidSteps.inspect = {
-        ...invalidSteps.inspect,
-        gate: {
-          provider: 'unknown',
-        },
-      };
-      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
-        /expected prompt or plannotator/,
-      );
     });
 
     test('project permission ceiling constrains declarative Bash rules', () => {

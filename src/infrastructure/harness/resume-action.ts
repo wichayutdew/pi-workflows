@@ -28,7 +28,6 @@ type HarnessActionContext = Pick<
   | 'dependencies'
   | 'isolateMainSessionTools'
   | 'launchCurrentStep'
-  | 'launchPromptReview'
   | 'persist'
   | 'pi'
   | 'preflight'
@@ -122,21 +121,14 @@ async function resumeNow(
   }
 
   let resumed = reconciled.run;
-  if (
-    resumed.pendingGate?.provider === 'plannotator' &&
-    !resumed.pendingGate.reviewId
-  ) {
+  if (resumed.pendingGate && !resumed.pendingGate.reviewId) {
     resumed = failGate(
       resumed,
       'Gate submission was interrupted before a review id was recorded; submit it again',
       this.dependencies.now(),
     );
   }
-  if (
-    resumed.pendingGate?.provider === 'plannotator' &&
-    resumed.pendingGate.reviewId &&
-    !resumed.pendingGate.resolution
-  ) {
+  if (resumed.pendingGate?.reviewId && !resumed.pendingGate.resolution) {
     const requestedReviewId = resumed.pendingGate.reviewId;
     const gateStep = workflow.definition.steps[resumed.pendingGate.stepId];
     const statusResponse =
@@ -144,9 +136,7 @@ async function resumeNow(
         this.pi.events,
         `${resumed.runId}:review-status:${this.dependencies.createRequestId()}`,
         requestedReviewId,
-        gateStep?.gate?.provider === 'plannotator'
-          ? gateStep.gate.timeoutMs
-          : 5_000,
+        gateStep?.gate?.timeoutMs ?? 5_000,
       );
     if (!matchesResumeCheckpoint(this.run, this.sessionEpoch, checkpoint)) {
       context.ui.notify(
@@ -277,11 +267,6 @@ async function resumeNow(
     this.persist();
     this.restoreBaselineTools();
     this.updateStatus();
-    if (this.run.pendingGate?.provider === 'prompt') {
-      this.launchPromptReview(workflow, this.run, context);
-      context.ui.notify('Workflow resumed with built-in review open', 'info');
-      return;
-    }
     context.ui.notify(
       `Workflow resumed and is waiting for review ${this.run.pendingGate?.reviewId ?? ''}`.trim(),
       'info',

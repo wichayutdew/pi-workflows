@@ -254,7 +254,6 @@ describe('when exploring workflow step evidence', () => {
       run = recordCurrentGateDecision(
         run,
         {
-          provider: 'prompt',
           requestId: `gate-${visit}`,
           approved: true,
           feedback: `feedback ${visit}:${'f'.repeat(9_000)}`,
@@ -524,7 +523,6 @@ describe('when exploring workflow step evidence', () => {
       review: {
         prompt: 'Review',
         gate: {
-          provider: 'prompt',
         },
         transitions: { ready: '$done', handoff: 'review' },
       },

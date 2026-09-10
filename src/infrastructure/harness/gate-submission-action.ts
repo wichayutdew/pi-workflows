@@ -15,7 +15,6 @@ type HarnessActionContext = Pick<
   | 'dependencies'
   | 'isSessionActive'
   | 'latestContext'
-  | 'launchPromptReview'
   | 'persist'
   | 'pi'
   | 'restoreBaselineTools'
@@ -83,11 +82,6 @@ async function submitGate(
   this.persist();
   this.restoreBaselineTools();
   this.updateStatus();
-
-  if (step.gate.provider === 'prompt') {
-    this.launchPromptReview(workflow, this.run, this.latestContext);
-    return;
-  }
 
   const response = await this.dependencies.requestPlannotatorReview(
     this.pi.events,

@@ -70,8 +70,7 @@ export function preflightStep(
   const hasExtension = (extension: string): boolean =>
     extensionResources.some((resource) => sourceMatches(resource, extension));
   const isPlannotatorRequired =
-    step.gate?.provider === 'plannotator' &&
-    !step.requires.extensions.includes('plannotator');
+    step.gate !== undefined && !step.requires.extensions.includes('plannotator');
 
   return [
     ...missingRequiredResources({

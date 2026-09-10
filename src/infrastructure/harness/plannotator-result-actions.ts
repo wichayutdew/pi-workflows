@@ -56,8 +56,7 @@ async function handlePlannotatorResult(
 ): Promise<void> {
   if (
     !this.isSessionActive ||
-    this.run?.pendingGate?.provider !== 'plannotator' ||
-    !this.run.pendingGate.reviewId
+    !this.run?.pendingGate?.reviewId
   ) {
     return;
   }

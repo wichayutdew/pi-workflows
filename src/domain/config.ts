@@ -70,16 +70,9 @@ type GateDefinition = {
   readonly artifactContract?: ArtifactContract;
 };
 
-export type PromptGate = GateDefinition & {
-  readonly provider: 'prompt';
-};
-
-export type PlannotatorGate = GateDefinition & {
-  readonly provider: 'plannotator';
+export type WorkflowGate = GateDefinition & {
   readonly timeoutMs: number;
 };
-
-export type WorkflowGate = PromptGate | PlannotatorGate;
 
 export type StepWorkspaceBinding = {
   /** Must contain only `ready`; retained in the persisted schema for compatibility. */

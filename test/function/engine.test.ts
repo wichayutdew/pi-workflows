@@ -164,7 +164,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: '$done',
@@ -210,7 +209,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: '$done',
@@ -275,7 +273,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: '$done',
@@ -394,7 +391,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: '$done',
@@ -479,7 +475,6 @@ describe('when testing engine', () => {
         plan: {
           prompt: 'Plan',
           gate: {
-            provider: 'prompt',
           },
           transitions: {
             ready: '$done',
@@ -527,7 +522,6 @@ describe('when testing engine', () => {
           permissions: { extensions: ['plannotator'] },
           requires: { extensions: ['plannotator'] },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: 'implement',
@@ -611,7 +605,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: 'implement',
@@ -868,7 +861,6 @@ describe('when testing engine', () => {
           permissions: { extensions: ['plannotator'] },
           requires: { extensions: ['plannotator'] },
           gate: {
-            provider: 'plannotator',
           },
           transitions: {
             ready: 'implement',
@@ -948,7 +940,6 @@ describe('when testing engine', () => {
             extensions: ['plannotator'],
           },
           gate: {
-            provider: 'prompt',
           },
           transitions: {
             ready: 'implement',
@@ -999,18 +990,6 @@ describe('when testing engine', () => {
         },
       };
 
-      const providerChanged = structuredClone(raw);
-      const providerSteps = providerChanged.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      providerSteps.plan = {
-        ...providerSteps.plan,
-        gate: {
-          provider: 'plannotator',
-        },
-      };
-
       const gateConfigChanged = structuredClone(raw);
       const gateConfigSteps = gateConfigChanged.steps as Record<
         string,
@@ -1019,12 +998,11 @@ describe('when testing engine', () => {
       gateConfigSteps.plan = {
         ...gateConfigSteps.plan,
         gate: {
-          provider: 'prompt',
           artifactContract: {
             maxChars: 1_000,
-            requiredSubstrings: [],
-            forbiddenSubstrings: [],
-            equalOccurrenceGroups: [],
+            requiredHeadings: [
+              { level: 1, title: 'Plan', guidance: 'Describe the work.' },
+            ],
           },
         },
         transitions: {
@@ -1049,7 +1027,6 @@ describe('when testing engine', () => {
       // when
       const changedWorkflows = [
         approvedTargetChanged,
-        providerChanged,
         gateConfigChanged,
         permissionsChanged,
       ].map(loadedWorkflow);
@@ -1061,12 +1038,11 @@ describe('when testing engine', () => {
             changed.stepStructuralDigests.plan ===
             original.stepStructuralDigests.plan,
         ),
-      ).toEqual([false, false, false, false]);
+      ).toEqual([false, false, false]);
       const reconciled = changedWorkflows.map((changed) =>
         reconcileRun(run, changed, 4),
       );
       expect(reconciled.map((result) => result.restartedStep)).toEqual([
-        'plan',
         'plan',
         'plan',
         'plan',
@@ -1075,16 +1051,13 @@ describe('when testing engine', () => {
         'plan',
         'plan',
         'plan',
-        'plan',
       ]);
       expect(reconciled.map((result) => result.run?.history)).toEqual([
         [],
         [],
         [],
-        [],
       ]);
       expect(reconciled.map((result) => result.run?.reviewedArtifact)).toEqual([
-        '',
         '',
         '',
         '',
@@ -1244,7 +1217,6 @@ describe('when testing engine', () => {
         plan: {
           prompt: 'Plan',
           gate: {
-            provider: 'prompt',
           },
           transitions: {
             ready: 'implement',
@@ -1355,7 +1327,6 @@ describe('when testing engine', () => {
           permissions: { extensions: ['plannotator'] },
           requires: { extensions: ['plannotator'] },
           gate: {
-            provider: 'plannotator',
           },
           transitions: { ready: '$done', handoff: 'plan' },
         },
@@ -1450,16 +1421,6 @@ describe('when testing engine', () => {
       expect(
         attachGateReviewId(pending, 'review-1', 3).pendingGate?.reviewId,
       ).toBe('review-1');
-      expect(() =>
-        attachGateReviewId(
-          {
-            ...pending,
-            pendingGate: { ...pending.pendingGate!, provider: 'prompt' },
-          },
-          'review-1',
-          3,
-        ),
-      ).toThrow(/only a Plannotator gate/);
       expect(
         storeGateResolution(
           run,
@@ -1536,7 +1497,6 @@ describe('when testing engine', () => {
         isWorkflowRun({
           ...run,
           pendingGate: {
-            provider: 'plannotator',
             requestId: 'request-3',
             stepId: 'inspect',
           },
@@ -1548,7 +1508,6 @@ describe('when testing engine', () => {
           status: 'paused',
           pausedFrom: 'awaiting-gate',
           pendingGate: {
-            provider: 'plannotator',
             requestId: 'request-4',
             stepId: 'inspect',
             artifact: '# Plan',

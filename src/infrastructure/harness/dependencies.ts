@@ -10,7 +10,6 @@ import {
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
 } from '../integrations/plannotator.ts';
-import { requestPromptGateReview } from '../integrations/prompt-gate.ts';
 import {
   createSubagentDelegationClient,
   type SubagentDelegationClientController,
@@ -57,7 +56,6 @@ export type WorkflowHarnessDependencies = {
   readonly loadCatalog: typeof loadCatalog;
   readonly requestPlannotatorReview: typeof requestPlannotatorReview;
   readonly requestPlannotatorReviewStatus: typeof requestPlannotatorReviewStatus;
-  readonly requestPromptGateReview: typeof requestPromptGateReview;
   readonly showWorkflowStatus: typeof showWorkflowStatus;
   readonly createSubagentClient: (
     pi: ExtensionAPI,
@@ -152,7 +150,6 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   loadCatalog,
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
-  requestPromptGateReview,
   showWorkflowStatus,
   createSubagentClient: () => createSubagentDelegationClient(),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),

@@ -144,7 +144,6 @@ function renderGateDecision(
   return [
     '',
     theme.bold(theme.fg('accent', 'Human gate decision')),
-    ...keyValueLines(theme, 'provider', decision.provider, width),
     ...keyValueLines(
       theme,
       'decision',

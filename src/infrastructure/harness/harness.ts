@@ -15,7 +15,6 @@ import {
   type WorkflowStep,
 } from '../../domain/index.ts';
 import type { WorkflowRun } from '../../domain/index.ts';
-import { type PromptGateReviewResult } from '../integrations/prompt-gate.ts';
 import type { SubagentDelegationClientController } from '../process/subagent-client.ts';
 import type {
   SubagentDelegationResponse,
@@ -31,7 +30,6 @@ import {
 } from './dependencies.ts';
 import type {
   ActiveDelegation,
-  ActivePromptReview,
   MainStepIdentity,
   WorkflowStartContext,
 } from './types.ts';
@@ -44,7 +42,6 @@ import { createStepExecutionActions } from './step-execution-actions.ts';
 import { createDelegationResponseActions } from './delegation-response-actions.ts';
 import { createDelegationControlActions } from './delegation-control-actions.ts';
 import { createGateSubmissionAction } from './gate-submission-action.ts';
-import { createPromptGateActions } from './prompt-gate-actions.ts';
 import { createPlannotatorResultActions } from './plannotator-result-actions.ts';
 import { createCoreActions } from './core-actions.ts';
 import type { SettledStepReport } from './step-reporting.ts';
@@ -62,7 +59,6 @@ const STEP_EXECUTION_ACTIONS = createStepExecutionActions();
 const DELEGATION_RESPONSE_ACTIONS = createDelegationResponseActions();
 const DELEGATION_CONTROL_ACTIONS = createDelegationControlActions();
 const GATE_SUBMISSION_ACTION = createGateSubmissionAction();
-const PROMPT_GATE_ACTIONS = createPromptGateActions();
 const PLANNOTATOR_RESULT_ACTIONS = createPlannotatorResultActions();
 const CORE_ACTIONS = createCoreActions();
 
@@ -82,7 +78,6 @@ export class WorkflowHarness implements WorkflowCommandController {
   private isSessionActive = false;
   private sessionEpoch = 0;
   private activeDelegation: ActiveDelegation | undefined;
-  private activePromptReview: ActivePromptReview | undefined;
   private registeredWorkflowCommands = new Set<string>();
   private catalogLoadSequence = 0;
   private readonly mutationQueue: SerialTaskQueueController;
@@ -214,30 +209,6 @@ export class WorkflowHarness implements WorkflowCommandController {
     summary: string,
     artifact: string,
   ) => Promise<void> = GATE_SUBMISSION_ACTION.submitGate;
-  private readonly launchPromptReview: (
-    workflow: LoadedWorkflow,
-    run: WorkflowRun,
-    context: ExtensionContext | undefined,
-  ) => void = PROMPT_GATE_ACTIONS.launchPromptReview;
-  private readonly queuePromptReviewResult: (
-    active: ActivePromptReview,
-    result: PromptGateReviewResult,
-  ) => void = PROMPT_GATE_ACTIONS.queuePromptReviewResult;
-  private readonly queuePromptReviewFailure: (
-    active: ActivePromptReview,
-    reason: string,
-  ) => void = PROMPT_GATE_ACTIONS.queuePromptReviewFailure;
-  private readonly finishPromptReview: (
-    active: ActivePromptReview,
-    result: PromptGateReviewResult,
-  ) => Promise<void> = PROMPT_GATE_ACTIONS.finishPromptReview;
-  private readonly pausePromptGate: (
-    requestId: string,
-    reason: string,
-    isFailed: boolean,
-  ) => void = PROMPT_GATE_ACTIONS.pausePromptGate;
-  private readonly cancelPromptReview: () => void =
-    PROMPT_GATE_ACTIONS.cancelPromptReview;
   private readonly registerPlannotatorResults: () => void =
     PLANNOTATOR_RESULT_ACTIONS.registerPlannotatorResults;
   private readonly handlePlannotatorResult: (data: unknown) => Promise<void> =

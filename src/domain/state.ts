@@ -57,7 +57,6 @@ export type StepAttemptResult = {
 };
 
 export type StepGateDecision = {
-  readonly provider: 'prompt' | 'plannotator';
   readonly requestId: string;
   readonly approved: boolean;
   readonly feedback: string;
@@ -142,7 +141,6 @@ export type GateResolution = {
 };
 
 export type PendingGate = {
-  readonly provider: 'prompt' | 'plannotator';
   readonly requestId: string;
   readonly stepId: string;
   readonly artifact: string;

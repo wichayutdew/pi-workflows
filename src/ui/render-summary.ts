@@ -139,9 +139,7 @@ export function renderSummaryLines(
     );
   }
   if (run.pendingGate) {
-    const review = run.pendingGate.reviewId
-      ? `${run.pendingGate.provider} · ${run.pendingGate.reviewId}`
-      : `${run.pendingGate.provider} · opening`;
+    const review = run.pendingGate.reviewId ?? 'opening';
     lines.push(...keyValueLines(theme, 'review', review, width, 'warning'));
   }
   if (!workflow) {

@@ -25,14 +25,6 @@ export type MainStepIdentity = {
   sessionEpoch: number;
 };
 
-export type ActivePromptReview = {
-  requestId: string;
-  runId: string;
-  stepId: string;
-  sessionEpoch: number;
-  abortController: AbortController;
-};
-
 export type WorkflowStartContext = {
   context: ExtensionContext;
   skills: () => ReadonlyArray<{ name: string }> | undefined;

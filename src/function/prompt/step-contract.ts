@@ -50,7 +50,7 @@ export function createStepContract({
     .map(([outcome, target]) => `- ${outcome}: ${target}`)
     .join('\n');
   const gateLine = step.gate
-    ? `- ${step.gate.submitOutcome}: submit the artifact to ${step.gate.provider}; include the full artifact argument`
+    ? `- ${step.gate.submitOutcome}: submit the artifact to Plannotator; include the full artifact argument`
     : '';
   const gateArtifactLines = formatGateArtifactContract(step);
   const workspaceLines = step.workspace

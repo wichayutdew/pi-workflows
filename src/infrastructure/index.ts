@@ -6,7 +6,6 @@ export * from './harness/workspace-directory.ts';
 export * from './fs/transcript-reader.ts';
 export * from './process/subagent-client.ts';
 export * from './integrations/plannotator.ts';
-export * from './integrations/prompt-gate.ts';
 export * from './runtime/main-step-runtime.ts';
 export * from './runtime/child-runtime.ts';
 export * from './runtime/task-queue.ts';
