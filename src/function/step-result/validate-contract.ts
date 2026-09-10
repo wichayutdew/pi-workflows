@@ -1,14 +1,34 @@
-import type { ArtifactContract } from '../../domain/index.ts';
+import type { ArtifactContract, RequiredHeading } from '../../domain/index.ts';
 
-function countOccurrences(value: string, substring: string): number {
-  let count = 0;
-  let offset = 0;
-  while (true) {
-    const match = value.indexOf(substring, offset);
-    if (match === -1) return count;
-    count += 1;
-    offset = match + substring.length;
+function headingLine(heading: RequiredHeading): string {
+  return `${'#'.repeat(heading.level)} ${heading.title}`;
+}
+
+function artifactHeadings(artifact: string): ReadonlySet<string> {
+  const headings = new Set<string>();
+  let fence: { readonly character: '`' | '~'; readonly length: number } | undefined;
+
+  for (const line of artifact.split(/\r?\n/)) {
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]!;
+      const character = marker[0] as '`' | '~';
+      if (!fence) {
+        fence = { character, length: marker.length };
+      } else if (fence.character === character && marker.length >= fence.length) {
+        fence = undefined;
+      }
+      continue;
+    }
+    if (fence) continue;
+
+    const headingMatch = /^(#{1,3})[ \t]+(.+?)\s*$/.exec(line);
+    if (headingMatch) {
+      headings.add(`${headingMatch[1]} ${headingMatch[2]}`);
+    }
   }
+
+  return headings;
 }
 
 export function validateArtifactContract(
@@ -19,28 +39,11 @@ export function validateArtifactContract(
   if (artifact.length > contract.maxChars) {
     return `gate artifact exceeds ${contract.maxChars} characters`;
   }
-  const required = contract.requiredSubstrings.find(
-    (substring) => !artifact.includes(substring),
+  const headings = artifactHeadings(artifact);
+  const required = contract.requiredHeadings.find(
+    (heading) => !headings.has(headingLine(heading)),
   );
-  if (required) {
-    return `gate artifact is missing required text: ${JSON.stringify(required)}`;
-  }
-  const forbidden = contract.forbiddenSubstrings.find((substring) =>
-    artifact.includes(substring),
-  );
-  if (forbidden) {
-    return `gate artifact contains forbidden text: ${JSON.stringify(forbidden)}`;
-  }
-  for (const group of contract.equalOccurrenceGroups) {
-    const counts = group.map((substring) =>
-      countOccurrences(artifact, substring),
-    );
-    if (counts.some((count) => count === 0)) {
-      return `gate artifact is missing required repeated text: ${JSON.stringify(group)}`;
-    }
-    if (!counts.every((count) => count === counts[0])) {
-      return `gate artifact has unequal repeated text counts: ${JSON.stringify(group)}`;
-    }
-  }
-  return undefined;
+  return required
+    ? `gate artifact is missing required heading: ${JSON.stringify(headingLine(required))}`
+    : undefined;
 }

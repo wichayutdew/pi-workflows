@@ -1,12 +1,18 @@
 import { describe, expect, test } from 'bun:test';
+import type { ArtifactContract } from '../../src/domain/index.ts';
 import { validateArtifactContract } from '../../src/function/step-result/validate-contract.ts';
 
 const contract = {
   maxChars: 100,
-  requiredSubstrings: ['# Plan'],
-  forbiddenSubstrings: ['secret'],
-  equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
-};
+  requiredHeadings: [
+    { level: 1, title: 'Report destination', guidance: 'Exact report path.' },
+    {
+      level: 2,
+      title: 'Validation',
+      guidance: 'Independent commands and proof.',
+    },
+  ],
+} satisfies ArtifactContract;
 
 describe('when validating a gate artifact contract', () => {
   test('accepts an artifact when no contract is configured', () => {
@@ -19,38 +25,35 @@ describe('when validating a gate artifact contract', () => {
     );
   });
 
-  test('rejects an artifact missing required text', () => {
-    expect(validateArtifactContract('## Evidence', contract)).toBe(
-      'gate artifact is missing required text: "# Plan"',
+  test('rejects an artifact missing a required heading', () => {
+    expect(validateArtifactContract('## Validation', contract)).toBe(
+      'gate artifact is missing required heading: "# Report destination"',
     );
   });
 
-  test('rejects an artifact containing forbidden text', () => {
-    expect(validateArtifactContract('# Plan\nsecret', contract)).toBe(
-      'gate artifact contains forbidden text: "secret"',
-    );
+  test('rejects a required heading at the wrong level', () => {
+    expect(
+      validateArtifactContract('# Report destination\n# Validation', contract),
+    ).toBe('gate artifact is missing required heading: "## Validation"');
   });
 
-  test('rejects an artifact missing repeated text', () => {
-    expect(validateArtifactContract('# Plan\n**Question:**', contract)).toBe(
-      'gate artifact is missing required repeated text: ["**Question:**","**Answer:**"]',
-    );
-  });
-
-  test('rejects an artifact with unequal repeated text', () => {
+  test('rejects headings found only inside a fenced code block', () => {
     expect(
       validateArtifactContract(
-        '# Plan\n**Question:**\n**Question:**\n**Answer:**',
+        '```md\n# Report destination\n## Validation\n```',
         contract,
       ),
     ).toBe(
-      'gate artifact has unequal repeated text counts: ["**Question:**","**Answer:**"]',
+      'gate artifact is missing required heading: "# Report destination"',
     );
   });
 
-  test('accepts an artifact satisfying every contract requirement', () => {
+  test('accepts an artifact containing every required Markdown heading', () => {
     expect(
-      validateArtifactContract('# Plan\n**Question:**\n**Answer:**', contract),
+      validateArtifactContract(
+        '# Report destination\n/tmp/report.md\n\n## Validation\nbun test',
+        contract,
+      ),
     ).toBeUndefined();
   });
 });

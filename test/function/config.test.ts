@@ -137,12 +137,17 @@ describe('when testing config', () => {
       const inspect = (raw.steps as Record<string, Record<string, unknown>>)
         .inspect!;
       inspect.gate = {
-        provider: 'prompt',
+        provider: 'plannotator',
         artifactContract: {
           maxChars: 100,
-          requiredSubstrings: ['# Plan', '## Evidence'],
-          forbiddenSubstrings: ['saved at /'],
-          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+          requiredHeadings: [
+            { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+            {
+              level: 2,
+              title: 'Evidence',
+              guidance: 'Provide independent proof.',
+            },
+          ],
         },
       };
       inspect.transitions = {
@@ -155,9 +160,14 @@ describe('when testing config', () => {
       expect(validateWorkflow(raw).value?.steps.inspect?.gate).toMatchObject({
         artifactContract: {
           maxChars: 100,
-          requiredSubstrings: ['# Plan', '## Evidence'],
-          forbiddenSubstrings: ['saved at /'],
-          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+          requiredHeadings: [
+            { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+            {
+              level: 2,
+              title: 'Evidence',
+              guidance: 'Provide independent proof.',
+            },
+          ],
         },
       });
 
@@ -168,11 +178,10 @@ describe('when testing config', () => {
       ).artifactContract as Record<string, unknown>;
       Object.assign(gate, {
         maxChars: 0,
-        requiredSubstrings: ['', '# Plan'],
-        forbiddenSubstrings: ['saved at /', 'saved at /'],
-        equalOccurrenceGroups: [
-          ['**Question:**', '**Question:**'],
-          ['only one'],
+        requiredHeadings: [
+          { level: 4, title: '', guidance: '' },
+          { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+          { level: 1, title: 'Plan', guidance: 'Different guidance.' },
         ],
         unexpected: true,
       });
@@ -180,10 +189,10 @@ describe('when testing config', () => {
       const messages = validateWorkflow(malformed).errors.join('\n');
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/expected an integer from 1 to 200000/);
-      expect(messages).toMatch(/must not be empty/);
-      expect(messages).toMatch(/duplicate value "saved at \//);
-      expect(messages).toMatch(/duplicate value "\*\*Question:\*\*"/);
-      expect(messages).toMatch(/at least two values are required/);
+      expect(messages).toMatch(/requiredHeadings\[0\]\.level: expected 1, 2, or 3/);
+      expect(messages).toMatch(/requiredHeadings\[0\]\.title: must not be empty/);
+      expect(messages).toMatch(/requiredHeadings\[0\]\.guidance: must not be empty/);
+      expect(messages).toMatch(/duplicate heading "# Plan"/);
 
       const withoutMax = structuredClone(raw);
       delete (
@@ -194,6 +203,16 @@ describe('when testing config', () => {
       ).maxChars;
       expect(validateWorkflow(withoutMax).errors.join('\n')).toMatch(
         /maxChars: expected an integer from 1 to 200000/,
+      );
+
+      const legacy = structuredClone(raw);
+      const legacyContract = (
+        (legacy.steps as Record<string, Record<string, unknown>>).inspect!
+          .gate as Record<string, unknown>
+      ).artifactContract as Record<string, unknown>;
+      legacyContract.requiredSubstrings = ['# Plan'];
+      expect(validateWorkflow(legacy).errors.join('\n')).toMatch(
+        /unknown property "requiredSubstrings"/,
       );
     });
 
