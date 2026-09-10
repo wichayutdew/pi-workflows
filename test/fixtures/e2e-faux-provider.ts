@@ -10,7 +10,6 @@ import {
 import {
   E2E_BOOTSTRAP_HANDOFF,
   E2E_BOOTSTRAP_MARKER,
-  E2E_FINAL_SUMMARY,
   E2E_IMPLEMENT_HANDOFF,
   E2E_IMPLEMENT_MARKER,
   E2E_INPUT_MARKER,
@@ -295,27 +294,45 @@ export default function e2eFauxProvider(pi: ExtensionAPI): void {
         observation.step === 'bootstrap'
           ? {
               outcome: 'ready',
-              summary: E2E_BOOTSTRAP_HANDOFF,
+              completed: [
+                'Selected the workspace in `test/e2e/direct-worker-runtime.test.ts`: E2E_WORKSPACE_HANDOFF_SENTINEL.',
+              ],
+              remaining: ['No active-step work remains.'],
               workspace: { cwd: workspaceCwd() },
             }
           : observation.step === 'plan'
-            ? { outcome: 'planned', summary: E2E_PLAN_HANDOFF }
+            ? {
+                outcome: 'ready',
+                completed: [
+                  'Created the approved plan in `test/fixtures/e2e-faux-provider.ts`: E2E_PLAN_HANDOFF_SENTINEL.',
+                ],
+                remaining: ['No active-step work remains.'],
+              }
             : observation.step === 'implement'
               ? observation.visit === 3
                 ? {
-                    outcome: 'checkpoint',
-                    summary:
-                      '# Checkpoint: Feature B checkpointed.\n**Completed:** Checkpointed feature B.\n**Remaining:** Implement the remaining approved work.',
-                    progress: {
-                      feature: 'feature B',
-                      commit: 'abcdef2 implement feature B',
-                      changedFiles: ['src/feature-b.ts'],
-                      verification: ['bun test feature-b: passed'],
-                      remaining: [],
-                    },
+                    outcome: 'handoff',
+                    completed: [
+                      'Checkpointed feature B in `src/feature-b.ts`.',
+                    ],
+                    remaining: [
+                      'Implement the remaining approved work in `src/feature-b.ts`.',
+                    ],
                   }
-                : { outcome: 'implemented', summary: E2E_IMPLEMENT_HANDOFF }
-              : { outcome: 'done', summary: E2E_FINAL_SUMMARY };
+                : {
+                    outcome: 'ready',
+                    completed: [
+                      'Implemented the change in `src/index.ts`: E2E_IMPLEMENT_HANDOFF_SENTINEL.',
+                    ],
+                    remaining: ['No active-step work remains.'],
+                  }
+              : {
+                  outcome: 'ready',
+                  completed: [
+                    'Verified the workflow with `bun test`: E2E_FINAL_SENTINEL.',
+                  ],
+                  remaining: ['No active-step work remains.'],
+                };
       return fauxAssistantMessage(
         fauxToolCall(
           'structured_output',

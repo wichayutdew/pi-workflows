@@ -28,17 +28,9 @@ export type StepPermissions = {
   readonly tools: ReadonlyArray<string>;
   /** MCP proxy selectors in `server` or `server/tool` form. */
   readonly mcp: ReadonlyArray<string>;
-  /** Source-name/path fragments whose registered tools may be used. */
-  readonly extensions: ReadonlyArray<string>;
   /** Skills the step prompt is allowed to use. */
   readonly skills: ReadonlyArray<string>;
   readonly bash: BashPermission;
-};
-
-export type StepRequirements = {
-  readonly tools: ReadonlyArray<string>;
-  readonly extensions: ReadonlyArray<string>;
-  readonly skills: ReadonlyArray<string>;
 };
 
 export type StepAgent = {
@@ -46,37 +38,35 @@ export type StepAgent = {
   readonly name: string;
 };
 
-export type PromptSpec =
-  { readonly inline: string } | { readonly file: string };
+export type PromptSpec = { readonly file: string };
+
+export type RequiredHeading = {
+  readonly level: 1 | 2 | 3;
+  readonly title: string;
+  readonly guidance: string;
+};
 
 export type ArtifactContract = {
   readonly maxChars: number;
-  readonly requiredSubstrings: ReadonlyArray<string>;
-  readonly forbiddenSubstrings: ReadonlyArray<string>;
-  readonly equalOccurrenceGroups: ReadonlyArray<ReadonlyArray<string>>;
-  readonly onValidationFailure?: 'retry';
+  readonly requiredHeadings: ReadonlyArray<RequiredHeading>;
 };
 
 type GateDefinition = {
-  readonly submitOutcome: string;
-  readonly approvedOutcome: string;
-  readonly rejectedOutcome: string;
+  /** Gates accept only the model's `ready` result. */
+  readonly submitOutcome: 'ready';
+  /** Approval follows the step's `ready` transition. */
+  readonly approvedOutcome: 'ready';
+  /** Rejection revisits the active step through its `handoff` transition. */
+  readonly rejectedOutcome: 'handoff';
   readonly artifactContract?: ArtifactContract;
 };
 
-export type PromptGate = GateDefinition & {
-  readonly provider: 'prompt';
-};
-
-export type PlannotatorGate = GateDefinition & {
-  readonly provider: 'plannotator';
+export type WorkflowGate = GateDefinition & {
   readonly timeoutMs: number;
 };
 
-export type WorkflowGate = PromptGate | PlannotatorGate;
-
 export type StepWorkspaceBinding = {
-  /** Outcomes whose result establishes the workspace for later steps. */
+  /** Must contain only `ready`; retained in the persisted schema for compatibility. */
   readonly bindOn: ReadonlyArray<string>;
   /** Relative, absolute, or ~/ home-relative paths that may contain the workspace. */
   readonly allowedRoots: ReadonlyArray<string>;
@@ -89,7 +79,6 @@ export type WorkflowStep = {
   readonly agent?: StepAgent;
   readonly maxToolCalls?: number;
   readonly permissions: StepPermissions;
-  readonly requires: StepRequirements;
   readonly transitions: Readonly<Record<string, StepTarget>>;
   readonly gate?: WorkflowGate;
   /** Optional immutable workspace binding produced by this delegated step. */
@@ -107,7 +96,7 @@ export type WorkflowDefinition = {
   readonly steps: Readonly<Record<string, WorkflowStep>>;
 };
 
-export type WorkflowSourceKind = 'user' | 'project';
+export type WorkflowSourceKind = 'user';
 
 export type LoadedWorkflow = {
   readonly definition: WorkflowDefinition;
@@ -120,19 +109,9 @@ export type LoadedWorkflow = {
   readonly sourceKind: WorkflowSourceKind;
 };
 
-export type PermissionCeiling = {
-  readonly tools: ReadonlyArray<string>;
-  readonly mcp: ReadonlyArray<string>;
-  readonly extensions: ReadonlyArray<string>;
-  readonly skills: ReadonlyArray<string>;
-  readonly bash: BashPermission;
-};
-
 export type WorkflowSettings = {
   readonly version: typeof WORKFLOW_SCHEMA_VERSION;
-  readonly allowProjectWorkflows: boolean;
   readonly statusShortcut: KeyId;
-  readonly permissionCeiling?: PermissionCeiling;
 };
 
 export type ConfigDiagnostic = {
@@ -146,44 +125,21 @@ export type WorkflowCatalog = {
   readonly settings: WorkflowSettings;
   readonly diagnostics: ReadonlyArray<ConfigDiagnostic>;
   readonly userDirectory: string;
-  readonly projectDirectory?: string;
 };
 
 export const EMPTY_PERMISSIONS = {
   tools: [],
   mcp: [],
-  extensions: [],
   skills: [],
   bash: { mode: 'deny', allow: [] },
 } as const satisfies StepPermissions;
 
-export const EMPTY_REQUIREMENTS = {
-  tools: [],
-  extensions: [],
-  skills: [],
-} as const satisfies StepRequirements;
-
 export const DEFAULT_SETTINGS = {
   version: WORKFLOW_SCHEMA_VERSION,
-  allowProjectWorkflows: false,
   statusShortcut: DEFAULT_STATUS_SHORTCUT,
 } as const satisfies WorkflowSettings;
 
-export function cloneEmptyRequirements(): {
-  readonly tools: Array<string>;
-  readonly extensions: Array<string>;
-  readonly skills: Array<string>;
-} {
-  return {
-    tools: [...EMPTY_REQUIREMENTS.tools],
-    extensions: [...EMPTY_REQUIREMENTS.extensions],
-    skills: [...EMPTY_REQUIREMENTS.skills],
-  };
-}
-
 export type LoadCatalogOptions = {
-  readonly cwd: string;
-  readonly projectTrusted: boolean;
   readonly userDirectory?: string;
 };
 

@@ -93,7 +93,7 @@ const buildResumeInputSection = (
 ): ReadonlyArray<string> => {
   if (!run.resumeInput) return [];
   const authority =
-    'The user-supplied resume guidance for this attempt is authoritative when it conflicts with task instructions in the step prompt or previous handoff. Inspect current state before applying it. It does not change the workflow graph or the YAML-enforced tools, MCP, extensions, skills, Bash policy, or workspace boundary.';
+    'The user-supplied resume guidance for this attempt is authoritative when it conflicts with task instructions in the step prompt or previous handoff. Inspect current state before applying it. It does not change the workflow graph or the YAML-enforced tools, MCP, skills, Bash policy, or workspace boundary.';
   if (promptContainsResumeInput) {
     return ['## Resume guidance authority', '', authority, ''];
   }
@@ -150,6 +150,13 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
       : []),
     prompt,
     '',
+    ...(contract.gateArtifactLines.length > 0
+      ? [
+          '## Gate artifact structure (enforced)',
+          '',
+          ...contract.gateArtifactLines,
+        ]
+      : []),
     ...(run.reviewedArtifact
       ? ['## Approved plan', '', run.reviewedArtifact, '']
       : []),
@@ -171,18 +178,33 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     contract.gateLine,
     ...contract.workspaceLines,
     '',
-    'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    'Provide only `completed` and `remaining` fields for the self-contained compact handoff; the extension owns all Markdown formatting and metadata.',
     ...(isDelegated
       ? [
           "Evaluate completion and choose an outcome using only this delegated step's instructions.",
           'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
-          'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
+          'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
         ]
       : []),
-    'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    'Do not write Markdown in completion fields. Provide one or more plain-text completed and remaining items; each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    ...(contract.outcomes.includes('ready')
+      ? [
+          'For `ready`, `remaining` must be exactly `No active-step work remains.`.',
+        ]
+      : []),
     ...(contract.outcomes.includes('blocked')
       ? [
-          'For `blocked`, also include `**Question:** <one concrete clarifying question ending in ?>`.',
+          'For `blocked`, put at least one user question ending in `?` in `remaining`.',
+        ]
+      : []),
+    ...(contract.outcomes.includes('handoff')
+      ? [
+          'For `handoff`, `remaining` must contain non-question actionable work for this same step.',
+        ]
+      : []),
+    ...(contract.outcomes.includes('gaps')
+      ? [
+          'For `gaps`, `remaining` must contain non-question actionable requirements to refresh in the configured earlier step.',
         ]
       : []),
     'Format all human-facing output—including summaries, gate artifacts, Markdown plans, reports, comments, and replies—for scanning: short headings, then one distinct fact, action, or metadata value per bullet or paragraph. Never pack unrelated values into one line or dense prose.',

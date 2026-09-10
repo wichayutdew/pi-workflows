@@ -13,7 +13,7 @@ function workspaceWorkflow() {
   raw.start = 'prepare';
   raw.steps = {
     prepare: {
-      prompt: 'Select a workspace',
+      prompt: { file: 'fixture-prompt-1.md' },
       agent: 'worker',
       workspace: {
         bindOn: ['ready'],
@@ -21,25 +21,25 @@ function workspaceWorkflow() {
       },
       transitions: {
         ready: 'implement',
-        retry: 'prepare',
+        handoff: 'prepare',
         blocked: '$pause',
       },
     },
     implement: {
-      prompt: 'Implement',
+      prompt: { file: 'fixture-prompt-2.md' },
       agent: 'worker',
       transitions: {
         ready: 'verify',
-        retry: 'implement',
+        handoff: 'implement',
         blocked: '$pause',
       },
     },
     verify: {
-      prompt: 'Verify',
+      prompt: { file: 'fixture-prompt-3.md' },
       agent: 'reviewer',
       transitions: {
-        passed: '$done',
-        failed: 'implement',
+        ready: '$done',
+        gaps: 'implement',
         blocked: '$pause',
       },
     },
@@ -145,12 +145,12 @@ describe('when persisting a workflow workspace binding', () => {
     });
 
     expect(() =>
-      advanceRun(workflow, run, 'retry', 'Retry', 3, {
+      advanceRun(workflow, run, 'handoff', 'Retry', 3, {
         workspaceCwd,
       }),
     ).toThrow(/cannot bind a workspace/);
     run = advanceRun(workflow, run, 'ready', 'Implemented', 3);
-    run = advanceRun(workflow, run, 'failed', 'Fix finding', 4);
+    run = advanceRun(workflow, run, 'gaps', 'Fix finding', 4);
     expect(run.currentStepId).toBe('implement');
     expect(run.cwd).toBe(workspaceCwd);
     expect(run.stepHandoff).toBe('Fix finding');
@@ -164,14 +164,14 @@ describe('when persisting a workflow workspace binding', () => {
     expect(run.stepHandoff).toBe('Fixed finding');
     expect(run.cwd).toBe(workspaceCwd);
 
-    run = advanceRun(workflow, run, 'passed', 'Verified finding', 6);
+    run = advanceRun(workflow, run, 'ready', 'Verified finding', 6);
     expect(run.status).toBe('completed');
     expect(run.history.map((entry) => entry.outcome)).toEqual([
       'ready',
       'ready',
-      'failed',
+      'gaps',
       'ready',
-      'passed',
+      'ready',
     ]);
     expect(isWorkflowRun(run)).toBe(true);
   });
@@ -183,16 +183,17 @@ describe('when persisting a workflow workspace binding', () => {
       ...steps.prepare,
       transitions: {
         ready: 'plan',
-        retry: 'prepare',
+        handoff: 'prepare',
         blocked: '$pause',
       },
     };
     steps.plan = {
-      prompt: 'Inspect the prepared workspace',
+      prompt: { file: 'fixture-prompt-4.md' },
       agent: 'planner',
       transitions: {
         ready: 'implement',
-        'workspace-refresh': 'prepare',
+        gaps: 'prepare',
+        handoff: 'plan',
         blocked: '$pause',
       },
     };
@@ -210,13 +211,7 @@ describe('when persisting a workflow workspace binding', () => {
     run = advanceRun(workflow, run, 'ready', 'Initially prepared', 2, {
       workspaceCwd,
     });
-    run = advanceRun(
-      workflow,
-      run,
-      'workspace-refresh',
-      'Refresh the same workspace',
-      3,
-    );
+    run = advanceRun(workflow, run, 'gaps', 'Refresh the same workspace', 3);
     expect(run.currentStepId).toBe('prepare');
     expect(run.cwd).toBe(workspaceCwd);
 
@@ -288,7 +283,7 @@ describe('when persisting a workflow workspace binding', () => {
     >;
     laterSteps.implement = {
       ...laterSteps.implement,
-      prompt: 'Changed implementation',
+      prompt: { file: 'fixture-prompt-5.md' },
     };
     const retained = reconcileRun(run, loadedWorkflow(laterChange), 4);
     expect(retained.restartedStep).toBe('implement');
@@ -302,7 +297,7 @@ describe('when persisting a workflow workspace binding', () => {
     >;
     bindingSteps.prepare = {
       ...bindingSteps.prepare,
-      prompt: 'Changed workspace preparation',
+      prompt: { file: 'fixture-prompt-6.md' },
     };
     const rolledBack = reconcileRun(run, loadedWorkflow(bindingChange), 5);
     expect(rolledBack.restartedStep).toBe('prepare');

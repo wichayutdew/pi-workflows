@@ -292,7 +292,6 @@ describe('when testing core actions', () => {
       workflows: new Map([[workflow.definition.id, workflow]]),
       settings: {
         version: 1,
-        allowProjectWorkflows: false,
         statusShortcut: 'ctrl+alt+w',
       },
       diagnostics: [],

@@ -80,7 +80,7 @@ describe('when persisting a workflow-only Pi session', () => {
       const completedRun = advanceRun(
         workflow,
         run,
-        'done',
+        'ready',
         'Implemented the requested change',
         3,
       );

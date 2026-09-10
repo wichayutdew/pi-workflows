@@ -54,6 +54,7 @@ function validateGraph(
   if (start && !Object.hasOwn(steps, start)) {
     errors.push(`workflow.start: unknown step "${start}"`);
   }
+  const stepOrder = Object.keys(steps);
   Object.entries(steps).forEach(([stepId, step]) => {
     Object.entries(step.transitions).forEach(([outcome, target]) => {
       if (
@@ -63,6 +64,16 @@ function validateGraph(
       ) {
         errors.push(
           `workflow.steps.${stepId}.transitions.${outcome}: unknown target "${target}"`,
+        );
+      }
+      if (
+        outcome === 'gaps' &&
+        (target === '$done' ||
+          target === '$pause' ||
+          stepOrder.indexOf(target) >= stepOrder.indexOf(stepId))
+      ) {
+        errors.push(
+          `workflow.steps.${stepId}.transitions.gaps: must target an earlier step`,
         );
       }
     });

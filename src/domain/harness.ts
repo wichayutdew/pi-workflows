@@ -82,14 +82,6 @@ export type MainStepIdentity = {
   sessionEpoch: number;
 };
 
-export type ActivePromptReview = {
-  requestId: string;
-  runId: string;
-  stepId: string;
-  sessionEpoch: number;
-  abortController: AbortController;
-};
-
 export type WorkflowStartContext = {
   context: ExtensionContext;
   skills: () => ReadonlyArray<{ name: string }> | undefined;
@@ -104,7 +96,6 @@ export type HarnessState = {
   isSessionActive: boolean;
   sessionEpoch: number;
   activeDelegation: ActiveDelegation | undefined;
-  activePromptReview: ActivePromptReview | undefined;
   registeredWorkflowCommands: Set<string>;
   catalogLoadSequence: number;
   statusShortcut: KeyId;

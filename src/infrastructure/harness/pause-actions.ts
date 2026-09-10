@@ -6,7 +6,6 @@ import { conciseStepPauseSummary, reportPausedStep } from './step-reporting.ts';
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
   | 'cancelActiveDelegation'
-  | 'cancelPromptReview'
   | 'catalog'
   | 'dependencies'
   | 'isolateMainSessionTools'
@@ -51,7 +50,6 @@ async function pauseNow(
     );
     return;
   }
-  this.cancelPromptReview();
   const isMainStepSuspended = this.mainSteps.suspend();
   const isCancellationConfirmed = await this.cancelActiveDelegation(
     'Workflow paused by user',
@@ -96,7 +94,6 @@ async function abortNow(
     context.ui.notify('No active workflow to abort', 'warning');
     return;
   }
-  this.cancelPromptReview();
   const isMainStepSuspended = this.mainSteps.suspend();
   const isCancellationConfirmed = await this.cancelActiveDelegation(
     'Workflow aborted by user',

@@ -27,7 +27,6 @@ export function buildResourceSection({
     '',
     `Pi tools: ${formatList(step.permissions.tools)}`,
     `MCP selectors: ${formatList(step.permissions.mcp)}`,
-    `Extension selectors: ${formatList(step.permissions.extensions)}`,
     `Skills: ${formatList(step.permissions.skills)}`,
     `Bash policy: ${step.permissions.bash.mode}`,
     `Bash allow rules: ${
@@ -96,20 +95,17 @@ export function buildNonSuccessSummaryInstructions(
   outcomes: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   const nonSuccessOutcomes = outcomes.filter((outcome) =>
-    ['blocked', 'failed', 'retry'].includes(outcome),
+    ['blocked', 'handoff'].includes(outcome),
   );
   if (nonSuccessOutcomes.length === 0) return [];
 
   return [
     '## Human-readable non-success results',
     '',
-    `For ${nonSuccessOutcomes.map((outcome) => `\`${outcome}\``).join(', ')}, write a decision-first summary. It is shown verbatim to the operator and handed to a fresh child. Use this format:`,
+    `For ${nonSuccessOutcomes.map((outcome) => `\`${outcome}\``).join(', ')}, provide a decision-first typed handoff. The extension formats it for the operator and fresh child.`,
     '',
-    '# <Failed | Blocked | Retry>: <one-sentence plain-language decision>',
-    '1. **<short issue>** — <only the decisive evidence, including an exact command/error, path, or identifier when it enables action>.',
-    '   **Action:** <the specific owner or role> must <the concrete evidence, decision, or change needed>.',
-    '2. Repeat only for other independent issues (at most three total).',
-    '**Next:** <the exact safe next move, such as provide the listed evidence and run `/workflow-resume`>.',
+    'Use only plain-text `completed` and `remaining` fields. Do not include Markdown, headings, list markers, or additional handoff fields.',
+    'For `blocked`, include at least one user question ending in `?` in `remaining`. For `handoff`, list only non-question actionable work in `remaining`. `ready` requires exactly `No active-step work remains.`.',
     '',
     'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes, or statements that merely say the child lacks authority. Mention a passed check only when it directly explains the remaining issue. Name the missing prerequisite and who can supply it. Keep only details needed to make the decision or complete the next action.',
     '',

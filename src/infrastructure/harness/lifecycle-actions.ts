@@ -8,7 +8,6 @@ import { reportFailedStep } from './step-reporting.ts';
 type HarnessActionContext = Pick<
   FullHarnessActionContext,
   | 'cancelActiveDelegation'
-  | 'cancelPromptReview'
   | 'captureSkills'
   | 'catalog'
   | 'dependencies'
@@ -84,7 +83,6 @@ function registerLifecycle(this: HarnessActionContext): void {
   this.pi.on('session_start', async (_event, context) => {
     this.sessionEpoch += 1;
     this.isSessionActive = false;
-    this.cancelPromptReview();
     this.mainSteps.deactivate();
     await this.cancelActiveDelegation('Pi session changed');
     if (this.run) this.restoreBaselineTools();
@@ -98,7 +96,6 @@ function registerLifecycle(this: HarnessActionContext): void {
   this.pi.on('session_tree', async (_event, context) => {
     this.sessionEpoch += 1;
     this.isSessionActive = false;
-    this.cancelPromptReview();
     this.mainSteps.deactivate();
     await this.cancelActiveDelegation('Pi session tree changed');
     this.latestContext = context;
@@ -123,7 +120,6 @@ function registerLifecycle(this: HarnessActionContext): void {
         );
       }
     }
-    this.cancelPromptReview();
     this.mainSteps.deactivate();
     await this.cancelActiveDelegation('Pi session shut down');
     if (this.run) this.restoreBaselineTools();

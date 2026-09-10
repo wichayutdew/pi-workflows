@@ -3,6 +3,7 @@ import {
   analyzeWorkflow,
   formatWorkflowDoctor,
 } from '../../src/function/doctor/workflow-doctor.ts';
+import type { WorkflowDefinition } from '../../src/domain/index.ts';
 import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
 
 describe('when diagnosing workflow liveness', () => {
@@ -18,20 +19,20 @@ describe('when diagnosing workflow liveness', () => {
     raw.start = 'loop';
     raw.steps = {
       loop: {
-        prompt: 'Loop',
+        prompt: { file: 'fixture-prompt-1.md' },
         transitions: { again: 'loop', escape: 'stranded' },
       },
       stranded: {
-        prompt: 'Stranded',
+        prompt: { file: 'fixture-prompt-2.md' },
         transitions: { stop: '$pause' },
       },
       unused: {
-        prompt: 'Unused',
-        transitions: { done: '$done' },
+        prompt: { file: 'fixture-prompt-3.md' },
+        transitions: { ready: '$done' },
       },
     };
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(report.issues).toMatchObject([
       {
@@ -71,13 +72,13 @@ describe('when diagnosing workflow liveness', () => {
     steps.inspect = {
       ...steps.inspect,
       transitions: {
-        retry: 'inspect',
+        handoff: 'inspect',
         ready: 'implement',
         blocked: '$pause',
       },
     };
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(report.issues).toMatchObject([
       {
@@ -95,21 +96,21 @@ describe('when diagnosing workflow liveness', () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
-        prompt: 'Choose',
+        prompt: { file: 'fixture-prompt-4.md' },
         transitions: { good: 'finish', bad: 'trap' },
       },
       finish: {
-        prompt: 'Finish',
-        transitions: { done: '$done' },
+        prompt: { file: 'fixture-prompt-5.md' },
+        transitions: { ready: '$done' },
       },
       trap: {
-        prompt: 'Trap',
+        prompt: { file: 'fixture-prompt-6.md' },
         transitions: { wait: '$pause' },
       },
     };
     raw.start = 'choose';
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
 
     expect(
       report.issues.some((issue) => issue.code === 'no-completion-path'),
@@ -127,21 +128,21 @@ describe('when diagnosing workflow liveness', () => {
     const raw = baseWorkflow();
     raw.steps = {
       finish: {
-        prompt: 'Finish',
-        transitions: { done: '$done' },
+        prompt: { file: 'fixture-prompt-7.md' },
+        transitions: { ready: '$done' },
       },
       zeta: {
-        prompt: 'Zeta',
+        prompt: { file: 'fixture-prompt-8.md' },
         transitions: { back: 'alpha' },
       },
       alpha: {
-        prompt: 'Alpha',
+        prompt: { file: 'fixture-prompt-9.md' },
         transitions: { forward: 'zeta' },
       },
     };
     raw.start = 'finish';
 
-    const report = analyzeWorkflow(loadedWorkflow(raw).definition);
+    const report = analyzeWorkflow(raw as unknown as WorkflowDefinition);
     const cycle = report.issues.find((issue) => issue.code === 'cycle');
 
     expect(cycle).toMatchObject({
@@ -158,15 +159,15 @@ describe('when diagnosing workflow liveness', () => {
     first.start = 'start';
     first.steps = {
       start: {
-        prompt: 'Start',
-        transitions: { retry: 'start', finish: 'finish' },
+        prompt: { file: 'fixture-prompt-10.md' },
+        transitions: { handoff: 'start', finish: 'finish' },
       },
       finish: {
-        prompt: 'Finish',
-        transitions: { done: '$done' },
+        prompt: { file: 'fixture-prompt-11.md' },
+        transitions: { ready: '$done' },
       },
       unused: {
-        prompt: 'Unused',
+        prompt: { file: 'fixture-prompt-12.md' },
         transitions: { back: 'unused' },
       },
     };
@@ -174,21 +175,21 @@ describe('when diagnosing workflow liveness', () => {
     reordered.start = 'start';
     reordered.steps = {
       unused: {
-        prompt: 'Unused',
+        prompt: { file: 'fixture-prompt-13.md' },
         transitions: { back: 'unused' },
       },
       finish: {
-        prompt: 'Finish',
-        transitions: { done: '$done' },
+        prompt: { file: 'fixture-prompt-14.md' },
+        transitions: { ready: '$done' },
       },
       start: {
-        prompt: 'Start',
-        transitions: { finish: 'finish', retry: 'start' },
+        prompt: { file: 'fixture-prompt-15.md' },
+        transitions: { finish: 'finish', handoff: 'start' },
       },
     };
 
-    expect(analyzeWorkflow(loadedWorkflow(first).definition)).toEqual(
-      analyzeWorkflow(loadedWorkflow(reordered).definition),
+    expect(analyzeWorkflow(first as unknown as WorkflowDefinition)).toEqual(
+      analyzeWorkflow(reordered as unknown as WorkflowDefinition),
     );
   });
 });

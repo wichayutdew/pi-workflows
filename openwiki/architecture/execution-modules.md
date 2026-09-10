@@ -13,7 +13,6 @@ transitions, and parent-mode coordination.
 | `src/infrastructure/integrations/plannotator.ts`      | Stable facade for Plannotator requests, response normalization, result parsing, and types. |
 | `src/infrastructure/integrations/plannotator-requests.ts`  | Publishes start/status events and makes timeout scheduling injectable.                     |
 | `src/infrastructure/integrations/plannotator-responses.ts` | Normalizes unknown event replies and validates review-result payloads.                     |
-| `src/infrastructure/integrations/prompt-gate.ts`      | Runs the built-in review selector and feedback editor with abort-aware UI dependencies.    |
 
 ## Subagent Integration
 
@@ -81,7 +80,7 @@ the runtime modules.
 | `src/infrastructure/runtime/main-step-trace.ts`       | Captures a redacted, size-bounded prefix of finalized main-agent assistant/tool events and usage.    |
 | `src/infrastructure/runtime/main-step-runtime.ts`     | Composes the functional controller and preserves the compatibility `MainStepRuntime` class.          |
 | `src/infrastructure/runtime/task-queue.ts`            | Serializes asynchronous state mutations; exposes a factory and compatibility class.                  |
-| `src/function/step-result/parse-result.ts`            | Validates allowed outcome, summary/artifact bounds, and gate artifact requirements.                  |
+| `src/function/step-result/parse-result.ts`            | Validates allowed outcome, typed handoff fields, generated summary/artifact bounds, and gate artifact requirements. |
 | `src/function/step-result/validate-contract.ts`       | Validates step artifact contracts for workflow authoring.                                            |
 
 ## Workflow Status

@@ -13,12 +13,8 @@ steps:
     maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
-    transitions:
-      { ready: plan, retry: intake, blocked: $pause, handoff: intake }
+    transitions: { ready: plan, blocked: $pause, handoff: intake }
   plan:
     title: Plan work for Plannotator
     prompt: { file: steps/work/plan.md }
@@ -26,37 +22,43 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     gate:
-      provider: plannotator
-      submitOutcome: submit
-      approvedOutcome: approved
-      rejectedOutcome: changes-requested
-      timeoutMs: 30000
       artifactContract:
         maxChars: 10000
-        requiredSubstrings:
-          - '## Goal/Acceptance Criteria'
-          - '## Non Goal'
-          - '## Implementation Steps and Tests'
-          - '## Validation'
-          - '## Risks/Decisions Needed'
-          - '## Publications Contract/Metadata'
-          - '## Execution appendix (machine-readable)'
-        forbiddenSubstrings:
-          - 'The complete gate artifact is the exact Markdown saved at'
-        onValidationFailure: retry
-    transitions:
-      {
-        approved: prepare-workspace,
-        changes-requested: plan,
-        retry: plan,
-        blocked: $pause,
-        handoff: plan,
-      }
+        requiredHeadings:
+          - {
+              level: 2,
+              title: Goal/Acceptance Criteria,
+              guidance: Observable outcome and acceptance criteria.,
+            }
+          - { level: 2, title: Non Goal, guidance: Explicitly excluded work. }
+          - {
+              level: 2,
+              title: Implementation Steps and Tests,
+              guidance: Scoped changes and assessable tests list as steps in TDD style.,
+            }
+          - {
+              level: 2,
+              title: Validation,
+              guidance: Independent commands and expected proof.,
+            }
+          - {
+              level: 2,
+              title: Risks/Decisions Needed,
+              guidance: Risks and unresolved decisions.,
+            }
+          - {
+              level: 2,
+              title: Publications Contract/Metadata,
+              guidance: Observed publication metadata.,
+            }
+          - {
+              level: 2,
+              title: Execution appendix (machine-readable),
+              guidance: Required execution JSON.,
+            }
+    transitions: { ready: prepare-workspace, blocked: $pause, handoff: plan }
   prepare-workspace:
     title: Create worktree and branch
     prompt: { file: steps/work/prepare-workspace.md }
@@ -67,15 +69,11 @@ steps:
       allowedRoots: [~/repositories/worktrees]
     permissions:
       tools: [read, ls, bash]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions:
       {
         ready: implement,
-        workspace-refresh: plan,
-        retry: prepare-workspace,
+        gaps: plan,
         blocked: $pause,
         handoff: prepare-workspace,
       }
@@ -86,18 +84,8 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, edit, write, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
-    transitions:
-      {
-        checkpoint: implement,
-        ready: verify,
-        retry: implement,
-        blocked: $pause,
-        handoff: implement,
-      }
+    transitions: { ready: verify, blocked: $pause, handoff: implement }
   verify:
     title: Check goal and acceptance criteria
     prompt: { file: steps/work/verify.md }
@@ -105,18 +93,9 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions:
-      {
-        passed: publish,
-        failed: implement,
-        retry: verify,
-        blocked: verify,
-        handoff: verify,
-      }
+      { ready: publish, gaps: implement, blocked: $pause, handoff: verify }
   publish:
     title: Push and open or update PR/MR
     prompt: { file: steps/work/publish-remote.md }
@@ -124,9 +103,5 @@ steps:
     maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
-    transitions:
-      { published: $done, retry: publish, blocked: $pause, handoff: publish }
+    transitions: { ready: $done, blocked: $pause, handoff: publish }

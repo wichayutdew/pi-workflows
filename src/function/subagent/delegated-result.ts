@@ -32,3 +32,25 @@ export const parseDelegatedStepResult = (
     });
   }
 };
+
+/** Validates the already-canonical result written by the child runtime. */
+export const parsePersistedDelegatedStepResult = (
+  value: unknown,
+  policy: ChildStepPolicy,
+): DelegatedStepResult => {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (value as Record<string, unknown>).version !== 1 ||
+    (value as Record<string, unknown>).policyDigest !== policy.policyDigest ||
+    typeof (value as Record<string, unknown>).outcome !== 'string' ||
+    !policy.outcomes.includes(
+      (value as Record<string, unknown>).outcome as string,
+    ) ||
+    typeof (value as Record<string, unknown>).summary !== 'string'
+  ) {
+    throw new Error('delegated step persisted result is invalid');
+  }
+  return value as DelegatedStepResult;
+};

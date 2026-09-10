@@ -64,7 +64,6 @@ const isStepAttemptResult = (value: unknown): value is StepAttemptResult =>
 
 const isStepGateDecision = (value: unknown): value is StepGateDecision =>
   isRecord(value) &&
-  (value.provider === 'prompt' || value.provider === 'plannotator') &&
   typeof value.requestId === 'string' &&
   value.requestId.length > 0 &&
   typeof value.approved === 'boolean' &&
@@ -250,7 +249,6 @@ const isGateResolution = (value: unknown): value is GateResolution =>
 
 const isPendingGate = (value: unknown): value is PendingGate =>
   isRecord(value) &&
-  (value.provider === 'prompt' || value.provider === 'plannotator') &&
   typeof value.requestId === 'string' &&
   value.requestId.length > 0 &&
   typeof value.stepId === 'string' &&

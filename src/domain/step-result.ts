@@ -6,11 +6,24 @@ export const RESULT_KEYS = new Set([
   'version',
   'policyDigest',
   'outcome',
-  'summary',
+  'completed',
+  'remaining',
   'artifact',
   'workspace',
-  'progress',
 ]);
+
+export const HANDOFF_RESULT_KEYS = new Set([
+  'outcome',
+  'completed',
+  'remaining',
+  'artifact',
+  'workspace',
+]);
+
+export type WorkflowHandoffInput = {
+  readonly completed: ReadonlyArray<string>;
+  readonly remaining: ReadonlyArray<string>;
+};
 
 /**
  * Result constraints derived from the active workflow step.
@@ -27,14 +40,6 @@ export type WorkflowResultWorkspace = {
   readonly cwd: string;
 };
 
-export type WorkflowCheckpointProgress = {
-  readonly feature: string;
-  readonly commit: string;
-  readonly changedFiles: ReadonlyArray<string>;
-  readonly verification: ReadonlyArray<string>;
-  readonly remaining: ReadonlyArray<string>;
-};
-
 /**
  * Validated result handed back to the workflow engine.
  */
@@ -45,7 +50,6 @@ export type WorkflowStepResult = {
   readonly summary: string;
   readonly artifact?: string;
   readonly workspace?: WorkflowResultWorkspace;
-  readonly progress?: WorkflowCheckpointProgress;
 };
 
 export type ArtifactContractValidationResult = {

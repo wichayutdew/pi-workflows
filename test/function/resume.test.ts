@@ -36,7 +36,6 @@ describe('when testing resume', () => {
         ...pausedRun(),
         pausedFrom: 'awaiting-gate',
         pendingGate: {
-          provider: 'plannotator',
           requestId: 'request-1',
           stepId: 'inspect',
           artifact: '# Plan',

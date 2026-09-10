@@ -52,12 +52,12 @@ describe('when reporting workflow step summaries', () => {
       'Inspection complete',
       2,
     );
-    run = advanceRun(workflow, run, 'done', 'Implementation complete', 3);
+    run = advanceRun(workflow, run, 'ready', 'Implementation complete', 3);
     const messages: Array<SentMessage> = [];
 
     reportSettledStep(reportingApi(messages), workflow, run, {
       stepId: 'implement',
-      outcome: 'done',
+      outcome: 'ready',
       summary: 'Implementation complete',
     });
 
@@ -71,7 +71,7 @@ describe('when reporting workflow step summaries', () => {
           runId: 'run-1',
           stepId: 'implement',
           status: 'completed',
-          outcome: 'done',
+          outcome: 'ready',
           workflowCompleted: true,
         },
       },

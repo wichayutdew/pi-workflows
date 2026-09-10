@@ -117,7 +117,8 @@ explicitly instead of guessed from the resumed process.
 Pi Subagents validates `structured_output` and returns one correlated terminal
 event. Pi Workflows owns declared outcomes and optional human-review gates, and
 the child result is accepted only after the private capability, policy digest,
-outcome, summary, artifact, and optional workspace fields validate.
+outcome, typed handoff fields, artifact, and optional workspace fields validate.
+The validated handoff fields become the persisted compact summary.
 Finalized worker message usage is normalized by provider/model and stored with
 the exact attempt, the step aggregate, and the workflow status totals; streaming
 progress does not contribute usage.
@@ -136,21 +137,21 @@ validation; it never infers an outcome from prose. If repair also produces no
 result and the step declares a self-looping `handoff` transition, the parent
 records a durable fallback handoff from available active-step context, prior
 checkpoint, diagnostic state, and repository state, then revisits the same
-step. Without that transition, complete bounded terminal evidence can permit
-one fresh retry only when all completed calls were read-only: `read`, `ls`,
-`grep`, or `structured_output`. Any Bash, edit, write, MCP, unknown, failed,
-started, malformed, missing, or truncated evidence pauses the workflow with
-diagnostics.
+step. Without that transition, complete bounded terminal evidence may permit
+one extension-owned recovery attempt only when all completed calls were
+read-only: `read`, `ls`, `rg`, or `structured_output`. Any Bash, edit, write,
+MCP, unknown, failed, started, malformed, missing, or truncated evidence pauses
+the workflow with diagnostics.
 
 When a delegated step has a productive tool-call budget, the warning at two
 productive calls remaining tells the child to finish the active delegated step
 with its applicable configured outcome when possible; otherwise it prepares a
 handoff for incomplete active-step work. After the productive budget is
 exhausted, work tools are locked and the completion reserve accepts the
-configured outcome that accurately reflects the active delegated step state,
-including `handoff` when active-step work is incomplete. A handoff must cite
-evidence for completed or in-progress active-step work and identify the first
-action for the next child.
+configured outcome that accurately reflects the active delegated step state.
+The model supplies only `completed` and `remaining`: `handoff` remaining work
+is non-question actionable work for the same step, while `gaps` remaining work
+is for the configured earlier step. The extension renders the Markdown summary.
 
 ## Result Path
 
@@ -186,7 +187,7 @@ While blocked, the harness keeps main tools isolated and refuses resume because 
 For a child that settles without `result.json`, Pi Workflows first sends one
 same-session completion-only repair follow-up. If repair also produces no
 result, diagnostics must prove the attempt settled, was not truncated, and
-completed only read-only tools: `read`, `ls`, `grep`, or `structured_output`.
+completed only read-only tools: `read`, `ls`, `rg`, or `structured_output`.
 Only that evidence permits one fresh child retry. Missing diagnostics,
 truncated evidence, failed or still-started calls, Bash, edit/write, MCP, or
 any unknown tool class pauses the workflow.

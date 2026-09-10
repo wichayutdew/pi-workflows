@@ -3,7 +3,6 @@ export type {
   BashPermission,
   BashRule,
   StepPermissions,
-  StepRequirements,
 } from './config.ts';
 
 export type ToolSourceInfo = {

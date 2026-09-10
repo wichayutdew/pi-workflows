@@ -23,14 +23,19 @@ describe('starter-kit sanitization', () => {
     }
   });
 
-  test('configures bounded retrying artifact contracts for every gated workflow', async () => {
+  test('configures ready-gated artifact contracts for every gated workflow', async () => {
     const glob = new Bun.Glob('*.workflow.yaml');
     for await (const path of glob.scan({ cwd: root, onlyFiles: true })) {
       const workflow = YAML.parse(await readFile(join(root, path), 'utf8')) as {
         steps: Record<
           string,
           {
-            gate?: { artifactContract?: Record<string, unknown> };
+            gate?: {
+              artifactContract?: {
+                maxChars?: unknown;
+                requiredHeadings?: unknown;
+              };
+            };
             transitions: Record<string, string>;
           }
         >;
@@ -40,8 +45,25 @@ describe('starter-kit sanitization', () => {
         const contract = step.gate.artifactContract;
         expect(contract).toBeDefined();
         expect(contract?.maxChars).toEqual(expect.any(Number));
-        expect(contract?.onValidationFailure).toBe('retry');
-        expect(step.transitions.retry).toBeDefined();
+        const headings = Array.isArray(contract?.requiredHeadings)
+          ? contract.requiredHeadings
+          : [];
+        expect(Array.isArray(contract?.requiredHeadings)).toBe(true);
+        expect(headings.length).toBeGreaterThan(0);
+        for (const heading of headings) {
+          expect(heading).toEqual({
+            level: expect.any(Number),
+            title: expect.any(String),
+            guidance: expect.any(String),
+          });
+          expect(Number.isInteger(heading.level)).toBe(true);
+          expect(heading.level).toBeGreaterThanOrEqual(1);
+          expect(heading.level).toBeLessThanOrEqual(3);
+          expect(heading.title.trim()).not.toBe('');
+          expect(heading.guidance.trim()).not.toBe('');
+        }
+        expect(step.transitions.ready).toBeDefined();
+        expect(step.transitions.handoff).toBeDefined();
       }
     }
   });

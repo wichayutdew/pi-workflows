@@ -6,9 +6,9 @@
 stateDiagram-v2
   [*] --> running: createRun
   running --> running: step outcome to next step
-  running --> awaiting_gate: gate submitOutcome
-  awaiting_gate --> running: rejected or approved to another step
-  awaiting_gate --> completed: approved to $done
+  running --> awaiting_gate: ready outcome on gated step
+  awaiting_gate --> running: rejection handoff or approval ready to another step
+  awaiting_gate --> completed: approval ready to $done
   running --> completed: outcome to $done
   running --> paused: outcome to $pause
   running --> paused: manual pause or failure
@@ -159,7 +159,7 @@ active-step context, the previous checkpoint, diagnostic state, and repository
 state, and does not mark new work as confirmed complete. Without that
 transition, `delegation-recovery.ts` permits one fresh child retry only for the
 first subagent attempt and only when diagnostics prove the attempt was settled,
-untruncated, and used completed read-only calls: `read`, `ls`, `grep`, or
+untruncated, and used completed read-only calls: `read`, `ls`, `rg`, or
 `structured_output`. Missing diagnostics, truncated evidence, failed/started
 calls, Bash, edit/write, MCP, or any other tool class pause the workflow.
 
@@ -251,10 +251,10 @@ proven-complete actions, and pause on ambiguity.
 
 Pause and resume are coordinated by
 `src/infrastructure/harness/pause-actions.ts`, `resume-action.ts`,
-`delegation-control-actions.ts`, `prompt-gate-actions.ts`, and
-`plannotator-result-actions.ts`. Engine helpers only produce the next
-checkpoint state; harness actions own effect cleanup, active-tool restoration,
-child cancellation, prompt review dismissal, and relaunching the current step.
+`delegation-control-actions.ts`, and `plannotator-result-actions.ts`. Engine
+helpers only produce the next checkpoint state; harness actions own effect
+cleanup, active-tool restoration, child cancellation, Plannotator review
+cancellation, and relaunching the current step.
 
 ## Session Restore
 

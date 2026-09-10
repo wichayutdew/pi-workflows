@@ -67,13 +67,9 @@ const validatePendingGate = (
   if (
     !step.gate ||
     pending.stepId !== run.currentStepId ||
-    pending.provider !== step.gate.provider ||
     pending.submittedOutcome !== step.gate.submitOutcome
   ) {
     return 'pending gate does not match the current workflow step';
-  }
-  if (pending.provider === 'prompt' && pending.reviewId !== undefined) {
-    return 'built-in prompt gate cannot carry a Plannotator review id';
   }
   return undefined;
 };

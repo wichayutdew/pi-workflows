@@ -6,10 +6,9 @@ import type { ChildStepPolicy, WorkflowStep } from '../../domain/index.ts';
  */
 export const childPolicyStep = (policy: ChildStepPolicy): WorkflowStep => ({
   title: policy.stepTitle,
-  prompt: { inline: 'Delegated workflow step' },
+  prompt: { file: 'delegated-step.md' },
   agent: { name: policy.agent },
   permissions: policy.permissions,
-  requires: { tools: [], extensions: [], skills: [] },
   transitions: {},
   ...(policy.workspace ? { workspace: policy.workspace } : {}),
 });
@@ -30,20 +29,35 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     'Perform only this delegated step. Its child-side tool policy is enforced.',
     'Do not launch subagents while executing this declarative workflow step.',
     'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
-    'Use `retry` only for a transient failure that can be retried without new user input.',
+    'Use `handoff` when actionable work remains without a user question; use `gaps` when an earlier configured step must refresh requirements.',
     'Do not open a skill unless this step YAML lists that skill.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
-    'Pass the workflow result as its `value`: outcome, summary, optional artifact, and workspace only when required below.',
+    'Pass the workflow result as its `value`: outcome, completed, remaining, plus artifact or workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     "Evaluate completion and choose an outcome using only this delegated step's instructions.",
     'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
-    'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
-    'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
+    'For every outcome, provide only plain-text `completed` and `remaining` fields; each completed item must cite a concrete path, command, identifier, or user decision. Do not use Markdown, list markers, placeholders, or extra handoff fields.',
+    ...(policy.outcomes.includes('ready')
+      ? [
+          'For `ready`, remaining must be exactly `No active-step work remains.`.',
+        ]
+      : []),
     ...(policy.outcomes.includes('blocked')
       ? [
-          'For `blocked`, also include `**Question:** <one concrete clarifying question ending in ?>`.',
+          'For `blocked`, include at least one user question ending in `?` in remaining.',
+        ]
+      : []),
+    ...(policy.outcomes.includes('handoff')
+      ? [
+          'For `handoff`, remaining must be non-question actionable work for this step.',
+        ]
+      : []),
+    ...(policy.outcomes.includes('gaps')
+      ? [
+          'For `gaps`, remaining must be non-question actionable requirements for the configured earlier step.',
         ]
       : []),
     ...(policy.maxToolCalls === undefined
@@ -65,8 +79,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
       : []),
     ...(policy.workspace
       ? [
-          `Workspace-binding outcomes: ${policy.workspace.bindOn.join(', ')}`,
-          `For those outcomes, include workspace.cwd as an absolute directory under one allowed root relative to the run-start directory: ${policy.workspace.allowedRoots.join(', ')}`,
+          `For the ready outcome, include workspace.cwd as an absolute directory under one allowed root relative to the run-start directory: ${policy.workspace.allowedRoots.join(', ')}`,
           'For every other outcome, omit workspace.',
         ]
       : ['This step cannot bind a workspace; omit workspace.']),

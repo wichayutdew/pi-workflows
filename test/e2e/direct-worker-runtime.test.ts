@@ -109,7 +109,7 @@ async function waitForTerminalCheckpoint(
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
   throw new Error(
-    `Timed out waiting for workflow completion. Last checkpoint: ${JSON.stringify(checkpoint)}\nPi stderr:\n${client.getStderr()}`,
+    `Timed out waiting for workflow completion. Last handoff: ${JSON.stringify(checkpoint)}\nPi stderr:\n${client.getStderr()}`,
   );
 }
 
@@ -172,36 +172,43 @@ describe('direct Pi workflow workers', () => {
           bootstrap: {
             title: 'Bootstrap',
             agent: 'worker',
-            prompt: E2E_BOOTSTRAP_MARKER,
+            prompt: { file: 'bootstrap.md' },
             workspace: { bindOn: ['ready'], allowedRoots: ['..'] },
-            transitions: { ready: 'plan', blocked: '$pause' },
+            transitions: {
+              ready: 'plan',
+              blocked: '$pause',
+              handoff: 'bootstrap',
+            },
           },
           plan: {
             title: 'Plan',
             agent: 'planner',
-            prompt: [
-              E2E_PLAN_MARKER,
-              'Workflow input: {{workflow.input}}',
-              'PRIVATE_PLAN_PADDING '.repeat(500),
-            ].join('\n'),
-            transitions: { planned: 'implement', blocked: '$pause' },
+            prompt: { file: 'plan.md' },
+            transitions: {
+              ready: 'implement',
+              blocked: '$pause',
+              handoff: 'plan',
+            },
           },
           implement: {
             title: 'Implement',
             agent: 'worker',
-            prompt: `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+            prompt: { file: 'implement.md' },
             transitions: {
-              checkpoint: 'implement',
+              ready: 'verify',
               handoff: 'implement',
-              implemented: 'verify',
               blocked: '$pause',
             },
           },
           verify: {
             title: 'Verify',
             agent: 'reviewer',
-            prompt: `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
-            transitions: { done: '$done', blocked: '$pause' },
+            prompt: { file: 'verify.md' },
+            transitions: {
+              ready: '$done',
+              blocked: '$pause',
+              handoff: 'verify',
+            },
           },
         },
       };
@@ -212,7 +219,7 @@ describe('direct Pi workflow workers', () => {
         defaultProjectTrust: 'never',
         quietStartup: true,
         enableInstallTelemetry: false,
-        retry: { enabled: false },
+        handoff: { enabled: false },
         extensions: [workflowExtensionPath, providerExtensionPath],
       };
       const launcherPath = join(launcherDirectory, 'pi');
@@ -226,10 +233,32 @@ describe('direct Pi workflow workers', () => {
           join(workflowDirectory, 'settings.yaml'),
           'version: 1\n',
         );
-        await writeFile(
-          join(workflowDirectory, 'direct-worker-e2e.workflow.yaml'),
-          JSON.stringify(workflow),
-        );
+        await Promise.all([
+          writeFile(
+            join(workflowDirectory, 'bootstrap.md'),
+            E2E_BOOTSTRAP_MARKER,
+          ),
+          writeFile(
+            join(workflowDirectory, 'plan.md'),
+            [
+              E2E_PLAN_MARKER,
+              'Workflow input: {{workflow.input}}',
+              'PRIVATE_PLAN_PADDING '.repeat(500),
+            ].join('\n'),
+          ),
+          writeFile(
+            join(workflowDirectory, 'implement.md'),
+            `${E2E_IMPLEMENT_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+          ),
+          writeFile(
+            join(workflowDirectory, 'verify.md'),
+            `${E2E_VERIFY_MARKER}\nConsume only the compact handoff: {{last.summary}}`,
+          ),
+          writeFile(
+            join(workflowDirectory, 'direct-worker-e2e.workflow.yaml'),
+            JSON.stringify(workflow),
+          ),
+        ]);
         await writeFile(tracePath, '');
         await writeFile(
           launcherPath,
@@ -288,19 +317,19 @@ describe('direct Pi workflow workers', () => {
           },
           {
             stepId: 'plan',
-            outcome: 'planned',
+            outcome: 'ready',
             summary: E2E_PLAN_HANDOFF,
             workspaceCwd: undefined,
           },
           {
             stepId: 'implement',
-            outcome: 'implemented',
+            outcome: 'ready',
             summary: E2E_IMPLEMENT_HANDOFF,
             workspaceCwd: undefined,
           },
           {
             stepId: 'verify',
-            outcome: 'done',
+            outcome: 'ready',
             summary: E2E_FINAL_SUMMARY,
             workspaceCwd: undefined,
           },

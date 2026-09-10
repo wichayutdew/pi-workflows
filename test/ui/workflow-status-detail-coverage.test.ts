@@ -138,7 +138,6 @@ describe('when rendering less common workflow step evidence', () => {
           workspaceCwd: '/tmp/detail-worktree',
         },
         gateDecision: {
-          provider: 'plannotator',
           requestId: 'gate-approved',
           approved: true,
           feedback: 'Approved feedback',
@@ -157,7 +156,6 @@ describe('when rendering less common workflow step evidence', () => {
         omittedLogEvents: 3,
         startedAt: 5,
         gateDecision: {
-          provider: 'prompt',
           requestId: 'gate-rejected',
           approved: false,
           feedback: '',
@@ -228,7 +226,6 @@ describe('when rendering less common workflow step evidence', () => {
       gateFeedback: 'Retry with additional evidence',
       cwd: '/tmp/detail-current',
       pendingGate: {
-        provider: 'prompt',
         requestId: 'pending-gate',
         stepId: 'inspect',
         artifact: 'Current review artifact',

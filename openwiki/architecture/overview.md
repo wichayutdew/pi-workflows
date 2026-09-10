@@ -16,7 +16,6 @@ flowchart TD
   HarnessActions --> PromptCore[src/function/prompt/*<br/>prompt rendering]
   HarnessActions --> SubClient[src/infrastructure/process/subagent-client.ts]
   HarnessActions --> Plannotator[src/infrastructure/integrations/plannotator*.ts]
-  HarnessActions --> PromptGate[src/infrastructure/integrations/prompt-gate.ts]
   HarnessActions --> MainRuntime[src/infrastructure/runtime/main-step-runtime.ts]
   HarnessActions --> Queue[src/infrastructure/runtime/task-queue.ts]
   HarnessActions --> StatusCore[src/ui/*]
@@ -137,17 +136,6 @@ exports adapters and runtimes, and `src/ui/index.ts` exports status rendering.
 flowchart TD
   Settings[Load settings.yaml] --> UserDir[Load user workflow YAML]
   UserDir --> AddUser[Add user workflows]
-  AddUser --> ProjectEnabled{allowProjectWorkflows?}
-  ProjectEnabled -- no --> RuntimeConflicts[Check runtime command conflicts]
-  ProjectEnabled -- yes --> Trusted{Project trusted?}
-  Trusted -- no --> Warning[Warn and skip project workflows]
-  Trusted -- yes --> CeilingSet{permissionCeiling configured?}
-  CeilingSet -- no --> Error[Error and skip project workflows]
-  CeilingSet -- yes --> ProjectDir[Load project workflow YAML]
-  ProjectDir --> CeilingCheck[Apply permission ceiling]
-  CeilingCheck --> AddProject[Add nonconflicting project workflows]
-  AddProject --> RuntimeConflicts
-  Warning --> RuntimeConflicts
-  Error --> RuntimeConflicts
+  AddUser --> RuntimeConflicts[Check runtime command conflicts]
   RuntimeConflicts --> Catalog[WorkflowCatalog with diagnostics]
 ```

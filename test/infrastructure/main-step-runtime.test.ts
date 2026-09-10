@@ -11,7 +11,11 @@ import { WORKFLOW_COMPLETION_TOOL } from '../../src/infrastructure/runtime/compl
 
 describe('when testing main step runtime', () => {
   const doneSummary =
-    '# Done: Implementation is complete.\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- None; workflow is complete.';
+    '# Ready\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- No active-step work remains.';
+  const doneHandoff = {
+    completed: ['Implemented `src/example.ts` and ran `bun test`.'],
+    remaining: ['No active-step work remains.'],
+  };
   type Handler = (event: Record<string, unknown>, context?: unknown) => unknown;
 
   describe('should satisfy its behavioral contract', () => {
@@ -64,22 +68,20 @@ describe('when testing main step runtime', () => {
         stepDigest: 'step-digest',
         policyDigest: 'policy-digest',
         task: 'Do exact work',
-        outcomes: ['done'],
+        outcomes: ['ready'],
         summaryMaxChars: 1_000,
-        workspace: { bindOn: ['done'], allowedRoots: ['.'] },
+        workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: ['read'],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
-          workspace: { bindOn: ['done'], allowedRoots: ['.'] },
+          transitions: { ready: '$done' },
+          workspace: { bindOn: ['ready'], allowedRoots: ['.'] },
         },
         onTrace: () => undefined,
         onSettled: (result) => {
@@ -130,19 +132,19 @@ describe('when testing main step runtime', () => {
         }),
       ).toBe(undefined);
       const result = await completion!.execute('complete-1', {
-        outcome: 'done',
-        summary: doneSummary,
+        outcome: 'ready',
+        ...doneHandoff,
         workspace: { cwd: '/tmp/worktree' },
       });
       expect(result).toEqual({
         content: [
-          { type: 'text', text: 'Captured workflow step outcome "done".' },
+          { type: 'text', text: 'Captured workflow step outcome "ready".' },
         ],
         details: {
           workflowId: 'workflow',
           runId: 'run',
           stepId: 'step',
-          outcome: 'done',
+          outcome: 'ready',
         },
         terminate: true,
       });
@@ -151,7 +153,7 @@ describe('when testing main step runtime', () => {
         {
           version: 1,
           policyDigest: 'policy-digest',
-          outcome: 'done',
+          outcome: 'ready',
           summary: doneSummary,
           workspace: { cwd: '/tmp/worktree' },
         },
@@ -244,16 +246,14 @@ describe('when testing main step runtime', () => {
         summaryMaxChars: 1_000,
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: ['read'],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
         onTrace: (lines, _context, usage) => {
           turns.push(lines);
@@ -368,7 +368,7 @@ describe('when testing main step runtime', () => {
 
       await completion!.execute('complete', {
         outcome: 'done',
-        summary: doneSummary,
+        ...doneHandoff,
       });
       await handlers.get('turn_end')!(
         {
@@ -379,7 +379,7 @@ describe('when testing main step runtime', () => {
                 type: 'toolCall',
                 id: 'complete',
                 name: WORKFLOW_COMPLETION_TOOL,
-                arguments: { outcome: 'done', summary: doneSummary },
+                arguments: { outcome: 'done', ...doneHandoff },
               },
             ],
           },
@@ -468,16 +468,14 @@ describe('when testing main step runtime', () => {
         summaryMaxChars: 1_000,
         step: {
           title: 'Step',
-          prompt: { inline: 'Do work' },
+          prompt: { file: 'do-work.md' },
           permissions: {
             tools: [],
-            extensions: [],
             mcp: [],
             skills: [],
             bash: { mode: 'deny', allow: [] },
           },
-          requires: { tools: [], extensions: [], skills: [] },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         },
         onTrace: () => undefined,
         onSettled: () => undefined,

@@ -12,8 +12,21 @@ export type StepContract = {
   readonly outcomes: ReadonlyArray<string>;
   readonly transitionLines: string;
   readonly gateLine: string;
+  readonly gateArtifactLines: ReadonlyArray<string>;
   readonly workspaceLines: ReadonlyArray<string>;
 };
+
+export function formatGateArtifactContract(
+  step: WorkflowStep,
+): ReadonlyArray<string> {
+  const headings = step.gate?.artifactContract?.requiredHeadings;
+  if (!headings) return [];
+  return headings.flatMap((heading) => [
+    `${'#'.repeat(heading.level)} ${heading.title}`,
+    heading.guidance,
+    '',
+  ]);
+}
 
 type CreateStepContractOptions = {
   readonly workflow: LoadedWorkflow;
@@ -39,8 +52,9 @@ export function createStepContract({
     .map(([outcome, target]) => `- ${outcome}: ${target}`)
     .join('\n');
   const gateLine = step.gate
-    ? `- ${step.gate.submitOutcome}: submit the artifact to ${step.gate.provider}; include the full artifact argument`
+    ? `- ${step.gate.submitOutcome}: submit the artifact to Plannotator; include the full artifact argument`
     : '';
+  const gateArtifactLines = formatGateArtifactContract(step);
   const workspaceLines = step.workspace
     ? [
         `Workspace-binding outcomes: ${step.workspace.bindOn.join(', ')}`,
@@ -53,6 +67,7 @@ export function createStepContract({
     outcomes,
     transitionLines,
     gateLine,
+    gateArtifactLines,
     workspaceLines,
   };
 }

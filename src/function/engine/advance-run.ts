@@ -16,6 +16,8 @@ export type RunAdvanceOptions = {
    * the incoming handoff and bypasses the visit-limit check for this decision.
    */
   readonly sameStepHumanGateRevision?: boolean | undefined;
+  /** Allows the gate resolver to follow the ready transition after approval. */
+  readonly gateResolution?: boolean | undefined;
 };
 
 const completedStep = (
@@ -72,7 +74,7 @@ export const advanceRun = (
   if (!step) {
     throw new Error(`current step "${run.currentStepId}" no longer exists`);
   }
-  if (step.gate?.submitOutcome === outcome) {
+  if (step.gate?.submitOutcome === outcome && !options.gateResolution) {
     throw new Error(
       `outcome "${outcome}" must be submitted through the configured gate`,
     );

@@ -5,7 +5,7 @@ import type {
 } from '../../domain/index.ts';
 import {
   advanceRun,
-  parseDelegatedStepResult,
+  parsePersistedDelegatedStepResult,
   recordCurrentStepResult,
   recordCurrentStepUsage,
   usageAggregateFromModels,
@@ -181,16 +181,6 @@ async function finishDelegation(
         `Workflow worker "${active.agent}" ${response.status.replaceAll('_', ' ')}${response.error ? `: ${response.error}` : ''}`,
       );
     }
-    const requiredSkillWarning =
-      step.requires.skills.length > 0
-        ? response.warnings?.find((warning) => /skill/i.test(warning))
-        : undefined;
-    if (requiredSkillWarning) {
-      throw new Error(
-        `Subagent skill preflight failed: ${requiredSkillWarning}`,
-      );
-    }
-
     let serializedResult: string;
     try {
       serializedResult = await this.dependencies.readDelegatedResult(active);
@@ -267,7 +257,7 @@ async function finishDelegation(
     }
 
     const rawResult: unknown = JSON.parse(serializedResult);
-    const result: WorkflowStepResult = parseDelegatedStepResult(
+    const result: WorkflowStepResult = parsePersistedDelegatedStepResult(
       rawResult,
       active.policy,
     );

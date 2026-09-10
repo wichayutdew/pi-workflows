@@ -43,8 +43,6 @@ async function loadPrompt(
 ): Promise<string> {
   const prompt = definition.steps[stepId]?.prompt;
   if (!prompt) throw new Error(`unknown step "${stepId}"`);
-  if ('inline' in prompt) return prompt.inline;
-
   const sourceDirectory = await fileSystem.realPath(dirname(sourcePath));
   const requestedPath = resolve(sourceDirectory, prompt.file);
   if (!isInside(sourceDirectory, requestedPath)) {

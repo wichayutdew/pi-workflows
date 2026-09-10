@@ -227,8 +227,8 @@ describe('when exploring workflow step evidence', () => {
     raw.maxStepVisits = 40;
     raw.steps = {
       loop: {
-        prompt: 'Loop',
-        transitions: { again: 'loop', done: '$done' },
+        prompt: { file: 'fixture-prompt-1.md' },
+        transitions: { handoff: 'loop', ready: '$done' },
       },
     };
     const workflow = loadedWorkflow(raw);
@@ -241,7 +241,7 @@ describe('when exploring workflow step evidence', () => {
       const requestId = `main-log-${visit}`;
       run = beginMainStepAttempt(run, requestId, `task ${visit}`, visit * 3);
       run = appendMainStepLog(run, requestId, largeTurn, visit * 3 + 1);
-      const outcome = visit === 40 ? 'done' : 'again';
+      const outcome = visit === 40 ? 'ready' : 'handoff';
       run = recordCurrentStepResult(
         run,
         result(
@@ -254,7 +254,6 @@ describe('when exploring workflow step evidence', () => {
       run = recordCurrentGateDecision(
         run,
         {
-          provider: 'prompt',
           requestId: `gate-${visit}`,
           approved: true,
           feedback: `feedback ${visit}:${'f'.repeat(9_000)}`,
@@ -343,8 +342,8 @@ describe('when exploring workflow step evidence', () => {
     raw.maxStepVisits = 100;
     raw.steps = {
       loop: {
-        prompt: 'Loop',
-        transitions: { again: 'loop', done: '$done' },
+        prompt: { file: 'fixture-prompt-2.md' },
+        transitions: { handoff: 'loop', ready: '$done' },
       },
     };
     const workflow = loadedWorkflow(raw);
@@ -357,7 +356,7 @@ describe('when exploring workflow step evidence', () => {
         `${visit}:${'x'.repeat(MAX_STEP_TRACE_TASK_CHARS - 4)}`,
         visit * 2,
       );
-      const outcome = visit === 100 ? 'done' : 'again';
+      const outcome = visit === 100 ? 'ready' : 'handoff';
       run = recordCurrentStepResult(
         run,
         result(outcome, `visit ${visit}`),
@@ -522,14 +521,9 @@ describe('when exploring workflow step evidence', () => {
     raw.start = 'review';
     raw.steps = {
       review: {
-        prompt: 'Review',
-        gate: {
-          provider: 'prompt',
-          submitOutcome: 'submit',
-          approvedOutcome: 'approved',
-          rejectedOutcome: 'rejected',
-        },
-        transitions: { approved: '$done', rejected: '$pause' },
+        prompt: { file: 'fixture-prompt-3.md' },
+        gate: {},
+        transitions: { ready: '$done', handoff: 'review' },
       },
     };
     const workflow = loadedWorkflow(raw);
@@ -537,13 +531,13 @@ describe('when exploring workflow step evidence', () => {
     run = beginMainStepAttempt(run, 'review-1', 'draft the plan', 2);
     run = recordCurrentStepResult(
       run,
-      result('submit', 'first plan', '# First'),
+      result('ready', 'first plan', '# First'),
       3,
     );
     run = beginGate(
       workflow,
       run,
-      'submit',
+      'ready',
       '# First',
       'gate-1',
       4,
@@ -555,8 +549,8 @@ describe('when exploring workflow step evidence', () => {
       { approved: false, feedback: 'add evidence', resolvedAt: 5 },
       5,
     );
-    expect(run.status).toBe('paused');
-    expect(run.currentStepAttempts?.[0]?.gateDecision).toMatchObject({
+    expect(run.status).toBe('running');
+    expect(run.history[0]?.attempts?.[0]?.gateDecision).toMatchObject({
       approved: false,
       feedback: 'add evidence',
     });
@@ -565,13 +559,13 @@ describe('when exploring workflow step evidence', () => {
     run = beginMainStepAttempt(run, 'review-2', 'revise with evidence', 7);
     run = recordCurrentStepResult(
       run,
-      result('submit', 'second plan', '# Second'),
+      result('ready', 'second plan', '# Second'),
       8,
     );
     run = beginGate(
       workflow,
       run,
-      'submit',
+      'ready',
       '# Second',
       'gate-2',
       9,
@@ -586,7 +580,9 @@ describe('when exploring workflow step evidence', () => {
 
     expect(run.status).toBe('completed');
     expect(
-      run.history[0]?.attempts?.map((attempt) => attempt.gateDecision),
+      run.history.flatMap((entry) =>
+        (entry.attempts ?? []).map((attempt) => attempt.gateDecision),
+      ),
     ).toMatchObject([
       { approved: false, feedback: 'add evidence' },
       { approved: true, feedback: 'ship it' },

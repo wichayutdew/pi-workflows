@@ -4,7 +4,6 @@ import {
   type BashPermission,
   type BashRule,
   type StepPermissions,
-  type StepRequirements,
 } from '../../../domain/index.ts';
 import {
   EXECUTABLE_PATTERN,
@@ -22,17 +21,8 @@ function emptyPermissions(): StepPermissions {
   return {
     tools: [],
     mcp: [],
-    extensions: [],
     skills: [],
     bash: { mode: 'deny', allow: [] },
-  };
-}
-
-function emptyRequirements(): StepRequirements {
-  return {
-    tools: [],
-    extensions: [],
-    skills: [],
   };
 }
 
@@ -67,7 +57,7 @@ function parseBashRule(
       value.argsPrefix,
       `${path}.argsPrefix`,
       errors,
-      /^[^\s]+$/,
+      /^\S+$/,
     );
     return executable ? [{ executable, argsPrefix }] : [];
   }
@@ -82,7 +72,7 @@ function parseBashRule(
   const prefixes = value.argsPrefixes.reduce<Array<Array<string>>>(
     (result, candidate, index) => {
       const prefixPath = `${path}.argsPrefixes[${index}]`;
-      const prefix = readStringList(candidate, prefixPath, errors, /^[^\s]+$/);
+      const prefix = readStringList(candidate, prefixPath, errors, /^\S+$/);
       if (Array.isArray(candidate) && candidate.length === 0) {
         errors.push(`${prefixPath}: at least one argument is required`);
         return result;
@@ -143,10 +133,7 @@ function parseBashPermission(
     errors.push(`${path}: allow-list mode requires an allow rule`);
   }
 
-  return {
-    mode: normalizedMode,
-    allow,
-  };
+  return { mode: normalizedMode, allow };
 }
 
 /** Parse the permission block shared by workflow steps and user ceilings. */
@@ -155,29 +142,16 @@ export function parsePermissions(
   path: string,
   errors: ValidationErrors,
 ): StepPermissions {
-  if (value === undefined) {
-    return emptyPermissions();
-  }
+  if (value === undefined) return emptyPermissions();
   if (!isJsonObject(value)) {
     errors.push(`${path}: expected an object`);
     return emptyPermissions();
   }
-  rejectUnknownKeys(
-    value,
-    ['tools', 'mcp', 'extensions', 'skills', 'bash'],
-    path,
-    errors,
-  );
+  rejectUnknownKeys(value, ['tools', 'mcp', 'skills', 'bash'], path, errors);
 
   const permissions: StepPermissions = {
     tools: readStringList(value.tools, `${path}.tools`, errors, TOOL_PATTERN),
     mcp: readStringList(value.mcp, `${path}.mcp`, errors, MCP_SELECTOR_PATTERN),
-    extensions: readStringList(
-      value.extensions,
-      `${path}.extensions`,
-      errors,
-      RESOURCE_SELECTOR_PATTERN,
-    ),
     skills: readStringList(
       value.skills,
       `${path}.skills`,
@@ -190,62 +164,4 @@ export function parsePermissions(
     errors.push(`${path}.tools: must include "bash" when Bash is enabled`);
   }
   return permissions;
-}
-
-/** Parse requirements and ensure every requirement is permitted by the step. */
-export function parseRequirements(
-  value: unknown,
-  permissions: StepPermissions,
-  path: string,
-  errors: ValidationErrors,
-): StepRequirements {
-  if (value === undefined) return emptyRequirements();
-  if (!isJsonObject(value)) {
-    errors.push(`${path}: expected an object`);
-    return emptyRequirements();
-  }
-  rejectUnknownKeys(value, ['tools', 'extensions', 'skills'], path, errors);
-
-  const requirements: StepRequirements = {
-    tools: readStringList(value.tools, `${path}.tools`, errors, TOOL_PATTERN),
-    extensions: readStringList(
-      value.extensions,
-      `${path}.extensions`,
-      errors,
-      RESOURCE_SELECTOR_PATTERN,
-    ),
-    skills: readStringList(
-      value.skills,
-      `${path}.skills`,
-      errors,
-      RESOURCE_SELECTOR_PATTERN,
-    ),
-  };
-
-  requirements.tools
-    .filter(
-      (tool) =>
-        !permissions.tools.includes(tool) &&
-        !(tool === 'mcp' && permissions.mcp.length > 0),
-    )
-    .forEach((tool) =>
-      errors.push(
-        `${path}.tools: required tool "${tool}" is not allowed by this step`,
-      ),
-    );
-  requirements.extensions
-    .filter((extension) => !permissions.extensions.includes(extension))
-    .forEach((extension) =>
-      errors.push(
-        `${path}.extensions: required extension "${extension}" is not allowed by this step`,
-      ),
-    );
-  requirements.skills
-    .filter((skill) => !permissions.skills.includes(skill))
-    .forEach((skill) =>
-      errors.push(
-        `${path}.skills: required skill "${skill}" is not allowed by this step`,
-      ),
-    );
-  return requirements;
 }

@@ -4,29 +4,19 @@ import {
   MAX_WORKSPACE_PATH_CHARS,
   RESULT_KEYS,
   type StepResultPolicy,
-  type WorkflowCheckpointProgress,
+  type WorkflowHandoffInput,
   type WorkflowResultWorkspace,
   type WorkflowStepResult,
 } from '../../domain/index.ts';
 
-const isObject = (value: unknown): value is Record<string, unknown> => {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-};
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const isPlaceholder = (value: string): boolean =>
   /^(?:p?placeholder|dummy)$/i.test(value.trim());
 
-const listItems = (summary: string, label: string): ReadonlyArray<string> => {
-  const section = new RegExp(
-    `^\\s*\\*\\*${label}:\\*\\*\\s*\\n((?:\\s*-\\s+.+(?:\\n|$))+)`,
-    'm',
-  ).exec(summary)?.[1];
-  return section
-    ? [...section.matchAll(/^\s*-\s+(.+)$/gm)].map((match) =>
-        (match[1] ?? '').trim(),
-      )
-    : [];
-};
+const hasFormattingSyntax = (value: string): boolean =>
+  /[\r\n\u2500-\u257f]|^(?:[-*+]\s|#{1,6}\s|\d+\.\s)/.test(value);
 
 const isSpecificCompletedItem = (item: string): boolean =>
   !isPlaceholder(item) &&
@@ -41,85 +31,61 @@ const isSpecificRemainingItem = (item: string): boolean =>
     item,
   );
 
-function validateNonSuccessSummary(outcome: string, summary: string): void {
-  const completed = listItems(summary, 'Completed');
-  const remaining = listItems(summary, 'Remaining');
-  if (
-    !/^# [^:\n]+:\s+.+/m.test(summary) ||
-    completed.length === 0 ||
-    remaining.length === 0 ||
-    !completed.every(isSpecificCompletedItem) ||
-    !remaining.every(isSpecificRemainingItem)
-  ) {
-    throw new Error(
-      'step summary must list specific completed and remaining work',
-    );
+function parseText(value: unknown, name: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`workflow step ${name} must be a string`);
   }
-  if (outcome === 'blocked') {
-    const question = /^\s*\*\*Question:\*\*\s*(.+\?)\s*$/m.exec(summary)?.[1];
-    if (!question || isPlaceholder(question)) {
-      throw new Error('blocked summary must ask a clarifying question');
-    }
-    const isActionable =
-      /^# Blocked:\s+.+/m.test(summary) &&
-      /^\s*\*\*Action:\*\*\s+.+/m.test(summary) &&
-      /^\s*\*\*Next:\*\*\s+.+/m.test(summary);
-    if (!isActionable) {
-      throw new Error(
-        'blocked summary must identify the missing user prerequisite and next action',
-      );
-    }
+  const text = value.trim();
+  if (!text || isPlaceholder(text) || hasFormattingSyntax(text)) {
+    throw new Error(`workflow step ${name} must be plain non-placeholder text`);
   }
-  if (outcome === 'retry') {
-    const describesTransientFailure = /\btransient\b/i.test(summary);
-    const hasSafeRetryCondition =
-      /\b(safe (retry|to retry)|retry (when|after|once))\b/i.test(summary);
-    const requestsUserInput =
-      /\b(provide|confirm|choose|approve|decide)\b/i.test(summary);
-    if (
-      !/^# Retry:\s+.+/m.test(summary) ||
-      !describesTransientFailure ||
-      !hasSafeRetryCondition ||
-      requestsUserInput
-    ) {
-      throw new Error(
-        'retry summary must identify a transient failure and safe retry condition',
-      );
-    }
-  }
+  return text;
 }
 
-function parseCheckpointProgress(
+function parseItems(
   value: unknown,
-  outcome: string,
-): WorkflowCheckpointProgress | undefined {
-  if (outcome !== 'checkpoint') return undefined;
-  if (!isObject(value)) throw new Error('checkpoint outcome requires progress');
-  const { feature, commit, changedFiles, verification, remaining } = value;
-  if (
-    typeof feature !== 'string' ||
-    !feature.trim() ||
-    typeof commit !== 'string' ||
-    !commit.trim() ||
-    !Array.isArray(changedFiles) ||
-    changedFiles.length === 0 ||
-    !changedFiles.every((item) => typeof item === 'string' && item) ||
-    !Array.isArray(verification) ||
-    verification.length === 0 ||
-    !verification.every((item) => typeof item === 'string' && item) ||
-    !Array.isArray(remaining) ||
-    !remaining.every((item) => typeof item === 'string' && item)
-  )
+  name: 'completed' | 'remaining',
+  validate: (item: string) => boolean,
+): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`workflow step ${name} must contain one or more items`);
+  }
+  const items = value.map((item) => parseText(item, `${name} item`));
+  if (!items.every(validate)) {
     throw new Error(
-      'checkpoint progress must identify feature, commit, changed files, verification, and remaining work',
+      `workflow step ${name} items must be specific and actionable`,
     );
+  }
+  return items;
+}
+
+function parseHandoff(value: Record<string, unknown>): WorkflowHandoffInput {
   return {
-    feature: feature.trim(),
-    commit: commit.trim(),
-    changedFiles,
-    verification,
-    remaining,
+    completed: parseItems(
+      value.completed,
+      'completed',
+      isSpecificCompletedItem,
+    ),
+    remaining: parseItems(
+      value.remaining,
+      'remaining',
+      isSpecificRemainingItem,
+    ),
   };
+}
+
+export function formatWorkflowStepSummary(
+  outcome: string,
+  handoff: WorkflowHandoffInput,
+): string {
+  const heading = outcome.charAt(0).toUpperCase() + outcome.slice(1);
+  return [
+    `# ${heading}`,
+    '**Completed:**',
+    ...handoff.completed.map((item) => `- ${item}`),
+    '**Remaining:**',
+    ...handoff.remaining.map((item) => `- ${item}`),
+  ].join('\n');
 }
 
 function parseResultWorkspace(
@@ -127,67 +93,50 @@ function parseResultWorkspace(
   outcome: string,
   policy: StepResultPolicy,
 ): WorkflowResultWorkspace | undefined {
-  const requiresWorkspace = policy.workspace?.bindOn.includes(outcome) === true;
+  const requiresWorkspace =
+    policy.workspace !== undefined && outcome === 'ready';
   if (!requiresWorkspace) {
-    if (value !== undefined) {
+    if (value !== undefined)
       throw new Error('workflow step workspace is forbidden for this outcome');
-    }
     return undefined;
   }
-  if (!isObject(value)) {
+  if (!isObject(value))
     throw new Error(
       `workflow step outcome "${outcome}" requires workspace.cwd`,
     );
-  }
   const unknownKey = Object.keys(value).find((key) => key !== 'cwd');
-  if (unknownKey) {
+  if (unknownKey)
     throw new Error(
       `workflow step workspace has unknown property "${unknownKey}"`,
     );
-  }
-  if (typeof value.cwd !== 'string') {
+  if (typeof value.cwd !== 'string')
     throw new Error('workflow step workspace cwd must be a string');
-  }
   const cwd = value.cwd;
-  if (!cwd || cwd.includes('\0') || !isAbsolute(cwd)) {
+  if (!cwd || cwd.includes('\0') || !isAbsolute(cwd))
     throw new Error('workflow step workspace cwd must be an absolute path');
-  }
-  if (cwd.length > MAX_WORKSPACE_PATH_CHARS) {
+  if (cwd.length > MAX_WORKSPACE_PATH_CHARS)
     throw new Error(
       `workflow step workspace cwd exceeds ${MAX_WORKSPACE_PATH_CHARS} characters`,
     );
-  }
   return { cwd };
 }
 
-/**
- * Validates and normalizes the structured result returned by a workflow step.
- *
- * @param value - Untrusted structured output from the agent.
- * @param policy - Result constraints for the active workflow step.
- * @returns A normalized workflow-step result.
- * @throws When the result violates the active policy or result schema.
- */
+/** Validates and normalizes the structured result returned by a workflow step. */
 export function parseWorkflowStepResult(
   value: unknown,
   policy: StepResultPolicy,
 ): WorkflowStepResult {
-  if (!isObject(value)) {
+  if (!isObject(value))
     throw new Error('workflow step result must be an object');
-  }
-
   const unknownKey = Object.keys(value).find((key) => !RESULT_KEYS.has(key));
-  if (unknownKey) {
+  if (unknownKey)
     throw new Error(
       `workflow step result has unknown property "${unknownKey}"`,
     );
-  }
-  if (value.version !== 1) {
+  if (value.version !== 1)
     throw new Error('unsupported workflow step result version');
-  }
-  if (value.policyDigest !== policy.policyDigest) {
+  if (value.policyDigest !== policy.policyDigest)
     throw new Error('workflow step result does not match the active policy');
-  }
   if (
     typeof value.outcome !== 'string' ||
     !policy.outcomes.includes(value.outcome)
@@ -196,19 +145,33 @@ export function parseWorkflowStepResult(
       `workflow step returned invalid outcome "${String(value.outcome)}"`,
     );
   }
-  if (typeof value.summary !== 'string') {
-    throw new Error('workflow step summary must be a string');
+
+  const handoff = parseHandoff(value);
+  if (
+    value.outcome === 'ready' &&
+    (handoff.remaining.length !== 1 ||
+      handoff.remaining[0] !== 'No active-step work remains.')
+  ) {
+    throw new Error('ready result must have no active-step work remaining');
   }
-  const summary = value.summary.trim();
-  if (!summary) {
-    throw new Error('workflow step summary must not be empty');
+  if (
+    value.outcome === 'blocked' &&
+    !handoff.remaining.some((item) => item.endsWith('?'))
+  ) {
+    throw new Error('blocked result must include a user question in remaining');
   }
+  if (
+    (value.outcome === 'handoff' || value.outcome === 'gaps') &&
+    handoff.remaining.some((item) => item.endsWith('?'))
+  ) {
+    throw new Error(`${value.outcome} result must not include a user question`);
+  }
+  const summary = formatWorkflowStepSummary(value.outcome, handoff);
   if (summary.length > policy.summaryMaxChars) {
     throw new Error(
       `workflow step summary exceeds ${policy.summaryMaxChars} characters`,
     );
   }
-  validateNonSuccessSummary(value.outcome, summary);
   if (value.artifact !== undefined && typeof value.artifact !== 'string') {
     throw new Error('workflow step artifact must be a string');
   }
@@ -219,10 +182,7 @@ export function parseWorkflowStepResult(
       `workflow step artifact exceeds ${MAX_ARTIFACT_CHARS} characters`,
     );
   }
-  if (
-    value.outcome === policy.gateSubmitOutcome &&
-    (!artifact || !artifact.trim())
-  ) {
+  if (policy.gateSubmitOutcome === 'ready' && (!artifact || !artifact.trim())) {
     throw new Error('workflow gate outcome requires a non-empty artifact');
   }
   const workspace = parseResultWorkspace(
@@ -230,7 +190,6 @@ export function parseWorkflowStepResult(
     value.outcome,
     policy,
   );
-  const progress = parseCheckpointProgress(value.progress, value.outcome);
   return {
     version: 1,
     policyDigest: policy.policyDigest,
@@ -238,6 +197,5 @@ export function parseWorkflowStepResult(
     summary,
     ...(artifact !== undefined ? { artifact } : {}),
     ...(workspace ? { workspace } : {}),
-    ...(progress ? { progress } : {}),
   };
 }

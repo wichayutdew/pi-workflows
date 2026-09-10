@@ -5,14 +5,9 @@ import type {
   ConfigLoaderDependencies,
   LoadCatalogOptions,
   LoadedWorkflow,
-  PermissionCeiling,
   WorkflowCatalog,
-  WorkflowSettings,
 } from '../../domain/index.ts';
-import {
-  checkWorkflowAgainstCeiling,
-  createDiagnostic,
-} from '../../function/index.ts';
+import { createDiagnostic } from '../../function/index.ts';
 import { loadSettings } from './load-settings.ts';
 import { loadWorkflowDirectory } from './load-workflows.ts';
 
@@ -61,17 +56,6 @@ function defaultUserWorkflowDirectory(
   return join(agentDirectory, 'workflows');
 }
 
-function requiredPermissionCeiling(
-  settings: WorkflowSettings,
-): PermissionCeiling {
-  if (!settings.permissionCeiling) {
-    throw new Error(
-      'validated settings must define a ceiling when project workflows are enabled',
-    );
-  }
-  return settings.permissionCeiling;
-}
-
 async function loadCatalog(
   dependencies: ConfigLoaderDependencies,
   options: LoadCatalogOptions,
@@ -88,7 +72,6 @@ async function loadCatalog(
     commands: new Map(),
     diagnostics: [...settingsResult.diagnostics],
   };
-
   const userResult = await loadWorkflowDirectory(
     dependencies.fileSystem,
     userDirectory,
@@ -98,53 +81,11 @@ async function loadCatalog(
   userResult.workflows.forEach((workflow) => {
     addWorkflow(state, workflow);
   });
-
-  const projectDirectory = join(resolve(options.cwd), '.pi', 'workflows');
-  if (settingsResult.settings.allowProjectWorkflows) {
-    if (!options.projectTrusted) {
-      state.diagnostics.push(
-        createDiagnostic(
-          projectDirectory,
-          'project workflows were skipped because the project is not trusted',
-          'warning',
-        ),
-      );
-    } else {
-      const permissionCeiling = requiredPermissionCeiling(
-        settingsResult.settings,
-      );
-      const projectResult = await loadWorkflowDirectory(
-        dependencies.fileSystem,
-        projectDirectory,
-        'project',
-      );
-      state.diagnostics.push(...projectResult.diagnostics);
-      projectResult.workflows.forEach((workflow) => {
-        const ceilingErrors = checkWorkflowAgainstCeiling(
-          workflow.definition,
-          permissionCeiling,
-        );
-        if (ceilingErrors.length > 0) {
-          state.diagnostics.push(
-            ...ceilingErrors.map((message) =>
-              createDiagnostic(workflow.sourcePath, message),
-            ),
-          );
-          return;
-        }
-        addWorkflow(state, workflow);
-      });
-    }
-  }
-
   return {
     workflows: state.workflows,
     settings: settingsResult.settings,
     diagnostics: state.diagnostics,
     userDirectory,
-    ...(settingsResult.settings.allowProjectWorkflows
-      ? { projectDirectory }
-      : {}),
   };
 }
 

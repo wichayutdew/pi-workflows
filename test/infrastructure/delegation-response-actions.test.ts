@@ -64,7 +64,6 @@ function buildActiveDelegation(run: WorkflowRun): ActiveDelegation {
     permissions: {
       tools: ['read', 'edit'],
       mcp: [],
-      extensions: [],
       skills: [],
       bash: { mode: 'deny', allow: [] },
     },

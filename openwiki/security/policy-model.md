@@ -105,17 +105,16 @@ context; the YAML rule only defines executable scope.
 flowchart TD
   Complete[completion params] --> Outcome{outcome in policy.outcomes?}
   Outcome -- no --> Reject[throw]
-  Outcome -- yes --> Summary{summary structured, specific, and <= limit?}
-  Summary -- no --> Reject
-  Summary -- yes --> BlockedOutcome{outcome is blocked?}
-  BlockedOutcome -- no --> Gate{outcome is gateSubmitOutcome?}
-  BlockedOutcome -- yes --> BlockedSummary{question/action/next present?}
-  BlockedSummary -- no --> Reject
-  BlockedSummary -- yes --> Gate
+  Outcome -- yes --> Handoff{completed and remaining plain and specific?}
+  Handoff -- no --> Reject
+  Handoff -- yes --> Semantics{outcome-specific remaining rules hold?}
+  Semantics -- no --> Reject
+  Semantics -- yes --> Gate{outcome is ready on a gated step?}
   Gate -- yes --> Artifact{artifact non-empty?}
   Artifact -- no --> Reject
-  Artifact -- yes --> Mode{execution mode}
-  Gate -- no --> Mode
+  Artifact -- yes --> Summary[format compact summary]
+  Gate -- no --> Summary
+  Summary --> Mode{execution mode}
   Mode -- delegated structured_output --> Write[atomic result.json write]
   Mode -- main --> Capture[capture pending in memory]
   Write --> Terminate[terminate turn]
@@ -124,11 +123,14 @@ flowchart TD
 
 For a delegated step, pi-subagents 0.36 supplies `structured_output`; for a
 main-agent step, the harness registers `workflow_complete_step`. Both paths
-feed the same outcome, summary, artifact, sole-call, and policy-digest
-validation. Summaries must start with `# <Outcome>: <state>`, include specific
-`Completed` and `Remaining` bullet sections, and avoid placeholder or generic
-items; `blocked` summaries must also ask one concrete clarifying question. The
-workflow step permissions become the sole active-tool allow-list after the
+feed the same outcome, typed handoff fields, artifact, sole-call, and
+policy-digest validation. Completion payloads contain `outcome`, plain-text
+`completed`, and `remaining` only; the extension generates persisted Markdown.
+The permitted outcomes are `ready`, `blocked`, `handoff`, and `gaps`. `ready`
+requires the exact remaining item `No active-step work remains.`; `blocked`
+requires a user question ending in `?`; `handoff` is non-question active work
+for the same step; and `gaps` carries non-question requirements for a configured
+earlier step. The workflow step permissions become the sole active-tool allow-list after the
 child capability is verified. The selected workflow `agent` profile supplies
 role instructions plus optional model/thinking overrides; unavailable tools or
 extension providers fail closed.

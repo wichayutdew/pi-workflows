@@ -8,20 +8,20 @@ function workspaceWorkflow() {
   raw.start = 'prepare';
   raw.steps = {
     prepare: {
-      prompt: 'Prepare the workspace',
+      prompt: { file: 'fixture-prompt-1.md' },
       agent: 'worker',
       workspace: { bindOn: ['ready'], allowedRoots: ['../worktrees'] },
       transitions: { ready: 'implement', blocked: '$pause' },
     },
     implement: {
-      prompt: 'Implement',
+      prompt: { file: 'fixture-prompt-2.md' },
       agent: 'worker',
       transitions: { ready: 'verify', blocked: '$pause' },
     },
     verify: {
-      prompt: 'Verify',
+      prompt: { file: 'fixture-prompt-3.md' },
       agent: 'reviewer',
-      transitions: { passed: '$done', blocked: '$pause' },
+      transitions: { ready: '$done', blocked: '$pause' },
     },
   };
   return loadedWorkflow(raw);
@@ -47,7 +47,7 @@ describe('when restarting a completed workflow iteration', () => {
     completed = advanceRun(
       workflow,
       completed,
-      'passed',
+      'ready',
       'Verified first work',
       4,
     );
@@ -118,7 +118,7 @@ describe('when restarting a completed workflow iteration', () => {
       workspaceCwd: '/repository/worktrees/task',
     });
     completed = advanceRun(workflow, completed, 'ready', 'Implemented', 3);
-    completed = advanceRun(workflow, completed, 'passed', 'Verified', 4);
+    completed = advanceRun(workflow, completed, 'ready', 'Verified', 4);
 
     const restarted = restartRun(
       workflow,

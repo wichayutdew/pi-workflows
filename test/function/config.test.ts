@@ -2,13 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
-import { checkWorkflowAgainstCeiling } from '../../src/function/config/ceiling.ts';
 import {
   defaultUserWorkflowDirectory,
   loadCatalog,
 } from '../../src/infrastructure/fs/load.ts';
 import {
-  cloneEmptyRequirements,
   validateSettings,
   validateWorkflow,
 } from '../../src/function/config/index.ts';
@@ -47,6 +45,40 @@ describe('when testing config', () => {
         'allow-list',
       );
       expect(result.value?.steps.inspect?.agent).toEqual({ name: 'scout' });
+    });
+
+    test('rejects outcomes outside ready, blocked, handoff, and gaps', () => {
+      const invalid = baseWorkflow();
+      const step = (invalid.steps as Record<string, Record<string, unknown>>)
+        .inspect!;
+      step.transitions = { planned: '$done' };
+
+      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
+        /unsupported outcome "planned"/,
+      );
+
+      const invalidTargets = baseWorkflow();
+      (
+        invalidTargets.steps as Record<string, Record<string, unknown>>
+      ).inspect!.transitions = {
+        ready: '$pause',
+        blocked: '$done',
+        handoff: 'other',
+      };
+      const errors = validateWorkflow(invalidTargets).errors.join('\n');
+      expect(errors).toMatch(
+        /transitions\.ready: must target another step or "\$done"/,
+      );
+      expect(errors).toMatch(/transitions\.blocked: must target "\$pause"/);
+      expect(errors).toMatch(/transitions\.handoff: must target "inspect"/);
+
+      const forwardGaps = baseWorkflow();
+      (
+        forwardGaps.steps as Record<string, Record<string, unknown>>
+      ).implement!.transitions = { ready: '$done', gaps: 'implement' };
+      expect(validateWorkflow(forwardGaps).errors.join('\n')).toMatch(
+        /transitions\.gaps: must target an earlier step/,
+      );
     });
 
     test('preserves valid per-step tool budgets and rejects invalid values', () => {
@@ -103,31 +135,36 @@ describe('when testing config', () => {
       const inspect = (raw.steps as Record<string, Record<string, unknown>>)
         .inspect!;
       inspect.gate = {
-        provider: 'prompt',
-        submitOutcome: 'submit',
-        approvedOutcome: 'ready',
-        rejectedOutcome: 'blocked',
         artifactContract: {
           maxChars: 100,
-          requiredSubstrings: ['# Plan', '## Evidence'],
-          forbiddenSubstrings: ['saved at /'],
-          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
-          onValidationFailure: 'retry',
+          requiredHeadings: [
+            { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+            {
+              level: 2,
+              title: 'Evidence',
+              guidance: 'Provide independent proof.',
+            },
+          ],
         },
       };
       inspect.transitions = {
         ready: 'implement',
         blocked: '$pause',
-        retry: 'inspect',
+        handoff: 'inspect',
       };
 
       expect(validateWorkflow(raw).errors).toEqual([]);
       expect(validateWorkflow(raw).value?.steps.inspect?.gate).toMatchObject({
         artifactContract: {
           maxChars: 100,
-          requiredSubstrings: ['# Plan', '## Evidence'],
-          forbiddenSubstrings: ['saved at /'],
-          equalOccurrenceGroups: [['**Question:**', '**Answer:**']],
+          requiredHeadings: [
+            { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+            {
+              level: 2,
+              title: 'Evidence',
+              guidance: 'Provide independent proof.',
+            },
+          ],
         },
       });
 
@@ -138,11 +175,10 @@ describe('when testing config', () => {
       ).artifactContract as Record<string, unknown>;
       Object.assign(gate, {
         maxChars: 0,
-        requiredSubstrings: ['', '# Plan'],
-        forbiddenSubstrings: ['saved at /', 'saved at /'],
-        equalOccurrenceGroups: [
-          ['**Question:**', '**Question:**'],
-          ['only one'],
+        requiredHeadings: [
+          { level: 4, title: '', guidance: '' },
+          { level: 1, title: 'Plan', guidance: 'Describe the plan.' },
+          { level: 1, title: 'Plan', guidance: 'Different guidance.' },
         ],
         unexpected: true,
       });
@@ -150,10 +186,16 @@ describe('when testing config', () => {
       const messages = validateWorkflow(malformed).errors.join('\n');
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/expected an integer from 1 to 200000/);
-      expect(messages).toMatch(/must not be empty/);
-      expect(messages).toMatch(/duplicate value "saved at \//);
-      expect(messages).toMatch(/duplicate value "\*\*Question:\*\*"/);
-      expect(messages).toMatch(/at least two values are required/);
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.level: expected 1, 2, or 3/,
+      );
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.title: must not be empty/,
+      );
+      expect(messages).toMatch(
+        /requiredHeadings\[0\]\.guidance: must not be empty/,
+      );
+      expect(messages).toMatch(/duplicate heading "# Plan"/);
 
       const withoutMax = structuredClone(raw);
       delete (
@@ -165,6 +207,16 @@ describe('when testing config', () => {
       expect(validateWorkflow(withoutMax).errors.join('\n')).toMatch(
         /maxChars: expected an integer from 1 to 200000/,
       );
+
+      const legacy = structuredClone(raw);
+      const legacyContract = (
+        (legacy.steps as Record<string, Record<string, unknown>>).inspect!
+          .gate as Record<string, unknown>
+      ).artifactContract as Record<string, unknown>;
+      legacyContract.requiredSubstrings = ['# Plan'];
+      expect(validateWorkflow(legacy).errors.join('\n')).toMatch(
+        /unknown property "requiredSubstrings"/,
+      );
     });
 
     test('validates one-time workspace binding and permits delegated downstream cycles', () => {
@@ -175,7 +227,7 @@ describe('when testing config', () => {
       >;
       defaultSteps.implement = {
         ...defaultSteps.implement,
-        transitions: { retry: 'inspect', done: '$done' },
+        transitions: { ready: '$done', handoff: 'implement' },
       };
 
       const defaultResult = validateWorkflow(withDefaultRoot);
@@ -246,12 +298,12 @@ describe('when testing config', () => {
       >;
       gatedSteps.inspect = {
         ...gatedSteps.inspect,
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
+        gate: {},
+        transitions: {
+          ready: 'implement',
+          blocked: '$pause',
+          handoff: 'inspect',
         },
-        transitions: { ready: 'implement', blocked: '$pause' },
       };
 
       const downstreamMain = workspaceWorkflow();
@@ -268,13 +320,13 @@ describe('when testing config', () => {
       >;
       multipleSteps.implement = {
         ...multipleSteps.implement,
-        transitions: { done: 'finish' },
-        workspace: { bindOn: ['done'] },
+        transitions: { ready: 'finish' },
+        workspace: { bindOn: ['ready'] },
       };
       multipleSteps.finish = {
         prompt: 'Finish',
         agent: 'reviewer',
-        transitions: { done: '$done' },
+        transitions: { ready: '$done' },
       };
 
       const messages = [
@@ -291,7 +343,7 @@ describe('when testing config', () => {
 
       expect(messages).toMatch(/unknown property "unexpected"/);
       expect(messages).toMatch(/duplicate value "missing"/);
-      expect(messages).toMatch(/unknown transition outcome "missing"/);
+      expect(messages).toMatch(/bindOn: must contain only "ready"/);
       expect(messages).toMatch(/at least one workspace path is required/);
       expect(messages).toMatch(
         /expected a relative, absolute, or home-relative path/,
@@ -422,28 +474,6 @@ describe('when testing config', () => {
       const malformedErrors = validateWorkflow(malformed).errors.join('\n');
       expect(malformedErrors).toMatch(/at least one argument is required/);
       expect(malformedErrors).toMatch(/duplicate argument prefix/);
-
-      const settings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [
-              {
-                executable: 'git',
-                argsPrefixes: [['status'], ['diff']],
-              },
-            ],
-          },
-        },
-      });
-      expect(settings.errors).toEqual([]);
-      expect(settings.value?.permissionCeiling?.bash.allow).toEqual([
-        { executable: 'git', argsPrefix: ['status'] },
-        { executable: 'git', argsPrefix: ['diff'] },
-      ]);
     });
 
     test('rejects unknown properties and transition targets', () => {
@@ -471,6 +501,64 @@ describe('when testing config', () => {
       expect(result.errors.join('\n')).toMatch(
         /workflow\.\$schema: expected a string/,
       );
+    });
+
+    test('rejects removed prompt, requirement, and extension configuration', () => {
+      // given
+      const inlinePrompt = baseWorkflow();
+      const requiredResources = baseWorkflow();
+      const extensionPermissions = baseWorkflow();
+      const inlineStep = (
+        inlinePrompt.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
+      const requiredStep = (
+        requiredResources.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
+      const extensionStep = (
+        extensionPermissions.steps as Record<string, Record<string, unknown>>
+      ).inspect!;
+      inlineStep.prompt = 'inline instructions';
+      requiredStep.requires = { tools: ['read'] };
+      extensionStep.permissions = { extensions: ['example'] };
+
+      // when
+      const inlineResult = validateWorkflow(inlinePrompt);
+      const requirementsResult = validateWorkflow(requiredResources);
+      const extensionsResult = validateWorkflow(extensionPermissions);
+
+      // then
+      expect(inlineResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect\.prompt: expected an object/,
+      );
+      expect(requirementsResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect: unknown property "requires"/,
+      );
+      expect(extensionsResult.errors.join('\n')).toMatch(
+        /workflow\.steps\.inspect\.permissions: unknown property "extensions"/,
+      );
+    });
+
+    test('defaults omitted optional permission categories', () => {
+      // when
+      const result = validateWorkflow(baseWorkflow());
+
+      // then
+      expect(result.errors).toEqual([]);
+      expect(result.value?.steps.inspect?.permissions).toEqual({
+        tools: ['read', 'bash'],
+        mcp: [],
+        skills: [],
+        bash: {
+          mode: 'allow-list',
+          allow: [{ executable: 'git', argsPrefix: ['status'] }],
+        },
+      });
+      expect(result.value?.steps.implement?.permissions).toEqual({
+        tools: ['read', 'edit'],
+        mcp: [],
+        skills: [],
+        bash: { mode: 'deny', allow: [] },
+      });
     });
 
     test('rejects malformed workflow fields at every validation boundary', () => {
@@ -519,20 +607,12 @@ describe('when testing config', () => {
         withStep({ transitions: { 'Invalid!': '$done' } }),
         withStep({
           gate: {
-            provider: 'prompt',
-            submitOutcome: 'submit',
-            approvedOutcome: 'same',
-            rejectedOutcome: 'same',
             timeoutMs: 1_000,
           },
           transitions: { same: '$done' },
         }),
         withStep({
-          gate: {
-            submitOutcome: 'submit',
-            approvedOutcome: 'ready',
-            rejectedOutcome: 'blocked',
-          },
+          gate: {},
           transitions: { submit: '$done' },
         }),
         withStep({
@@ -630,7 +710,7 @@ describe('when testing config', () => {
               allow: [{ executable: 'git', argsPrefix: ['status'] }],
             },
           },
-          transitions: { done: '$done' },
+          transitions: { ready: '$done' },
         }),
       );
 
@@ -638,7 +718,6 @@ describe('when testing config', () => {
       expect(errors.every((items) => items.length > 0)).toBe(true);
       expect(errors.flat().join('\n')).toMatch(/expected an object/);
       expect(errors.flat().join('\n')).toMatch(/must not be empty/);
-      expect(errors.flat().join('\n')).toMatch(/required tool "write"/);
       expect(errors.flat().join('\n')).toMatch(/missing gate outcome "ready"/);
       expect(validPrefix.errors).toEqual([]);
       expect(validPrefix.value?.steps.inspect?.permissions.bash.allow).toEqual([
@@ -683,84 +762,6 @@ describe('when testing config', () => {
       );
     });
 
-    test('rejects malformed settings and returns independent defaults', () => {
-      // given
-      const malformed: unknown[] = [
-        null,
-        {
-          $schema: 42,
-          version: 2,
-          allowProjectWorkflows: 'yes',
-          permissionCeiling: 42,
-          unexpected: true,
-        },
-        { version: 1, allowProjectWorkflows: true },
-        {
-          version: 1,
-          permissionCeiling: {
-            tools: ['bash'],
-            bash: { mode: 'read-only' },
-            subagent: 42,
-          },
-        },
-        {
-          version: 1,
-          permissionCeiling: {
-            subagent: {
-              agents: [],
-              contexts: ['fork'],
-              models: 'models',
-            },
-          },
-        },
-        {
-          version: 1,
-          permissionCeiling: {
-            subagent: {
-              agents: ['pi-workflows.step'],
-              contexts: ['fresh'],
-              models: [],
-              maxTimeoutMs: 0,
-              maxTurns: 0,
-              maxGraceTurns: 101,
-              maxToolCalls: 0,
-              artifacts: 'yes',
-            },
-          },
-        },
-      ];
-
-      // when
-      const errors = malformed.map((raw) => validateSettings(raw).errors);
-      const unknownAgentCeiling = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: [],
-          mcp: [],
-          extensions: [],
-          skills: [],
-          bash: { mode: 'deny' },
-          agent: 'worker',
-        },
-      });
-      const first = cloneEmptyRequirements();
-      const second = cloneEmptyRequirements();
-      first.tools.push('read');
-
-      // then
-      expect(errors.every((items) => items.length > 0)).toBe(true);
-      expect(errors.flat().join('\n')).toMatch(
-        /required when project workflows are enabled/,
-      );
-      expect(errors.flat().join('\n')).toMatch(/unknown property "subagent"/);
-      expect(unknownAgentCeiling.value).toBe(undefined);
-      expect(unknownAgentCeiling.errors.join('\n')).toMatch(
-        /unknown property "agent"/,
-      );
-      expect(second).toEqual({ tools: [], extensions: [], skills: [] });
-    });
-
     test('rejects workflow aliases reserved by Pi', () => {
       // given
       // when
@@ -770,121 +771,24 @@ describe('when testing config', () => {
       expect(result.errors.join('\n')).toMatch(/reserved by Pi or the harness/);
     });
 
-    test('defaults gates to prompt and supports Plannotator without duplication', () => {
-      // given
+    test('defaults a gate timeout', () => {
       const raw = baseWorkflow();
       const steps = raw.steps as Record<string, Record<string, unknown>>;
       steps.inspect = {
         ...steps.inspect,
-        gate: {
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
+        gate: {},
+        transitions: {
+          ready: 'implement',
+          blocked: '$pause',
+          handoff: 'inspect',
         },
       };
-      // when
-      const promptResult = validateWorkflow(raw);
-      // then
-      expect(promptResult.errors).toEqual([]);
-      expect(promptResult.value?.steps.inspect?.gate?.provider).toBe('prompt');
 
-      const plannotator = structuredClone(raw);
-      const plannotatorSteps = plannotator.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      plannotatorSteps.inspect = {
-        ...plannotatorSteps.inspect,
-        gate: {
-          provider: 'plannotator',
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
-        },
-      };
-      const plannotatorResult = validateWorkflow(plannotator);
+      const plannotatorResult = validateWorkflow(raw);
       expect(plannotatorResult.errors).toEqual([]);
-      expect(plannotatorResult.value?.steps.inspect?.gate?.provider).toBe(
-        'plannotator',
-      );
       expect(plannotatorResult.value?.steps.inspect?.gate).toMatchObject({
         timeoutMs: 30_000,
       });
-
-      const invalid = structuredClone(raw);
-      const invalidSteps = invalid.steps as Record<
-        string,
-        Record<string, unknown>
-      >;
-      invalidSteps.inspect = {
-        ...invalidSteps.inspect,
-        gate: {
-          provider: 'unknown',
-          submitOutcome: 'submit',
-          approvedOutcome: 'ready',
-          rejectedOutcome: 'blocked',
-        },
-      };
-      expect(validateWorkflow(invalid).errors.join('\n')).toMatch(
-        /expected prompt or plannotator/,
-      );
-    });
-
-    test('project permission ceiling constrains declarative Bash rules', () => {
-      // given
-      const raw = baseWorkflow();
-      const steps = raw.steps as Record<string, Record<string, unknown>>;
-      steps.inspect = {
-        ...steps.inspect,
-        permissions: {
-          tools: ['read', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      };
-      // when
-      const workflow = validateWorkflow(raw);
-      // then
-      expect(workflow.value).toBeTruthy();
-      const deniedSettings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['diff'] }],
-          },
-        },
-      });
-      expect(deniedSettings.value?.permissionCeiling).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          deniedSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).toMatch(/permissions\.bash: exceeds/);
-
-      const allowedSettings = validateSettings({
-        version: 1,
-        allowProjectWorkflows: true,
-        permissionCeiling: {
-          tools: ['read', 'edit', 'bash'],
-          bash: {
-            mode: 'allow-list',
-            allow: [{ executable: 'git', argsPrefix: ['status'] }],
-          },
-        },
-      });
-      expect(allowedSettings.value?.permissionCeiling).toBeTruthy();
-      expect(
-        checkWorkflowAgainstCeiling(
-          workflow.value!,
-          allowedSettings.value!.permissionCeiling!,
-        ).join('\n'),
-      ).not.toMatch(/permissions\.bash: exceeds/);
     });
 
     test('loader accepts YAML workflow files and rejects duplicate YAML keys', async () => {
@@ -902,7 +806,7 @@ describe('when testing config', () => {
           'start: inspect',
           'steps:',
           '  inspect:',
-          '    prompt: Inspect safely',
+          '    prompt: { file: compact.md }',
           '    agent: reviewer',
           '    maxToolCalls: 10',
           '    permissions:',
@@ -913,7 +817,7 @@ describe('when testing config', () => {
           '          - executable: git',
           '            argsPrefixes: [[status], [diff, --stat]]',
           '    transitions:',
-          '      done: $done',
+          '      ready: $done',
           '      handoff: inspect',
         ].join('\n'),
         'utf8',
@@ -928,11 +832,22 @@ describe('when testing config', () => {
           'start: inspect',
           'steps:',
           '  inspect:',
-          '    prompt: Inspect',
-          '    transitions: { done: $done }',
+          '    prompt: { file: short-extension.md }',
+          '    transitions: { ready: $done }',
         ].join('\n'),
         'utf8',
       );
+      await writeFile(
+        join(userDirectory, 'compact.md'),
+        'Inspect safely',
+        'utf8',
+      );
+      await writeFile(
+        join(userDirectory, 'short-extension.md'),
+        'Inspect',
+        'utf8',
+      );
+
       // when
       await writeFile(
         join(userDirectory, 'duplicate.workflow.yaml'),
@@ -946,15 +861,13 @@ describe('when testing config', () => {
           'steps:',
           '  inspect:',
           '    prompt: Inspect',
-          '    transitions: { done: $done }',
+          '    transitions: { ready: $done }',
         ].join('\n'),
         'utf8',
       );
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect([...catalog.workflows.keys()]).toEqual([
@@ -1001,7 +914,7 @@ describe('when testing config', () => {
         'steps:',
         '  inspect:',
         '    prompt: Inspect',
-        '    transitions: { done: $done }',
+        '    transitions: { ready: $done }',
       ];
       await writeFile(
         join(userDirectory, 'multiple.workflow.yaml'),
@@ -1026,8 +939,6 @@ describe('when testing config', () => {
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(catalog.workflows.size).toBe(0);
@@ -1063,8 +974,6 @@ describe('when testing config', () => {
           'utf8',
         );
         const configured = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(configured.diagnostics).toEqual([]);
@@ -1076,8 +985,6 @@ describe('when testing config', () => {
           'utf8',
         );
         const invalid = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(invalid.settings.statusShortcut).toBe('ctrl+alt+w');
@@ -1100,8 +1007,8 @@ describe('when testing config', () => {
         join(userDirectory, 'settings.yaml'),
         [
           'version: 1',
-          'allowProjectWorkflows: false',
-          'allowProjectWorkflows: true',
+          'statusShortcut: ctrl+alt+w',
+          'statusShortcut: ctrl+shift+y',
         ].join('\n'),
         'utf8',
       );
@@ -1109,13 +1016,10 @@ describe('when testing config', () => {
       // then
       try {
         const catalog = await loadCatalog({
-          cwd: root,
-          projectTrusted: false,
           userDirectory,
         });
         expect(catalog.settings).toEqual({
           version: 1,
-          allowProjectWorkflows: false,
           statusShortcut: 'ctrl+alt+w',
         });
         expect(catalog.diagnostics.length).toBe(1);
@@ -1125,60 +1029,6 @@ describe('when testing config', () => {
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(/unique/i);
         expect(catalog.diagnostics[0]?.message ?? '').toMatch(
           /line 3, column 1/,
-        );
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    });
-
-    test('trusted project workflows cannot override user workflow ids', async () => {
-      // given
-      const root = await mkdtemp(join(tmpdir(), 'pi-workflows-catalog-'));
-      const userDirectory = join(root, 'user');
-      const projectDirectory = join(root, 'project', '.pi', 'workflows');
-      await mkdir(userDirectory, { recursive: true });
-      await mkdir(projectDirectory, { recursive: true });
-      await writeFile(
-        join(userDirectory, 'settings.yaml'),
-        [
-          'version: 1',
-          'allowProjectWorkflows: true',
-          'permissionCeiling:',
-          '  tools: [read, edit, bash]',
-          '  mcp: []',
-          '  extensions: []',
-          '  skills: []',
-          '  bash:',
-          '    mode: allow-list',
-          '    allow:',
-          '      - executable: git',
-          '        argsPrefix: [status]',
-        ].join('\n'),
-        'utf8',
-      );
-      await writeFile(
-        join(userDirectory, 'example.workflow.yaml'),
-        JSON.stringify(baseWorkflow()),
-        'utf8',
-      );
-      const projectWorkflow = baseWorkflow();
-      // when
-      await writeFile(
-        join(projectDirectory, 'override.workflow.yaml'),
-        JSON.stringify(projectWorkflow),
-        'utf8',
-      );
-
-      // then
-      try {
-        const catalog = await loadCatalog({
-          cwd: join(root, 'project'),
-          projectTrusted: true,
-          userDirectory,
-        });
-        expect(catalog.workflows.size).toBe(1);
-        expect(catalog.diagnostics.at(-1)?.message ?? '').toMatch(
-          /overrides are not allowed/,
         );
       } finally {
         await rm(root, { recursive: true, force: true });
@@ -1201,7 +1051,7 @@ describe('when testing config', () => {
         steps: {
           run: {
             prompt: { file: 'linked.md' },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',
@@ -1212,8 +1062,8 @@ describe('when testing config', () => {
         command: 'invalid-prompt',
         steps: {
           run: {
-            prompt: 'Use {{unknown.variable}}',
-            transitions: { done: '$done' },
+            prompt: { file: 'invalid-prompt.md' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',
@@ -1230,12 +1080,19 @@ describe('when testing config', () => {
         steps: {
           run: {
             prompt: { file: 'local.md' },
-            transitions: { done: '$done' },
+            transitions: { ready: '$done' },
           },
         },
         start: 'run',
       };
       await Promise.all([
+        writeFile(join(userDirectory, 'inspect.md'), 'Inspect', 'utf8'),
+        writeFile(join(userDirectory, 'implement.md'), 'Implement', 'utf8'),
+        writeFile(
+          join(userDirectory, 'invalid-prompt.md'),
+          'Use {{unknown.variable}}',
+          'utf8',
+        ),
         writeFile(join(userDirectory, 'settings.yaml'), 'version: 2\n', 'utf8'),
         writeFile(
           join(userDirectory, 'invalid.workflow.yaml'),
@@ -1271,8 +1128,6 @@ describe('when testing config', () => {
 
       // when
       const catalog = await loadCatalog({
-        cwd: root,
-        projectTrusted: false,
         userDirectory,
       });
 
@@ -1298,8 +1153,6 @@ describe('when testing config', () => {
 
       // when
       const catalog = await loadCatalog({
-        cwd: root,
-        projectTrusted: false,
         userDirectory: filePath,
       });
       process.env.PI_WORKFLOWS_DIR = join(root, 'explicit');
@@ -1318,57 +1171,6 @@ describe('when testing config', () => {
       else process.env.PI_WORKFLOWS_DIR = previousWorkflows;
       if (previousAgent === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgent;
-      await rm(root, { recursive: true, force: true });
-    });
-
-    test('loader explains every project workflow skip and ceiling failure', async () => {
-      // given
-      const root = await mkdtemp(join(tmpdir(), 'pi-workflows-project-load-'));
-      const project = join(root, 'project');
-      const projectDirectory = join(project, '.pi', 'workflows');
-      await mkdir(projectDirectory, { recursive: true });
-      await writeFile(
-        join(projectDirectory, 'project.workflow.yaml'),
-        JSON.stringify(baseWorkflow()),
-        'utf8',
-      );
-      const untrustedUser = join(root, 'untrusted');
-      const deniedUser = join(root, 'denied');
-      await Promise.all(
-        [untrustedUser, deniedUser].map((directory) =>
-          mkdir(directory, { recursive: true }),
-        ),
-      );
-      await writeFile(
-        join(untrustedUser, 'settings.yaml'),
-        'version: 1\nallowProjectWorkflows: true\npermissionCeiling:\n  tools: []\n  bash: { mode: deny }\n',
-        'utf8',
-      );
-      await writeFile(
-        join(deniedUser, 'settings.yaml'),
-        'version: 1\nallowProjectWorkflows: true\npermissionCeiling:\n  tools: []\n  bash: { mode: deny }\n',
-        'utf8',
-      );
-
-      // when
-      const [untrusted, denied] = await Promise.all([
-        loadCatalog({
-          cwd: project,
-          projectTrusted: false,
-          userDirectory: untrustedUser,
-        }),
-        loadCatalog({
-          cwd: project,
-          projectTrusted: true,
-          userDirectory: deniedUser,
-        }),
-      ]);
-
-      // then
-      expect(untrusted.diagnostics[0]?.message).toMatch(/not trusted/);
-      expect(denied.diagnostics.map((item) => item.message).join('\n')).toMatch(
-        /exceeds the user permission ceiling/,
-      );
       await rm(root, { recursive: true, force: true });
     });
   });

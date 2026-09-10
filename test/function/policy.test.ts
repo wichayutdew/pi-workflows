@@ -136,22 +136,19 @@ describe('when testing policy', () => {
       ).toBe(false);
     });
 
-    test('active tool selection includes exact tools and allowed extension tools', () => {
+    test('active tool selection includes explicitly permitted tools', () => {
       // given
       const workflow = loadedWorkflow({
         version: 1,
-        id: 'extensions',
-        command: 'extensions',
-        description: 'Extension selection',
+        id: 'tools',
+        command: 'tools',
+        description: 'Tool selection',
         start: 'run',
         steps: {
           run: {
-            prompt: 'Run',
-            permissions: {
-              tools: ['read'],
-              extensions: ['plannotator'],
-            },
-            transitions: { done: '$done' },
+            prompt: { file: 'run.md' },
+            permissions: { tools: ['read', 'annotate'] },
+            transitions: { ready: '$done' },
           },
         },
       });
@@ -177,53 +174,6 @@ describe('when testing policy', () => {
       );
       // then
       expect(selected).toEqual(['read', 'annotate', 'workflow_complete_step']);
-    });
-
-    test('extension selectors do not widen direct MCP access', () => {
-      // given
-      const workflow = loadedWorkflow({
-        version: 1,
-        id: 'mcp-extension',
-        command: 'mcp-extension',
-        description: 'MCP extension',
-        start: 'run',
-        steps: {
-          run: {
-            prompt: 'Run',
-            permissions: {
-              extensions: ['pi-mcp-adapter'],
-            },
-            transitions: { done: '$done' },
-          },
-        },
-      });
-      const directTool = {
-        name: 'gitlab_get_merge_request',
-        sourceInfo: {
-          source: 'extension',
-          path: '/packages/pi-mcp-adapter/index.ts',
-        },
-      };
-      // when
-      const step = workflow.definition.steps.run!;
-      // then
-      expect(
-        resolveActiveTools(
-          [
-            directTool,
-            {
-              name: 'workflow_complete_step',
-              sourceInfo: { source: 'extension' },
-            },
-          ],
-          step,
-          'workflow_complete_step',
-        ),
-      ).toEqual(['workflow_complete_step']);
-      expect(
-        authorizeToolCall('gitlab_get_merge_request', {}, step, [directTool])
-          .allowed,
-      ).toBe(false);
     });
 
     test('covers restricted Bash tokenization and terminal policy modes', () => {
@@ -279,9 +229,9 @@ describe('when testing policy', () => {
         start: 'run',
         steps: {
           run: {
-            prompt: 'Run',
-            permissions: { extensions: ['annotator'] },
-            transitions: { done: '$done' },
+            prompt: { file: 'run.md' },
+            permissions: { tools: ['annotate'] },
+            transitions: { ready: '$done' },
           },
         },
       });

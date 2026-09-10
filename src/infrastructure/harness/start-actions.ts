@@ -121,10 +121,7 @@ async function doctorWorkflows(
   workflowId: string,
   context: ExtensionCommandContext,
 ): Promise<void> {
-  const catalog = await this.dependencies.loadCatalog({
-    cwd: context.cwd,
-    projectTrusted: context.isProjectTrusted(),
-  });
+  const catalog = await this.dependencies.loadCatalog({});
   if (catalog.diagnostics.some((diagnostic) => diagnostic.level === 'error')) {
     context.ui.notify(
       `Workflow configuration errors:\n${formatCatalogDiagnostics(catalog)}`,

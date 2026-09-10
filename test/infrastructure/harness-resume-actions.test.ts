@@ -22,22 +22,14 @@ type Notice = {
   level: string;
 };
 
-function gatedWorkflow(provider: 'prompt' | 'plannotator'): LoadedWorkflow {
+function gatedWorkflow(): LoadedWorkflow {
   const raw = baseWorkflow();
   const steps = raw.steps as Record<string, Record<string, unknown>>;
   const inspect = steps.inspect!;
-  if (provider === 'plannotator') {
-    const permissions = inspect.permissions as Record<string, unknown>;
-    const requirements = inspect.requires as Record<string, unknown>;
-    permissions.extensions = ['plannotator'];
-    requirements.extensions = ['plannotator'];
-  }
-  inspect.gate = {
-    provider,
-    submitOutcome: 'submit',
-    approvedOutcome: 'ready',
-    rejectedOutcome: 'blocked',
-    ...(provider === 'plannotator' ? { timeoutMs: 1_000 } : {}),
+  inspect.gate = { timeoutMs: 1_000 };
+  inspect.transitions = {
+    ...(inspect.transitions as Record<string, string>),
+    handoff: 'inspect',
   };
   return loadedWorkflow(raw);
 }
@@ -57,7 +49,7 @@ function pausedGateRun(
   let run = beginGate(
     workflow,
     createRun(workflow, 'request', ['read'], 'run-1', 1),
-    'submit',
+    'ready',
     '# Plan',
     'gate-request',
     2,
@@ -274,16 +266,12 @@ describe('when testing resume actions', () => {
     );
   });
 
-  test('refuses to resume a workflow with a reachable completion trap', async () => {
+  test('resumes a workflow with a bounded handoff and completion path', async () => {
     const raw = baseWorkflow();
     raw.steps = {
       choose: {
-        prompt: 'Choose',
-        transitions: { finish: '$done', trap: 'trap' },
-      },
-      trap: {
-        prompt: 'Trap',
-        transitions: { wait: '$pause' },
+        prompt: { file: 'fixture-prompt-1.md' },
+        transitions: { ready: '$done', handoff: 'choose' },
       },
     };
     raw.start = 'choose';
@@ -296,14 +284,9 @@ describe('when testing resume actions', () => {
       command.context,
     );
 
-    expect(fixture.fixture.run?.status).toBe('paused');
-    expect(fixture.calls.launched).toBe(0);
-    expect(command.notices.at(-1)?.message).toContain(
-      '/workflow-doctor example',
-    );
-    expect(command.notices.at(-1)?.message).toContain(
-      'reachable step trap cannot reach $done',
-    );
+    expect(fixture.fixture.run?.status).toBe('running');
+    expect(fixture.calls.launched).toBe(1);
+    expect(command.notices).toEqual([]);
   });
 
   test('resumes a runnable step and enforces its preflight', async () => {
@@ -356,23 +339,9 @@ describe('when testing resume actions', () => {
     );
   });
 
-  test('reopens a paused prompt review and preserves a pending remote review', async () => {
-    const promptWorkflow = gatedWorkflow('prompt');
-    const prompt = createResumeFixture(
-      pausedGateRun(promptWorkflow),
-      promptWorkflow,
-    );
+  test('preserves a paused remote review', async () => {
     const command = createCommandContext();
-
-    await action.resumeNow.call(
-      prompt.fixture as unknown as HarnessActionContext,
-      command.context,
-    );
-    expect(prompt.fixture.run?.status).toBe('awaiting-gate');
-    expect(prompt.calls.promptReviews).toBe(1);
-    expect(command.notices.at(-1)?.message).toContain('built-in review open');
-
-    const remoteWorkflow = gatedWorkflow('plannotator');
+    const remoteWorkflow = gatedWorkflow();
     const remote = createResumeFixture(
       pausedGateRun(remoteWorkflow, 'review-1'),
       remoteWorkflow,
@@ -389,7 +358,7 @@ describe('when testing resume actions', () => {
   });
 
   test('retries a Plannotator gate interrupted before recording its review id', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const { calls, fixture } = createResumeFixture(
       pausedGateRun(workflow),
       workflow,
@@ -410,7 +379,7 @@ describe('when testing resume actions', () => {
   });
 
   test('reports an unavailable Plannotator status without changing the pause', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const { fixture } = createResumeFixture(
       pausedGateRun(workflow, 'review-1'),
       workflow,
@@ -431,7 +400,7 @@ describe('when testing resume actions', () => {
   });
 
   test('applies a completed review and reports its terminal transition', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const { calls, fixture } = createResumeFixture(
       pausedGateRun(workflow, 'review-1'),
       workflow,
@@ -453,14 +422,15 @@ describe('when testing resume actions', () => {
     );
 
     expect(fixture.run).toMatchObject({
-      status: 'paused',
+      status: 'running',
       gateFeedback: 'revise the plan',
+      currentStepId: 'inspect',
     });
     expect(calls.restoredTools).toBe(1);
     expect(calls.settled).toEqual([
       {
         stepId: 'inspect',
-        outcome: 'blocked',
+        outcome: 'handoff',
         summary: 'Gate rejected: revise the plan',
       },
     ]);
@@ -468,7 +438,7 @@ describe('when testing resume actions', () => {
   });
 
   test('retries a review missing from Plannotator', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const { calls, fixture } = createResumeFixture(
       pausedGateRun(workflow, 'review-1'),
       workflow,
@@ -489,7 +459,7 @@ describe('when testing resume actions', () => {
   });
 
   test('rejects state and catalog changes during a status request', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const command = createCommandContext();
     const switched = createResumeFixture(
       pausedGateRun(workflow, 'review-1'),
@@ -522,7 +492,7 @@ describe('when testing resume actions', () => {
   });
 
   test('reports reconciliation changes discovered after a status request', async () => {
-    const workflow = gatedWorkflow('plannotator');
+    const workflow = gatedWorkflow();
     const { fixture } = createResumeFixture(
       pausedGateRun(workflow, 'review-1'),
       workflow,
@@ -552,7 +522,7 @@ describe('when testing resume actions', () => {
   });
 
   test('restarts a stored gate when its current-step configuration changed', async () => {
-    const workflow = gatedWorkflow('prompt');
+    const workflow = gatedWorkflow();
     const stored = storeGateResolution(
       pausedGateRun(workflow),
       { approved: true, feedback: '', resolvedAt: 5 },

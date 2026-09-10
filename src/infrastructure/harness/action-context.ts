@@ -13,7 +13,6 @@ import type {
   WorkflowStep,
   WorkflowStepResult,
 } from '../../domain/index.ts';
-import type { PromptGateReviewResult } from '../integrations/prompt-gate.ts';
 import type { SubagentDelegationClientController } from '../process/subagent-client.ts';
 import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts';
 import type { SerialTaskQueueController } from '../runtime/task-queue.ts';
@@ -23,7 +22,6 @@ import type { WorkflowHarnessDependencies } from './dependencies.ts';
 import type { SettledStepReport } from './step-reporting.ts';
 import type {
   ActiveDelegation,
-  ActivePromptReview,
   MainStepIdentity,
   WorkflowStartContext,
 } from './types.ts';
@@ -46,7 +44,6 @@ export type HarnessActionContext = {
   isSessionActive: boolean;
   sessionEpoch: number;
   activeDelegation: ActiveDelegation | undefined;
-  activePromptReview: ActivePromptReview | undefined;
   registeredWorkflowCommands: Set<string>;
   catalogLoadSequence: number;
   mutationQueue: SerialTaskQueueController;
@@ -154,25 +151,6 @@ export type HarnessActionContext = {
     summary: string,
     artifact: string,
   ) => Promise<void>;
-  launchPromptReview: (
-    workflow: LoadedWorkflow,
-    run: WorkflowRun,
-    context: ExtensionContext | undefined,
-  ) => void;
-  queuePromptReviewResult: (
-    active: ActivePromptReview,
-    result: PromptGateReviewResult,
-  ) => void;
-  queuePromptReviewFailure: (
-    active: ActivePromptReview,
-    reason: string,
-  ) => void;
-  finishPromptReview: (
-    active: ActivePromptReview,
-    result: PromptGateReviewResult,
-  ) => Promise<void>;
-  pausePromptGate: (requestId: string, reason: string, failed: boolean) => void;
-  cancelPromptReview: () => void;
   registerPlannotatorResults: () => void;
   handlePlannotatorResult: (data: unknown) => Promise<void>;
   settleAfterTransition: (

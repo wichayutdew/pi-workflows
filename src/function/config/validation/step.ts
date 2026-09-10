@@ -4,13 +4,14 @@ import {
   MAX_WORKSPACE_PATH_CHARS,
   type ArtifactContract,
   type PromptSpec,
+  type RequiredHeading,
   type StepWorkspaceBinding,
   type WorkflowGate,
   type WorkflowStep,
   AGENT_PROFILE_NAME_PATTERN,
   type StepAgent,
 } from '../../../domain/index.ts';
-import { parsePermissions, parseRequirements } from './permissions.ts';
+import { parsePermissions } from './permissions.ts';
 import {
   isJsonObject,
   OUTCOME_PATTERN,
@@ -26,12 +27,8 @@ function parsePrompt(
   path: string,
   errors: ValidationErrors,
 ): PromptSpec | undefined {
-  if (typeof value === 'string') {
-    const inline = readString(value, path, errors);
-    return inline ? { inline } : undefined;
-  }
   if (!isJsonObject(value)) {
-    errors.push(`${path}: expected a string or an object`);
+    errors.push(`${path}: expected an object`);
     return undefined;
   }
   rejectUnknownKeys(value, ['file'], path, errors);
@@ -43,6 +40,8 @@ function parsePrompt(
   }
   return { file };
 }
+
+const WORKFLOW_OUTCOMES = new Set(['ready', 'blocked', 'handoff', 'gaps']);
 
 function parseTransitions(
   value: unknown,
@@ -57,6 +56,10 @@ function parseTransitions(
     (result, [outcome, targetValue]) => {
       if (!OUTCOME_PATTERN.test(outcome)) {
         errors.push(`${path}: invalid outcome "${outcome}"`);
+        return result;
+      }
+      if (!WORKFLOW_OUTCOMES.has(outcome)) {
+        errors.push(`${path}: unsupported outcome "${outcome}"`);
         return result;
       }
       const target = readString(targetValue, `${path}.${outcome}`, errors);
@@ -80,18 +83,7 @@ function parseArtifactContract(
     errors.push(`${path}: expected an object`);
     return undefined;
   }
-  rejectUnknownKeys(
-    value,
-    [
-      'maxChars',
-      'requiredSubstrings',
-      'forbiddenSubstrings',
-      'equalOccurrenceGroups',
-      'onValidationFailure',
-    ],
-    path,
-    errors,
-  );
+  rejectUnknownKeys(value, ['maxChars', 'requiredHeadings'], path, errors);
   if (value.maxChars === undefined) {
     errors.push(`${path}.maxChars: expected an integer from 1 to 200000`);
   }
@@ -102,72 +94,60 @@ function parseArtifactContract(
     errors,
     { min: 1, max: 200_000 },
   );
-  const parseSubstrings = (field: string): Array<string> => {
-    const values = readStringList(
-      value[field],
-      `${path}.${field}`,
-      errors,
-      /.+/,
-    );
-    if (values.length > 32) {
-      errors.push(`${path}.${field}: at most 32 values are allowed`);
-    }
-    values.forEach((substring, index) => {
-      if (substring.length > 1_024) {
-        errors.push(`${path}.${field}[${index}]: exceeds 1024 characters`);
-      }
-    });
-    return values;
-  };
-  const equalOccurrenceGroups = (() => {
-    if (value.equalOccurrenceGroups === undefined) return [];
-    if (!Array.isArray(value.equalOccurrenceGroups)) {
-      errors.push(`${path}.equalOccurrenceGroups: expected an array`);
-      return [];
-    }
-    if (value.equalOccurrenceGroups.length > 32) {
-      errors.push(
-        `${path}.equalOccurrenceGroups: at most 32 groups are allowed`,
-      );
-    }
-    return value.equalOccurrenceGroups.reduce<Array<Array<string>>>(
-      (groups, group, index) => {
-        const groupPath = `${path}.equalOccurrenceGroups[${index}]`;
-        const values = readStringList(group, groupPath, errors, /.+/);
-        if (values.length < 2) {
-          errors.push(`${groupPath}: at least two values are required`);
-        }
-        if (values.length > 32) {
-          errors.push(`${groupPath}: at most 32 values are allowed`);
-        }
-        values.forEach((substring, valueIndex) => {
-          if (substring.length > 1_024) {
-            errors.push(`${groupPath}[${valueIndex}]: exceeds 1024 characters`);
-          }
-        });
-        return [...groups, values];
-      },
-      [],
-    );
-  })();
-  const onValidationFailure =
-    value.onValidationFailure === undefined
-      ? undefined
-      : readString(
-          value.onValidationFailure,
-          `${path}.onValidationFailure`,
-          errors,
-        );
-  if (onValidationFailure !== undefined && onValidationFailure !== 'retry') {
-    errors.push(`${path}.onValidationFailure: expected retry`);
+  if (!Array.isArray(value.requiredHeadings)) {
+    errors.push(`${path}.requiredHeadings: expected a non-empty array`);
+    return { maxChars, requiredHeadings: [] };
   }
-  return {
-    maxChars,
-    requiredSubstrings: parseSubstrings('requiredSubstrings'),
-    forbiddenSubstrings: parseSubstrings('forbiddenSubstrings'),
-    equalOccurrenceGroups,
-    ...(onValidationFailure === 'retry' ? { onValidationFailure } : {}),
-  };
+  if (value.requiredHeadings.length === 0) {
+    errors.push(`${path}.requiredHeadings: at least one heading is required`);
+  }
+  if (value.requiredHeadings.length > 32) {
+    errors.push(`${path}.requiredHeadings: at most 32 headings are allowed`);
+  }
+  const requiredHeadings = value.requiredHeadings.reduce<
+    Array<RequiredHeading>
+  >((headings, item, index) => {
+    const headingPath = `${path}.requiredHeadings[${index}]`;
+    if (!isJsonObject(item)) {
+      errors.push(`${headingPath}: expected an object`);
+      return headings;
+    }
+    rejectUnknownKeys(
+      item,
+      ['level', 'title', 'guidance'],
+      headingPath,
+      errors,
+    );
+    const level = item.level;
+    const validLevel = level === 1 || level === 2 || level === 3;
+    if (!validLevel) {
+      errors.push(`${headingPath}.level: expected 1, 2, or 3`);
+    }
+    const title = readString(item.title, `${headingPath}.title`, errors);
+    const guidance = readString(
+      item.guidance,
+      `${headingPath}.guidance`,
+      errors,
+    );
+    if (!validLevel || !title || !guidance) return headings;
+    if (title.length > 1_024) {
+      errors.push(`${headingPath}.title: exceeds 1024 characters`);
+    }
+    if (guidance.length > 1_024) {
+      errors.push(`${headingPath}.guidance: exceeds 1024 characters`);
+    }
+    const heading = { level, title, guidance } as const;
+    if (
+      headings.some((other) => other.level === level && other.title === title)
+    ) {
+      errors.push(
+        `${headingPath}: duplicate heading "${'#'.repeat(level)} ${title}"`,
+      );
+      return headings;
+    }
+    return [...headings, heading];
+  }, []);
+  return { maxChars, requiredHeadings };
 }
 
 function parseGate(
@@ -180,86 +160,30 @@ function parseGate(
     errors.push(`${path}: expected an object`);
     return undefined;
   }
-  rejectUnknownKeys(
-    value,
-    [
-      'provider',
-      'submitOutcome',
-      'approvedOutcome',
-      'rejectedOutcome',
-      'timeoutMs',
-      'artifactContract',
-    ],
-    path,
-    errors,
-  );
+  rejectUnknownKeys(value, ['timeoutMs', 'artifactContract'], path, errors);
 
-  const providerValue =
-    value.provider === undefined
-      ? 'prompt'
-      : readString(value.provider, `${path}.provider`, errors);
-  const provider =
-    providerValue === 'prompt' || providerValue === 'plannotator'
-      ? providerValue
-      : undefined;
-  if (!provider) {
-    errors.push(`${path}.provider: expected prompt or plannotator`);
-  }
-  const submitOutcome = readString(
-    value.submitOutcome,
-    `${path}.submitOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
-  const approvedOutcome = readString(
-    value.approvedOutcome,
-    `${path}.approvedOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
-  const rejectedOutcome = readString(
-    value.rejectedOutcome,
-    `${path}.rejectedOutcome`,
-    errors,
-    { pattern: OUTCOME_PATTERN },
-  );
   const artifactContract = parseArtifactContract(
     value.artifactContract,
     `${path}.artifactContract`,
     errors,
   );
-  if (provider === 'prompt' && value.timeoutMs !== undefined) {
-    errors.push(`${path}.timeoutMs: only valid with provider "plannotator"`);
-  }
-  if (!submitOutcome || !approvedOutcome || !rejectedOutcome || !provider) {
-    return undefined;
-  }
-  if (approvedOutcome === rejectedOutcome) {
-    errors.push(`${path}: approvedOutcome and rejectedOutcome must differ`);
-  }
 
-  return provider === 'prompt'
-    ? {
-        provider,
-        submitOutcome,
-        approvedOutcome,
-        rejectedOutcome,
-        ...(artifactContract ? { artifactContract } : {}),
-      }
-    : {
-        provider,
-        submitOutcome,
-        approvedOutcome,
-        rejectedOutcome,
-        ...(artifactContract ? { artifactContract } : {}),
-        timeoutMs: readInteger(
-          value.timeoutMs,
-          30_000,
-          `${path}.timeoutMs`,
-          errors,
-          { min: 1_000, max: 30_000 },
-        ),
-      };
+  return {
+    submitOutcome: 'ready',
+    approvedOutcome: 'ready',
+    rejectedOutcome: 'handoff',
+    ...(artifactContract ? { artifactContract } : {}),
+    timeoutMs: readInteger(
+      value.timeoutMs,
+      30_000,
+      `${path}.timeoutMs`,
+      errors,
+      {
+        min: 1_000,
+        max: 30_000,
+      },
+    ),
+  };
 }
 
 function parseWorkspaceRoots(
@@ -331,8 +255,8 @@ function parseWorkspace(
     errors,
     OUTCOME_PATTERN,
   );
-  if (bindOn.length === 0) {
-    errors.push(`${path}.bindOn: at least one outcome is required`);
+  if (bindOn.length !== 1 || bindOn[0] !== 'ready') {
+    errors.push(`${path}.bindOn: must contain only "ready"`);
   }
   const allowedRoots = parseWorkspaceRoots(
     value.allowedRoots,
@@ -361,7 +285,6 @@ export function parseWorkflowStep(
       'agent',
       'maxToolCalls',
       'permissions',
-      'requires',
       'transitions',
       'gate',
       'workspace',
@@ -396,12 +319,6 @@ export function parseWorkflowStep(
     `${path}.permissions`,
     errors,
   );
-  const requires = parseRequirements(
-    value.requires,
-    permissions,
-    `${path}.requires`,
-    errors,
-  );
   const transitions = parseTransitions(
     value.transitions,
     `${path}.transitions`,
@@ -414,6 +331,18 @@ export function parseWorkflowStep(
     errors,
   );
 
+  if (transitions.blocked && transitions.blocked !== '$pause') {
+    errors.push(`${path}.transitions.blocked: must target "$pause"`);
+  }
+  if (transitions.handoff && transitions.handoff !== stepId) {
+    errors.push(`${path}.transitions.handoff: must target "${stepId}"`);
+  }
+  if (transitions.ready === '$pause' || transitions.ready === stepId) {
+    errors.push(
+      `${path}.transitions.ready: must target another step or "$done"`,
+    );
+  }
+
   if (gate) {
     if (!Object.hasOwn(transitions, gate.approvedOutcome)) {
       errors.push(
@@ -423,19 +352,6 @@ export function parseWorkflowStep(
     if (!Object.hasOwn(transitions, gate.rejectedOutcome)) {
       errors.push(
         `${path}.transitions: missing gate outcome "${gate.rejectedOutcome}"`,
-      );
-    }
-    if (Object.hasOwn(transitions, gate.submitOutcome)) {
-      errors.push(
-        `${path}.transitions: submitOutcome is handled by the gate and must not be a transition`,
-      );
-    }
-    if (
-      gate.artifactContract?.onValidationFailure === 'retry' &&
-      !Object.hasOwn(transitions, 'retry')
-    ) {
-      errors.push(
-        `${path}.transitions: artifact-contract retry requires a "retry" transition`,
       );
     }
   }
@@ -450,14 +366,8 @@ export function parseWorkflowStep(
       );
     }
   }
-  if (workspace) {
-    workspace.bindOn.forEach((outcome) => {
-      if (!Object.hasOwn(transitions, outcome)) {
-        errors.push(
-          `${path}.workspace.bindOn: unknown transition outcome "${outcome}"`,
-        );
-      }
-    });
+  if (workspace && !Object.hasOwn(transitions, 'ready')) {
+    errors.push(`${path}.workspace: requires a "ready" transition`);
   }
 
   if (!title || !prompt) return undefined;
@@ -467,7 +377,6 @@ export function parseWorkflowStep(
     ...(agent ? { agent } : {}),
     ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
     permissions,
-    requires,
     transitions,
     ...(gate ? { gate } : {}),
     ...(workspace ? { workspace } : {}),

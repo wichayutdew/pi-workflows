@@ -76,7 +76,6 @@ export const beginGate = (
     {
       status: 'awaiting-gate',
       pendingGate: {
-        provider: step.gate.provider,
         requestId,
         stepId: run.currentStepId,
         artifact,
@@ -104,9 +103,6 @@ export const attachGateReviewId = (
   now: number,
 ): WorkflowRun => {
   if (!run.pendingGate) throw new Error('workflow has no pending gate');
-  if (run.pendingGate.provider !== 'plannotator') {
-    throw new Error('only a Plannotator gate can have a review id');
-  }
   return withRunUpdate(
     run,
     { pendingGate: { ...run.pendingGate, reviewId } },
@@ -216,7 +212,6 @@ export const resolveGate = (
   const decidedRun = recordCurrentGateDecision(
     run,
     {
-      provider: pendingGate.provider,
       requestId: pendingGate.requestId,
       approved: resolution.approved,
       feedback,
@@ -248,6 +243,7 @@ export const resolveGate = (
     {},
     {
       sameStepHumanGateRevision: isSameStepHumanRevision,
+      gateResolution: true,
     },
   );
   const completedApprovedGate =

@@ -48,7 +48,8 @@ export function registerMainStepCompletion({
           version: 1,
           policyDigest: activeExecution.policyDigest,
           outcome: params.outcome,
-          summary: params.summary,
+          completed: params.completed,
+          remaining: params.remaining,
           ...(params.artifact !== undefined
             ? { artifact: params.artifact }
             : {}),

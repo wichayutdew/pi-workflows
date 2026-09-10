@@ -75,9 +75,9 @@ describe('when running a workflow through a direct Pi worker', () => {
         result = JSON.stringify({
           version: 1,
           policyDigest: policy.policy.policyDigest,
-          outcome: 'done',
+          outcome: 'ready',
           summary:
-            '# Done: Worker completed the step.\n**Completed:**\n- Completed the delegated work in `src/example.ts`.\n**Remaining:**\n- None; workflow is complete.',
+            '# Ready\n**Completed:**\n- Completed the delegated work in `src/example.ts`.\n**Remaining:**\n- No active-step work remains.',
         });
         return {
           requestId: request.requestId,
@@ -166,6 +166,10 @@ describe('when running a workflow through a direct Pi worker', () => {
 
     try {
       await writeFile(
+        join(directory, 'implement.md'),
+        'Complete {{workflow.input}}',
+      );
+      await writeFile(
         join(directory, 'direct.workflow.yaml'),
         [
           'version: 1',
@@ -176,13 +180,11 @@ describe('when running a workflow through a direct Pi worker', () => {
           'steps:',
           '  implement:',
           '    agent: worker',
-          '    prompt: Complete {{workflow.input}}',
+          '    prompt: { file: implement.md }',
           '    permissions:',
           '      tools: [read]',
-          '    requires:',
-          '      tools: [read]',
           '    transitions:',
-          '      done: $done',
+          '      ready: $done',
         ].join('\n'),
       );
       new WorkflowHarness(pi, 'ctrl+alt+w', dependencies);

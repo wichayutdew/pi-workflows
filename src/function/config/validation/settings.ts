@@ -1,10 +1,8 @@
 import {
   DEFAULT_SETTINGS,
   WORKFLOW_SCHEMA_VERSION,
-  type PermissionCeiling,
   type WorkflowSettings,
 } from '../../../domain/index.ts';
-import { parsePermissions } from './permissions.ts';
 import {
   isJsonObject,
   rejectUnknownKeys,
@@ -13,39 +11,7 @@ import {
 } from './shared.ts';
 import { readStatusShortcut } from './shortcut.ts';
 
-function parsePermissionCeiling(
-  value: unknown,
-  path: string,
-  errors: ValidationErrors,
-): PermissionCeiling | undefined {
-  if (value === undefined) return undefined;
-  if (!isJsonObject(value)) {
-    errors.push(`${path}: expected an object`);
-    return undefined;
-  }
-  rejectUnknownKeys(
-    value,
-    ['tools', 'mcp', 'extensions', 'skills', 'bash'],
-    path,
-    errors,
-  );
-  const permissions = parsePermissions(
-    {
-      ...(value.tools !== undefined ? { tools: value.tools } : {}),
-      ...(value.mcp !== undefined ? { mcp: value.mcp } : {}),
-      ...(value.extensions !== undefined
-        ? { extensions: value.extensions }
-        : {}),
-      ...(value.skills !== undefined ? { skills: value.skills } : {}),
-      ...(value.bash !== undefined ? { bash: value.bash } : {}),
-    },
-    path,
-    errors,
-  );
-  return permissions;
-}
-
-/** Validate and normalize untrusted user workflow settings. */
+/** Validate and normalize user-owned workflow settings. */
 export function validateSettings(
   value: unknown,
 ): ValidationResult<WorkflowSettings> {
@@ -55,13 +21,7 @@ export function validateSettings(
   }
   rejectUnknownKeys(
     value,
-    [
-      '$schema',
-      'version',
-      'allowProjectWorkflows',
-      'statusShortcut',
-      'permissionCeiling',
-    ],
+    ['$schema', 'version', 'statusShortcut'],
     'settings',
     errors,
   );
@@ -71,40 +31,11 @@ export function validateSettings(
   if (value.version !== WORKFLOW_SCHEMA_VERSION) {
     errors.push(`settings.version: expected ${WORKFLOW_SCHEMA_VERSION}`);
   }
-  const allowProjectWorkflows =
-    typeof value.allowProjectWorkflows === 'boolean'
-      ? value.allowProjectWorkflows
-      : false;
-  if (
-    value.allowProjectWorkflows !== undefined &&
-    typeof value.allowProjectWorkflows !== 'boolean'
-  ) {
-    errors.push('settings.allowProjectWorkflows: expected a boolean');
-  }
   const statusShortcut = readStatusShortcut(
     value.statusShortcut,
     'settings.statusShortcut',
     errors,
   );
-  const permissionCeiling = parsePermissionCeiling(
-    value.permissionCeiling,
-    'settings.permissionCeiling',
-    errors,
-  );
-  if (allowProjectWorkflows && !permissionCeiling) {
-    errors.push(
-      'settings.permissionCeiling: required when project workflows are enabled',
-    );
-  }
   if (errors.length > 0) return { errors };
-
-  return {
-    value: {
-      ...DEFAULT_SETTINGS,
-      allowProjectWorkflows,
-      statusShortcut,
-      ...(permissionCeiling ? { permissionCeiling } : {}),
-    },
-    errors,
-  };
+  return { value: { ...DEFAULT_SETTINGS, statusShortcut }, errors };
 }
