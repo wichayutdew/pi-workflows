@@ -84,6 +84,7 @@ describe('when testing prompt', () => {
       const mainTask = buildMainStepTask(workflow, run);
       expect(mainTask).toMatch(/Main-agent declarative workflow step/);
       expect(mainTask).toContain('No active-step work remains.');
+      expect(mainTask).not.toContain('Gate artifact structure');
       expect(buildDelegatedStepTask(workflow, run, 'policy envelope')).toMatch(
         /policy envelope/,
       );
@@ -348,6 +349,21 @@ describe('when testing prompt', () => {
         agent: 'planner',
         gate: {
           provider: 'plannotator',
+          artifactContract: {
+            maxChars: 1000,
+            requiredHeadings: [
+              {
+                level: 1,
+                title: 'Report destination',
+                guidance: 'Exact report path.',
+              },
+              {
+                level: 2,
+                title: 'Validation',
+                guidance: 'Independent commands and proof.',
+              },
+            ],
+          },
         },
         transitions: {
           ready: 'implement',
@@ -363,6 +379,9 @@ describe('when testing prompt', () => {
       );
       expect(gatedTask).toContain(
         '- ready: submit the artifact to plannotator; include the full artifact argument',
+      );
+      expect(gatedTask).toContain(
+        '## Gate artifact structure (enforced)\n\n# Report destination\nExact report path.\n\n## Validation\nIndependent commands and proof.',
       );
       expect(gatedTask).not.toMatch(
         /decision-ready|machine-readable contract|review focus|caveman/i,

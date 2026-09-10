@@ -150,6 +150,13 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
       : []),
     prompt,
     '',
+    ...(contract.gateArtifactLines.length > 0
+      ? [
+          '## Gate artifact structure (enforced)',
+          '',
+          ...contract.gateArtifactLines,
+        ]
+      : []),
     ...(run.reviewedArtifact
       ? ['## Approved plan', '', run.reviewedArtifact, '']
       : []),
