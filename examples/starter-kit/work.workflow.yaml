@@ -13,9 +13,6 @@ steps:
     maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions: { ready: plan, blocked: $pause, handoff: intake }
   plan:
@@ -25,25 +22,18 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     gate:
-      provider: plannotator
-      timeoutMs: 30000
       artifactContract:
         maxChars: 10000
-        requiredSubstrings:
-          - '## Goal/Acceptance Criteria'
-          - '## Non Goal'
-          - '## Implementation Steps and Tests'
-          - '## Validation'
-          - '## Risks/Decisions Needed'
-          - '## Publications Contract/Metadata'
-          - '## Execution appendix (machine-readable)'
-        forbiddenSubstrings:
-          - 'The complete gate artifact is the exact Markdown saved at'
+        requiredHeadings:
+          - { level: 2, title: Goal/Acceptance Criteria, guidance: Observable outcome and acceptance criteria. }
+          - { level: 2, title: Non Goal, guidance: Explicitly excluded work. }
+          - { level: 2, title: Implementation Steps and Tests, guidance: Scoped changes and assessable tests list as steps in TDD style. }
+          - { level: 2, title: Validation, guidance: Independent commands and expected proof. }
+          - { level: 2, title: Risks/Decisions Needed, guidance: Risks and unresolved decisions. }
+          - { level: 2, title: Publications Contract/Metadata, guidance: Observed publication metadata. }
+          - { level: 2, title: Execution appendix (machine-readable), guidance: Required execution JSON. }
     transitions: { ready: prepare-workspace, blocked: $pause, handoff: plan }
   prepare-workspace:
     title: Create worktree and branch
@@ -55,9 +45,6 @@ steps:
       allowedRoots: [~/repositories/worktrees]
     permissions:
       tools: [read, ls, bash]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions:
       {
@@ -73,9 +60,6 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash, edit, write, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions: { ready: verify, blocked: $pause, handoff: implement }
   verify:
@@ -85,9 +69,6 @@ steps:
     maxToolCalls: 60
     permissions:
       tools: [read, ls, bash]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions:
       { ready: publish, gaps: implement, blocked: $pause, handoff: verify }
@@ -98,8 +79,5 @@ steps:
     maxToolCalls: 10
     permissions:
       tools: [read, ls, bash, mcp]
-      mcp: []
-      extensions: []
-      skills: []
       bash: { mode: unrestricted }
     transitions: { ready: $done, blocked: $pause, handoff: publish }
