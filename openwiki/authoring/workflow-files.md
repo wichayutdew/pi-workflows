@@ -177,15 +177,18 @@ Supported variables:
 | `{{resume.input}}`       | User task-level amendment supplied for the current attempt by `/workflow-resume [guidance]`; it cannot bypass YAML policy. |
 | `{{restart.workspace}}`  | Exact prior workspace that a restarted iteration must rebind; empty for a first iteration.                                 |
 
-Every step result summary must be a structured handoff: start with
-`# <Outcome>: <state>`, then include `**Completed:**` and `**Remaining:**`
-sections with one or more `- ` list items. Completed items must cite concrete
-evidence such as a path, command, identifier, or user decision; placeholder or
-generic completed and remaining items are rejected. A `blocked` result must also
-include `**Question:**` with one concrete clarifying question ending in `?`.
-Delegated steps choose an outcome using only the active step's instructions:
-later workflow steps do not count as unfinished work, and a completed delegated
-step should state `- No active-step work remains.` under `Remaining`.
+Every step completion must provide typed handoff fields, not model-authored
+summary Markdown. The common fields are plain-text `state`, `completed`, and
+`remaining`; `completed` and `remaining` must each contain one or more items.
+Completed items must cite concrete evidence such as a path, command, identifier,
+or user decision; placeholder, generic, Markdown-formatted, or list-marker text
+is rejected. The parser formats the persisted compact summary from those typed
+fields. A `blocked` result must also include plain-text `question` ending in
+`?`, `action`, and `next`; a `retry` result must instead include
+`transientFailure` and `retryWhen`. Delegated steps choose an outcome using only
+the active step's instructions: later workflow steps do not count as unfinished
+work, and a completed delegated step should use `No active-step work remains.`
+as its remaining item.
 
 ## Prompt File Safety
 
@@ -280,7 +283,7 @@ permissions replace the active-tool list resolved in the child. Unavailable
 tools or extension providers fail closed.
 
 Each child receives the original workflow input plus the previous step's
-self-contained compact `summary`. Approved and rejected gate artifacts appear
+generated compact handoff summary. Approved and rejected gate artifacts appear
 only when the prompt explicitly uses `{{reviewed.artifact}}` or
 `{{gate.artifact}}`. It never inherits the parent or sibling transcript.
 

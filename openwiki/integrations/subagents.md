@@ -117,7 +117,8 @@ explicitly instead of guessed from the resumed process.
 Pi Subagents validates `structured_output` and returns one correlated terminal
 event. Pi Workflows owns declared outcomes and optional human-review gates, and
 the child result is accepted only after the private capability, policy digest,
-outcome, summary, artifact, and optional workspace fields validate.
+outcome, typed handoff fields, artifact, and optional workspace fields validate.
+The validated handoff fields become the persisted compact summary.
 Finalized worker message usage is normalized by provider/model and stored with
 the exact attempt, the step aggregate, and the workflow status totals; streaming
 progress does not contribute usage.
