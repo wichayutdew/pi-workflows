@@ -143,14 +143,14 @@ describe('when testing prompt', () => {
         'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
       );
       expect(delegatedTask).toContain(
-        'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
+        'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
       );
       expect(delegatedTask).toContain(
         'This step cannot bind a workspace; omit `workspace`.',
       );
       expect(delegatedTask).toContain('## Human-readable non-success results');
       expect(delegatedTask).toContain(
-        '# <Failed | Blocked | Retry>: <one-sentence plain-language decision>',
+        'Use plain-text `state`, `completed`, and `remaining` fields. Do not include Markdown, headings, or list markers.',
       );
       expect(delegatedTask).toContain(
         'Do not include a process narrative, raw logs, repeated policy constraints, successful checks, clean-state notes',

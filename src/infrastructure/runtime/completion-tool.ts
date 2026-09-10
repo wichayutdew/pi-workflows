@@ -11,10 +11,42 @@ export const WORKFLOW_COMPLETION_PARAMETERS = Type.Object(
     outcome: Type.String({
       description: 'One exact outcome allowed by the active workflow step',
     }),
-    summary: Type.String({
-      description: 'Concise checkpoint and handoff for the next workflow step',
-      maxLength: 50_000,
+    state: Type.String({
+      description: 'Short plain-language step status; do not use Markdown',
+      minLength: 1,
+      maxLength: 5_000,
     }),
+    completed: Type.Array(
+      Type.String({
+        description: 'One concrete completed-work record; do not use Markdown',
+        minLength: 1,
+        maxLength: 10_000,
+      }),
+      { minItems: 1, maxItems: 100 },
+    ),
+    remaining: Type.Array(
+      Type.String({
+        description: 'One concrete remaining action; do not use Markdown',
+        minLength: 1,
+        maxLength: 10_000,
+      }),
+      { minItems: 1, maxItems: 100 },
+    ),
+    question: Type.Optional(
+      Type.String({ description: 'Required only for blocked outcomes' }),
+    ),
+    action: Type.Optional(
+      Type.String({ description: 'Required only for blocked outcomes' }),
+    ),
+    next: Type.Optional(
+      Type.String({ description: 'Required only for blocked outcomes' }),
+    ),
+    transientFailure: Type.Optional(
+      Type.String({ description: 'Required only for retry outcomes' }),
+    ),
+    retryWhen: Type.Optional(
+      Type.String({ description: 'Required only for retry outcomes' }),
+    ),
     artifact: Type.Optional(
       Type.String({
         description: 'Full artifact required when submitting to a review gate',

@@ -12,7 +12,6 @@ import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from '../../src/infrastructure/run
 import {
   encodeChildPolicy,
   extractChildPolicy,
-  parseDelegatedStepResult,
   type ChildStepPolicy,
 } from '../../src/domain/index.ts';
 import { childSystemPrompt } from '../../src/infrastructure/runtime/child-runtime-policy.ts';
@@ -22,6 +21,11 @@ describe('when testing subagent child runtime', () => {
   type Handler = (event: Record<string, unknown>) => unknown;
   const readySummary =
     '# Ready: Inspection is complete.\n**Completed:**\n- Inspected `README.md`.\n**Remaining:**\n- Continue with the next workflow step.';
+  const readyHandoff = {
+    state: 'Inspection is complete.',
+    completed: ['Inspected `README.md`.'],
+    remaining: ['Continue with the next workflow step.'],
+  };
 
   function childPolicy(
     directory: string,
@@ -273,7 +277,7 @@ describe('when testing subagent child runtime', () => {
           'Call `structured_output` exactly once',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
-          'Call `structured_output` exactly once, alone, with the configured outcome that accurately reflects the active delegated step state.',
+          'Call `structured_output` exactly once, alone, with the configured outcome plus plain-text state, completed, remaining, and required outcome-specific fields that accurately reflect the active delegated step state.',
         );
         expect(rig.sentUserMessages.at(-1)?.content).toContain(
           'Use `handoff` only for incomplete work in the active delegated step, never for downstream workflow work.',
@@ -283,7 +287,7 @@ describe('when testing subagent child runtime', () => {
             toolCallId: 'wrong-outcome',
             toolName: CHILD_COMPLETION_TOOL,
             input: {
-              value: { outcome: 'not-configured', summary: readySummary },
+              value: { outcome: 'not-configured', ...readyHandoff },
             },
           }),
         ).toMatchObject({
@@ -295,7 +299,7 @@ describe('when testing subagent child runtime', () => {
             toolCallId: 'completed-outcome',
             toolName: CHILD_COMPLETION_TOOL,
             input: {
-              value: { outcome: 'ready', summary: readySummary },
+              value: { outcome: 'ready', ...readyHandoff },
             },
           }),
         ).toBe(undefined);
@@ -518,7 +522,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'ready',
-                summary: readySummary,
+                ...readyHandoff,
                 extra: true,
               },
             },
@@ -528,7 +532,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'unknown',
-                summary: readySummary,
+                ...readyHandoff,
               },
             },
             reason: /invalid outcome/,
@@ -548,7 +552,7 @@ describe('when testing subagent child runtime', () => {
         const completionInput = {
           value: {
             outcome: 'ready',
-            summary: readySummary,
+            ...readyHandoff,
             workspace: { cwd: '/tmp/worktree' },
           },
         };
@@ -565,7 +569,7 @@ describe('when testing subagent child runtime', () => {
         const stored = JSON.parse(
           await readFile(policy.resultPath, 'utf8'),
         ) as unknown;
-        expect(parseDelegatedStepResult(stored, policy)).toEqual({
+        expect(stored).toEqual({
           version: 1,
           policyDigest: policy.policyDigest,
           outcome: 'ready',
@@ -580,7 +584,7 @@ describe('when testing subagent child runtime', () => {
             input: {
               value: {
                 outcome: 'ready',
-                summary: readySummary,
+                ...readyHandoff,
                 workspace: { cwd: '/tmp/worktree' },
               },
             },
@@ -648,7 +652,7 @@ describe('when testing subagent child runtime', () => {
         const completionInput = {
           value: {
             outcome: 'ready',
-            summary: readySummary,
+            ...readyHandoff,
             artifact: '# Complete plan',
           },
         };
@@ -759,7 +763,7 @@ describe('when testing subagent child runtime', () => {
           toolCall({
             toolCallId: 'complete-before-settled',
             toolName: CHILD_COMPLETION_TOOL,
-            input: { value: { outcome: 'ready', summary: readySummary } },
+            input: { value: { outcome: 'ready', ...readyHandoff } },
           }),
         ).toBe(undefined);
 
@@ -1002,7 +1006,7 @@ describe('when testing subagent child runtime', () => {
           input: {
             value: {
               outcome: 'ready',
-              summary: readySummary,
+              ...readyHandoff,
             },
           },
         }) as { block: boolean; reason: string };
@@ -1095,7 +1099,7 @@ describe('when testing subagent child runtime', () => {
       const completionInput = {
         value: {
           outcome: 'ready',
-          summary: readySummary,
+          ...readyHandoff,
         },
       };
       const completionResult = toolCall({

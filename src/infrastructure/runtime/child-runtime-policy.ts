@@ -33,17 +33,22 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     'Use `retry` only for a transient failure that can be retried without new user input.',
     'Do not open a skill unless this step YAML lists that skill.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
-    'Pass the workflow result as its `value`: outcome, summary, optional artifact, and workspace only when required below.',
+    'Pass the workflow result as its `value`: outcome, state, completed, remaining, optional outcome-specific fields, artifact, and workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
     `Pause outcomes: ${policy.pauseOutcomes.join(', ') || '(none)'}`,
     `Summary limit: ${policy.summaryMaxChars} characters`,
     "Evaluate completion and choose an outcome using only this delegated step's instructions.",
     'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
-    'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
-    'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
+    'For every outcome, provide plain-text `state`, `completed`, and `remaining` fields; each completed item must cite a concrete path, command, identifier, or user decision. Do not use Markdown, list markers, or placeholders.',
     ...(policy.outcomes.includes('blocked')
       ? [
-          'For `blocked`, also include `**Question:** <one concrete clarifying question ending in ?>`.',
+          'For `blocked`, also provide plain-text `question` ending in `?`, `action`, and `next` fields.',
+        ]
+      : []),
+    ...(policy.outcomes.includes('retry')
+      ? [
+          'For `retry`, also provide plain-text `transientFailure` and `retryWhen` fields.',
         ]
       : []),
     ...(policy.maxToolCalls === undefined

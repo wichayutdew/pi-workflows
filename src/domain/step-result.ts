@@ -6,11 +6,44 @@ export const RESULT_KEYS = new Set([
   'version',
   'policyDigest',
   'outcome',
-  'summary',
+  'state',
+  'completed',
+  'remaining',
+  'question',
+  'action',
+  'next',
+  'transientFailure',
+  'retryWhen',
   'artifact',
   'workspace',
   'progress',
 ]);
+
+export const HANDOFF_RESULT_KEYS = new Set([
+  'outcome',
+  'state',
+  'completed',
+  'remaining',
+  'question',
+  'action',
+  'next',
+  'transientFailure',
+  'retryWhen',
+  'artifact',
+  'workspace',
+  'progress',
+]);
+
+export type WorkflowHandoffInput = {
+  readonly state: string;
+  readonly completed: ReadonlyArray<string>;
+  readonly remaining: ReadonlyArray<string>;
+  readonly question?: string;
+  readonly action?: string;
+  readonly next?: string;
+  readonly transientFailure?: string;
+  readonly retryWhen?: string;
+};
 
 /**
  * Result constraints derived from the active workflow step.

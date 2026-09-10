@@ -48,7 +48,20 @@ export function registerMainStepCompletion({
           version: 1,
           policyDigest: activeExecution.policyDigest,
           outcome: params.outcome,
-          summary: params.summary,
+          state: params.state,
+          completed: params.completed,
+          remaining: params.remaining,
+          ...(params.question !== undefined
+            ? { question: params.question }
+            : {}),
+          ...(params.action !== undefined ? { action: params.action } : {}),
+          ...(params.next !== undefined ? { next: params.next } : {}),
+          ...(params.transientFailure !== undefined
+            ? { transientFailure: params.transientFailure }
+            : {}),
+          ...(params.retryWhen !== undefined
+            ? { retryWhen: params.retryWhen }
+            : {}),
           ...(params.artifact !== undefined
             ? { artifact: params.artifact }
             : {}),

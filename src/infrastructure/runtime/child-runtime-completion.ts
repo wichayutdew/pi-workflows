@@ -1,4 +1,7 @@
-import type { ChildStepPolicy } from '../../domain/index.ts';
+import {
+  HANDOFF_RESULT_KEYS,
+  type ChildStepPolicy,
+} from '../../domain/index.ts';
 import { parseDelegatedStepResult } from '../../function/index.ts';
 
 export const CHILD_COMPLETION_TOOL = 'structured_output';
@@ -8,13 +11,7 @@ export const CHILD_COORDINATION_TOOLS: ReadonlySet<string> = new Set([
   'intercom',
 ]);
 
-const STRUCTURED_RESULT_KEYS: ReadonlySet<string> = new Set([
-  'outcome',
-  'summary',
-  'artifact',
-  'workspace',
-  'progress',
-]);
+const STRUCTURED_RESULT_KEYS: ReadonlySet<string> = HANDOFF_RESULT_KEYS;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);

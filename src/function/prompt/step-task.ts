@@ -171,18 +171,23 @@ export function buildStepTask(options: BuildStepTaskOptions): string {
     contract.gateLine,
     ...contract.workspaceLines,
     '',
-    'Put a self-contained compact handoff in `summary`; this is the only step context passed to the next fresh child.',
+    'Provide `state`, `completed`, and `remaining` fields for a self-contained compact handoff; this is the only step context passed to the next fresh child.',
     ...(isDelegated
       ? [
           "Evaluate completion and choose an outcome using only this delegated step's instructions.",
           'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
-          'Limit `Completed` and `Remaining` to this delegated step. When it is complete, state `- No active-step work remains.` under `Remaining`.',
+          'Limit completed and remaining fields to this delegated step. When it is complete, use `No active-step work remains.` as the remaining item.',
         ]
       : []),
-    'For every outcome, use `# <Outcome>: <state>`, then `**Completed:**` and `**Remaining:**` sections with one or more `- ` items. Each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
+    'Do not write Markdown in completion fields. Provide one or more plain-text completed and remaining items; each completed item must cite a concrete path, command, identifier, or user decision; never use placeholders or generic text.',
     ...(contract.outcomes.includes('blocked')
       ? [
-          'For `blocked`, also include `**Question:** <one concrete clarifying question ending in ?>`.',
+          'For `blocked`, also provide plain-text `question` (ending in `?`), `action`, and `next` fields.',
+        ]
+      : []),
+    ...(contract.outcomes.includes('retry')
+      ? [
+          'For `retry`, also provide plain-text `transientFailure` and `retryWhen` fields.',
         ]
       : []),
     'Format all human-facing output—including summaries, gate artifacts, Markdown plans, reports, comments, and replies—for scanning: short headings, then one distinct fact, action, or metadata value per bullet or paragraph. Never pack unrelated values into one line or dense prose.',

@@ -5,28 +5,19 @@ import {
   RESULT_KEYS,
   type StepResultPolicy,
   type WorkflowCheckpointProgress,
+  type WorkflowHandoffInput,
   type WorkflowResultWorkspace,
   type WorkflowStepResult,
 } from '../../domain/index.ts';
 
-const isObject = (value: unknown): value is Record<string, unknown> => {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-};
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const isPlaceholder = (value: string): boolean =>
   /^(?:p?placeholder|dummy)$/i.test(value.trim());
 
-const listItems = (summary: string, label: string): ReadonlyArray<string> => {
-  const section = new RegExp(
-    `^\\s*\\*\\*${label}:\\*\\*\\s*\\n((?:\\s*-\\s+.+(?:\\n|$))+)`,
-    'm',
-  ).exec(summary)?.[1];
-  return section
-    ? [...section.matchAll(/^\s*-\s+(.+)$/gm)].map((match) =>
-        (match[1] ?? '').trim(),
-      )
-    : [];
-};
+const hasFormattingSyntax = (value: string): boolean =>
+  /[\r\n\u2500-\u257f]|^(?:[-*+]\s|#{1,6}\s|\d+\.\s)/.test(value);
 
 const isSpecificCompletedItem = (item: string): boolean =>
   !isPlaceholder(item) &&
@@ -41,52 +32,112 @@ const isSpecificRemainingItem = (item: string): boolean =>
     item,
   );
 
-function validateNonSuccessSummary(outcome: string, summary: string): void {
-  const completed = listItems(summary, 'Completed');
-  const remaining = listItems(summary, 'Remaining');
-  if (
-    !/^# [^:\n]+:\s+.+/m.test(summary) ||
-    completed.length === 0 ||
-    remaining.length === 0 ||
-    !completed.every(isSpecificCompletedItem) ||
-    !remaining.every(isSpecificRemainingItem)
-  ) {
+function parseText(value: unknown, name: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`workflow step ${name} must be a string`);
+  }
+  const text = value.trim();
+  if (!text || isPlaceholder(text) || hasFormattingSyntax(text)) {
+    throw new Error(`workflow step ${name} must be plain non-placeholder text`);
+  }
+  return text;
+}
+
+function parseItems(
+  value: unknown,
+  name: 'completed' | 'remaining',
+  validate: (item: string) => boolean,
+): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`workflow step ${name} must contain one or more items`);
+  }
+  const items = value.map((item) => parseText(item, `${name} item`));
+  if (!items.every(validate)) {
     throw new Error(
-      'step summary must list specific completed and remaining work',
+      `workflow step ${name} items must be specific and actionable`,
     );
   }
+  return items;
+}
+
+function parseHandoff(
+  value: Record<string, unknown>,
+  outcome: string,
+): WorkflowHandoffInput {
+  const state = parseText(value.state, 'state');
+  const completed = parseItems(
+    value.completed,
+    'completed',
+    isSpecificCompletedItem,
+  );
+  const remaining = parseItems(
+    value.remaining,
+    'remaining',
+    isSpecificRemainingItem,
+  );
+  const hasBlockedFields = ['question', 'action', 'next'].some(
+    (key) => value[key] !== undefined,
+  );
+  const hasRetryFields = ['transientFailure', 'retryWhen'].some(
+    (key) => value[key] !== undefined,
+  );
+
   if (outcome === 'blocked') {
-    const question = /^\s*\*\*Question:\*\*\s*(.+\?)\s*$/m.exec(summary)?.[1];
-    if (!question || isPlaceholder(question)) {
-      throw new Error('blocked summary must ask a clarifying question');
+    if (hasRetryFields)
+      throw new Error('workflow step blocked result has retry-only fields');
+    const question = parseText(value.question, 'question');
+    if (!question.endsWith('?')) {
+      throw new Error('workflow step blocked question must end in "?"');
     }
-    const isActionable =
-      /^# Blocked:\s+.+/m.test(summary) &&
-      /^\s*\*\*Action:\*\*\s+.+/m.test(summary) &&
-      /^\s*\*\*Next:\*\*\s+.+/m.test(summary);
-    if (!isActionable) {
-      throw new Error(
-        'blocked summary must identify the missing user prerequisite and next action',
-      );
-    }
+    return {
+      state,
+      completed,
+      remaining,
+      question,
+      action: parseText(value.action, 'action'),
+      next: parseText(value.next, 'next'),
+    };
   }
+
   if (outcome === 'retry') {
-    const describesTransientFailure = /\btransient\b/i.test(summary);
-    const hasSafeRetryCondition =
-      /\b(safe (retry|to retry)|retry (when|after|once))\b/i.test(summary);
-    const requestsUserInput =
-      /\b(provide|confirm|choose|approve|decide)\b/i.test(summary);
-    if (
-      !/^# Retry:\s+.+/m.test(summary) ||
-      !describesTransientFailure ||
-      !hasSafeRetryCondition ||
-      requestsUserInput
-    ) {
-      throw new Error(
-        'retry summary must identify a transient failure and safe retry condition',
-      );
-    }
+    if (hasBlockedFields)
+      throw new Error('workflow step retry result has blocked-only fields');
+    return {
+      state,
+      completed,
+      remaining,
+      transientFailure: parseText(value.transientFailure, 'transientFailure'),
+      retryWhen: parseText(value.retryWhen, 'retryWhen'),
+    };
   }
+
+  if (hasBlockedFields || hasRetryFields) {
+    throw new Error(
+      'workflow step result has outcome-incompatible handoff fields',
+    );
+  }
+  return { state, completed, remaining };
+}
+
+export function formatWorkflowStepSummary(
+  outcome: string,
+  handoff: WorkflowHandoffInput,
+): string {
+  const heading = outcome.charAt(0).toUpperCase() + outcome.slice(1);
+  return [
+    `# ${heading}: ${handoff.state}`,
+    '**Completed:**',
+    ...handoff.completed.map((item) => `- ${item}`),
+    '**Remaining:**',
+    ...handoff.remaining.map((item) => `- ${item}`),
+    ...(handoff.question ? [`**Question:** ${handoff.question}`] : []),
+    ...(handoff.action ? [`**Action:** ${handoff.action}`] : []),
+    ...(handoff.next ? [`**Next:** ${handoff.next}`] : []),
+    ...(handoff.transientFailure
+      ? [`**Transient failure:** ${handoff.transientFailure}`]
+      : []),
+    ...(handoff.retryWhen ? [`**Retry when:** ${handoff.retryWhen}`] : []),
+  ].join('\n');
 }
 
 function parseCheckpointProgress(
@@ -129,65 +180,47 @@ function parseResultWorkspace(
 ): WorkflowResultWorkspace | undefined {
   const requiresWorkspace = policy.workspace?.bindOn.includes(outcome) === true;
   if (!requiresWorkspace) {
-    if (value !== undefined) {
+    if (value !== undefined)
       throw new Error('workflow step workspace is forbidden for this outcome');
-    }
     return undefined;
   }
-  if (!isObject(value)) {
+  if (!isObject(value))
     throw new Error(
       `workflow step outcome "${outcome}" requires workspace.cwd`,
     );
-  }
   const unknownKey = Object.keys(value).find((key) => key !== 'cwd');
-  if (unknownKey) {
+  if (unknownKey)
     throw new Error(
       `workflow step workspace has unknown property "${unknownKey}"`,
     );
-  }
-  if (typeof value.cwd !== 'string') {
+  if (typeof value.cwd !== 'string')
     throw new Error('workflow step workspace cwd must be a string');
-  }
   const cwd = value.cwd;
-  if (!cwd || cwd.includes('\0') || !isAbsolute(cwd)) {
+  if (!cwd || cwd.includes('\0') || !isAbsolute(cwd))
     throw new Error('workflow step workspace cwd must be an absolute path');
-  }
-  if (cwd.length > MAX_WORKSPACE_PATH_CHARS) {
+  if (cwd.length > MAX_WORKSPACE_PATH_CHARS)
     throw new Error(
       `workflow step workspace cwd exceeds ${MAX_WORKSPACE_PATH_CHARS} characters`,
     );
-  }
   return { cwd };
 }
 
-/**
- * Validates and normalizes the structured result returned by a workflow step.
- *
- * @param value - Untrusted structured output from the agent.
- * @param policy - Result constraints for the active workflow step.
- * @returns A normalized workflow-step result.
- * @throws When the result violates the active policy or result schema.
- */
+/** Validates and normalizes the structured result returned by a workflow step. */
 export function parseWorkflowStepResult(
   value: unknown,
   policy: StepResultPolicy,
 ): WorkflowStepResult {
-  if (!isObject(value)) {
+  if (!isObject(value))
     throw new Error('workflow step result must be an object');
-  }
-
   const unknownKey = Object.keys(value).find((key) => !RESULT_KEYS.has(key));
-  if (unknownKey) {
+  if (unknownKey)
     throw new Error(
       `workflow step result has unknown property "${unknownKey}"`,
     );
-  }
-  if (value.version !== 1) {
+  if (value.version !== 1)
     throw new Error('unsupported workflow step result version');
-  }
-  if (value.policyDigest !== policy.policyDigest) {
+  if (value.policyDigest !== policy.policyDigest)
     throw new Error('workflow step result does not match the active policy');
-  }
   if (
     typeof value.outcome !== 'string' ||
     !policy.outcomes.includes(value.outcome)
@@ -196,19 +229,14 @@ export function parseWorkflowStepResult(
       `workflow step returned invalid outcome "${String(value.outcome)}"`,
     );
   }
-  if (typeof value.summary !== 'string') {
-    throw new Error('workflow step summary must be a string');
-  }
-  const summary = value.summary.trim();
-  if (!summary) {
-    throw new Error('workflow step summary must not be empty');
-  }
+
+  const handoff = parseHandoff(value, value.outcome);
+  const summary = formatWorkflowStepSummary(value.outcome, handoff);
   if (summary.length > policy.summaryMaxChars) {
     throw new Error(
       `workflow step summary exceeds ${policy.summaryMaxChars} characters`,
     );
   }
-  validateNonSuccessSummary(value.outcome, summary);
   if (value.artifact !== undefined && typeof value.artifact !== 'string') {
     throw new Error('workflow step artifact must be a string');
   }

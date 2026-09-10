@@ -11,7 +11,12 @@ import { WORKFLOW_COMPLETION_TOOL } from '../../src/infrastructure/runtime/compl
 
 describe('when testing main step runtime', () => {
   const doneSummary =
-    '# Done: Implementation is complete.\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- None; workflow is complete.';
+    '# Done: Implementation is complete.\n**Completed:**\n- Implemented `src/example.ts` and ran `bun test`.\n**Remaining:**\n- No active-step work remains.';
+  const doneHandoff = {
+    state: 'Implementation is complete.',
+    completed: ['Implemented `src/example.ts` and ran `bun test`.'],
+    remaining: ['No active-step work remains.'],
+  };
   type Handler = (event: Record<string, unknown>, context?: unknown) => unknown;
 
   describe('should satisfy its behavioral contract', () => {
@@ -131,7 +136,7 @@ describe('when testing main step runtime', () => {
       ).toBe(undefined);
       const result = await completion!.execute('complete-1', {
         outcome: 'done',
-        summary: doneSummary,
+        ...doneHandoff,
         workspace: { cwd: '/tmp/worktree' },
       });
       expect(result).toEqual({
@@ -368,7 +373,7 @@ describe('when testing main step runtime', () => {
 
       await completion!.execute('complete', {
         outcome: 'done',
-        summary: doneSummary,
+        ...doneHandoff,
       });
       await handlers.get('turn_end')!(
         {
@@ -379,7 +384,7 @@ describe('when testing main step runtime', () => {
                 type: 'toolCall',
                 id: 'complete',
                 name: WORKFLOW_COMPLETION_TOOL,
-                arguments: { outcome: 'done', summary: doneSummary },
+                arguments: { outcome: 'done', ...doneHandoff },
               },
             ],
           },
