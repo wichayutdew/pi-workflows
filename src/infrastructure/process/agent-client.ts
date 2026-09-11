@@ -3,10 +3,10 @@ import { StringDecoder } from 'node:string_decoder';
 import type {
   DelegationDiagnostic,
   DelegationDiagnosticCall,
-  SubagentDelegationRequest,
-  SubagentDelegationResponse,
-  SubagentDelegationUpdate,
-  SubagentModelUsage,
+  AgentDelegationRequest,
+  AgentDelegationResponse,
+  AgentDelegationUpdate,
+  AgentModelUsage,
 } from '../../domain/index.ts';
 import {
   emptyUsageAggregate,
@@ -17,16 +17,16 @@ import {
 export type DelegateOptions = {
   readonly signal?: AbortSignal;
   readonly onUpdate?: (update: { readonly requestId: string }) => void;
-  readonly onLateTerminal?: (response: SubagentDelegationResponse) => void;
+  readonly onLateTerminal?: (response: AgentDelegationResponse) => void;
 };
 
 /** A pi-workflows-owned foreground Pi process. */
-export type SubagentDelegationClientController = {
+export type AgentDelegationClientController = {
   readonly activeRequestId: string | undefined;
   readonly delegate: (
-    request: SubagentDelegationRequest,
+    request: AgentDelegationRequest,
     options?: DelegateOptions,
-  ) => Promise<SubagentDelegationResponse>;
+  ) => Promise<AgentDelegationResponse>;
   readonly cancelActiveAndWait: (waitMs?: number) => Promise<boolean>;
 };
 
@@ -44,7 +44,7 @@ export type DirectWorkerSpawn = (
 };
 
 export const directWorkerCommand = (
-  request: SubagentDelegationRequest,
+  request: AgentDelegationRequest,
 ): ReadonlyArray<string> => [
   '--no-session',
   '--mode',
@@ -56,13 +56,13 @@ export const directWorkerCommand = (
 ];
 
 export function directWorkerResponse(
-  request: SubagentDelegationRequest,
+  request: AgentDelegationRequest,
   code: number | null,
   signal: NodeJS.Signals | null,
   stderr: string,
   diagnostic?: DelegationDiagnostic,
-  usage: ReadonlyArray<SubagentModelUsage> = [],
-): SubagentDelegationResponse {
+  usage: ReadonlyArray<AgentModelUsage> = [],
+): AgentDelegationResponse {
   const status = code === 0 ? 'completed' : signal ? 'cancelled' : 'failed';
   return {
     requestId: request.requestId,
@@ -98,7 +98,7 @@ type WorkerJsonEvent = {
 type WorkerProgress = {
   readonly toolCount: number;
   readonly responseText: string;
-  readonly update?: SubagentDelegationUpdate;
+  readonly update?: AgentDelegationUpdate;
 };
 
 const MAX_PROGRESS_DETAIL_CHARS = 480;
@@ -109,7 +109,7 @@ export function workerUsageFromJsonLine(
   line: string,
   fallbackProvider?: string,
   fallbackModel?: string,
-): ReadonlyArray<SubagentModelUsage> {
+): ReadonlyArray<AgentModelUsage> {
   let event: WorkerJsonEvent;
   try {
     const parsed: unknown = JSON.parse(line);
@@ -290,15 +290,15 @@ export function workerProgressFromJsonLine(
   return { toolCount, responseText };
 }
 
-export function createSubagentDelegationClient(
+export function createAgentDelegationClient(
   spawnWorker: DirectWorkerSpawn = spawn,
-): SubagentDelegationClientController {
+): AgentDelegationClientController {
   let active: { requestId: string; process: ChildProcess } | undefined;
 
   const delegate = (
-    request: SubagentDelegationRequest,
+    request: AgentDelegationRequest,
     options: DelegateOptions = {},
-  ): Promise<SubagentDelegationResponse> => {
+  ): Promise<AgentDelegationResponse> => {
     if (active) {
       return Promise.reject(
         new Error(`workflow worker "${active.requestId}" is still active`),
@@ -433,15 +433,15 @@ export function createSubagentDelegationClient(
   };
 }
 
-export class SubagentDelegationClient implements SubagentDelegationClientController {
-  readonly #client = createSubagentDelegationClient();
+export class AgentDelegationClient implements AgentDelegationClientController {
+  readonly #client = createAgentDelegationClient();
   get activeRequestId(): string | undefined {
     return this.#client.activeRequestId;
   }
   delegate(
-    request: SubagentDelegationRequest,
+    request: AgentDelegationRequest,
     options?: DelegateOptions,
-  ): Promise<SubagentDelegationResponse> {
+  ): Promise<AgentDelegationResponse> {
     return this.#client.delegate(request, options);
   }
   cancelActiveAndWait(waitMs?: number): Promise<boolean> {

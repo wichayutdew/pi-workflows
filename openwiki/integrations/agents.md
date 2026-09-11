@@ -1,4 +1,4 @@
-# Subagent Integration
+# Agent Integration
 
 Launched workflow steps use the `agent` field to run a delegated Pi worker with
 a workflow-owned role profile. Pi Workflows loads
@@ -8,7 +8,7 @@ supply `model` and `thinking`; the workflow step continues to own permissions,
 outcomes, gates, and workspace binding. A step without `agent` cannot create a
 delegation plan and pauses before execution.
 
-Pi Subagents 0.36.0 or newer supplies the foreground-child transport and
+Pi Agents 0.36.0 or newer supplies the foreground-child transport and
 schema-backed completion. Pi Workflows passes the configured `agent` name
 directly, so `workspace-preparer`, `scout`, `planner`, `worker`, and `reviewer`
 retain their distinct role prompts and optional runtime defaults.
@@ -19,18 +19,18 @@ retain their distinct role prompts and optional runtime defaults.
 sequenceDiagram
   participant Harness as WorkflowHarness
   participant Bus as Pi event bus
-  participant Sub as pi-subagents
+  participant Sub as pi-agents
   participant Child as pi-workflows child
 
-  Harness->>Bus: prompt-template:subagent:request
+  Harness->>Bus: prompt-template:agent:request
   Bus->>Sub: delegation request v1
-  Sub-->>Bus: prompt-template:subagent:started
+  Sub-->>Bus: prompt-template:agent:started
   Bus-->>Harness: started
   Sub->>Child: launch child process
   Child-->>Sub: progress and terminal status
-  Sub-->>Bus: prompt-template:subagent:update
+  Sub-->>Bus: prompt-template:agent:update
   Bus-->>Harness: update status
-  Sub-->>Bus: prompt-template:subagent:response
+  Sub-->>Bus: prompt-template:agent:response
   Bus-->>Harness: finish delegation
 ```
 
@@ -38,7 +38,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  Request[SubagentDelegationRequest] --> Version[version 1]
+  Request[AgentDelegationRequest] --> Version[version 1]
   Request --> Id[requestId]
   Request --> Agent[workflow agent profile]
   Request --> Task[rendered role and step task plus policy envelope]
@@ -68,7 +68,7 @@ flowchart TD
 ## Profile Resolution
 
 Pi Workflows passes the workflow `agent` value through the public delegation API.
-A value such as `agent: scout` therefore starts Pi Subagents' actual `scout`
+A value such as `agent: scout` therefore starts Pi Agents' actual `scout`
 profile and injects the loaded workflow role prompt into the delegated task; it
 is not merely a label in a general-purpose prompt.
 
@@ -114,7 +114,7 @@ A legacy checkpoint with no captured run-start directory cannot launch a
 delegated child. Abort that run and start a new one so the directory is captured
 explicitly instead of guessed from the resumed process.
 
-Pi Subagents validates `structured_output` and returns one correlated terminal
+Pi Agents validates `structured_output` and returns one correlated terminal
 event. Pi Workflows owns declared outcomes and optional human-review gates, and
 the child result is accepted only after the private capability, policy digest,
 outcome, typed handoff fields, artifact, and optional workspace fields validate.
@@ -201,7 +201,7 @@ cannot interrupt a healthy run or recovery attempt.
 ## Non-Interactive Child Boundary
 
 Delegated workflow children are non-interactive. The child runtime removes and
-blocks `contact_supervisor`, `subagent_supervisor`, and `intercom`, preventing a
+blocks `contact_supervisor`, `agent_supervisor`, and `intercom`, preventing a
 dependency-level detach from escaping the workflow lifecycle.
 
 The extension does not prescribe planning, implementation, verification,
@@ -218,7 +218,7 @@ working-directory authority.
 
 ```mermaid
 flowchart TD
-  Settings[Pi Subagents selected profile] --> Providers[loaded child providers]
+  Settings[Pi Agents selected profile] --> Providers[loaded child providers]
   Workflow[workflow step permissions] --> Activation[exact tool activation]
   Providers --> Registered[registered child tools]
   Registered --> Activation
@@ -230,6 +230,6 @@ flowchart TD
 The workflow step is the sole active-tool allow-list after capability
 verification. The selected profile still controls provider loading, so an
 unregistered extension tool cannot be activated. Ordinary non-workflow
-subagent runs retain their profile tool lists. `structured_output` is supplied
+agent runs retain their profile tool lists. `structured_output` is supplied
 upstream for this schema-backed request and is accepted only after capability
 verification.

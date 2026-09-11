@@ -14,23 +14,23 @@ transitions, and parent-mode coordination.
 | `src/infrastructure/integrations/plannotator-requests.ts`  | Publishes start/status events and makes timeout scheduling injectable.                     |
 | `src/infrastructure/integrations/plannotator-responses.ts` | Normalizes unknown event replies and validates review-result payloads.                     |
 
-## Subagent Integration
+## Agent Integration
 
 Parent-side process transport lives in `src/infrastructure/process/`, child
 runtime files live in `src/infrastructure/runtime/`, and pure policy/result
-validation lives in `src/function/subagent/`.
+validation lives in `src/function/agent/`.
 
 | Module                                                  | Responsibility                                                                                                                 |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `src/domain/subagent.ts`                                | Delegation request/update/response, child policy, and protocol event types.                                                    |
-| `src/function/subagent/delegated-result.ts`             | Adds policy correlation fields and validates delegated structured results through the shared step-result parser.               |
-| `src/function/subagent/child-policy-envelope.ts`        | Encodes a policy into the child task and extracts one nonduplicated envelope.                                                  |
-| `src/function/subagent/child-policy-sections.ts`        | Parses policy sections and JSON payloads before semantic validation.                                                           |
-| `src/function/subagent/child-policy-validation.ts`      | Validates runtime identity, policy fields, outcomes, permissions, and request correlation.                                     |
-| `src/function/subagent/child-policy-paths.ts`           | Validates private capability/result paths against the temporary-directory boundary.                                            |
-| `src/function/subagent/diagnostics.ts`                  | Constrains trusted session paths, reads bounded transcript tails, parses calls/results/completions, renders concise evidence, and audits replay safety. |
-| `src/infrastructure/process/subagent-client.ts`         | Functional client factory plus compatibility class for one active delegation at a time, including message validation, timeout, cancellation, and listener cleanup. |
-| `src/infrastructure/fs/subagent-files.ts`               | Atomically verifies and consumes capabilities, then writes bounded correlated results.                                         |
+| `src/domain/agent.ts`                                | Delegation request/update/response, child policy, and protocol event types.                                                    |
+| `src/function/agent/delegated-result.ts`             | Adds policy correlation fields and validates delegated structured results through the shared step-result parser.               |
+| `src/function/agent/child-policy-envelope.ts`        | Encodes a policy into the child task and extracts one nonduplicated envelope.                                                  |
+| `src/function/agent/child-policy-sections.ts`        | Parses policy sections and JSON payloads before semantic validation.                                                           |
+| `src/function/agent/child-policy-validation.ts`      | Validates runtime identity, policy fields, outcomes, permissions, and request correlation.                                     |
+| `src/function/agent/child-policy-paths.ts`           | Validates private capability/result paths against the temporary-directory boundary.                                            |
+| `src/function/agent/diagnostics.ts`                  | Constrains trusted session paths, reads bounded transcript tails, parses calls/results/completions, renders concise evidence, and audits replay safety. |
+| `src/infrastructure/process/agent-client.ts`         | Functional client factory plus compatibility class for one active delegation at a time, including message validation, timeout, cancellation, and listener cleanup. |
+| `src/infrastructure/fs/agent-files.ts`               | Atomically verifies and consumes capabilities, then writes bounded correlated results.                                         |
 | `src/infrastructure/runtime/child-runtime-types.ts`     | Injected filesystem and child-runtime dependency ports.                                                                        |
 | `src/infrastructure/runtime/child-runtime-dependencies.ts` | Supplies the Node-backed child dependency defaults.                                                                            |
 | `src/infrastructure/runtime/child-runtime-policy.ts`    | Projects child policy into a workflow step and renders the child system policy.                                                |

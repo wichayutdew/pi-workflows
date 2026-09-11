@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   StepExecutionAttempt,
-  SubagentTranscriptReference,
+  AgentTranscriptReference,
   WorkflowRun,
 } from '../../src/domain/index.ts';
 import {
@@ -54,7 +54,7 @@ function transcriptReference(
   trustedRoot: string,
   runId: string,
   childIndex = 0,
-): SubagentTranscriptReference {
+): AgentTranscriptReference {
   return {
     trustedRoot,
     runId,
@@ -68,7 +68,7 @@ async function writeTranscript(
   runId: string,
   content: string,
   childIndex = 0,
-): Promise<SubagentTranscriptReference> {
+): Promise<AgentTranscriptReference> {
   const reference = transcriptReference(trustedRoot, runId, childIndex);
   await mkdir(join(trustedRoot, runId, `run-${childIndex}`), {
     recursive: true,
@@ -286,7 +286,7 @@ describe('when rendering less common workflow step evidence', () => {
     );
     const attempts: ReadonlyArray<StepExecutionAttempt> = [
       {
-        kind: 'subagent',
+        kind: 'agent',
         requestId: 'child-no-reference',
         ordinal: 1,
         agent: 'worker',
@@ -294,7 +294,7 @@ describe('when rendering less common workflow step evidence', () => {
         startedAt: 2,
       },
       ...references.map((transcript, index): StepExecutionAttempt => ({
-        kind: 'subagent',
+        kind: 'agent',
         requestId: `child-${index + 1}`,
         ordinal: index + 2,
         agent: 'worker',

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import type { SubagentChildRuntimeDependencies } from './child-runtime-types.ts';
+import type { AgentChildRuntimeDependencies } from './child-runtime-types.ts';
 
 const tokensAreEqual = (actual: string, expected: string): boolean => {
   const actualBytes = Buffer.from(actual, 'utf8');
@@ -44,4 +44,4 @@ export const DEFAULT_CHILD_RUNTIME_DEPENDENCIES = {
     process.env.PI_WORKFLOWS_CHILD_AGENT?.trim() || undefined,
   temporaryDirectory: tmpdir,
   tokensAreEqual,
-} as const satisfies SubagentChildRuntimeDependencies;
+} as const satisfies AgentChildRuntimeDependencies;

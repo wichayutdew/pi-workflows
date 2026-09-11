@@ -7,7 +7,7 @@ import { digest } from '../../function/index.ts';
 import { encodeChildPolicy } from '../../function/index.ts';
 import type {
   ChildStepPolicy,
-  SubagentDelegationRequest,
+  AgentDelegationRequest,
 } from '../../domain/index.ts';
 import { buildDelegatedStepTask } from '../../function/index.ts';
 import type { WorkflowHarnessDependencies } from './dependencies.ts';
@@ -31,11 +31,11 @@ export type DelegationPlan =
   | {
       kind: 'ready';
       active: ActiveDelegation;
-      request: SubagentDelegationRequest;
+      request: AgentDelegationRequest;
     };
 
 /**
- * Creates one immutable subagent request from workflow state and injected
+ * Creates one immutable agent request from workflow state and injected
  * identity/workspace effects.
  */
 export function createDelegationPlan(
@@ -221,7 +221,7 @@ export function createDelegationPlan(
     agent,
     ...(agentProfile.model ? { model: agentProfile.model } : {}),
   };
-  const request: SubagentDelegationRequest = {
+  const request: AgentDelegationRequest = {
     version: 1,
     requestId,
     agent,

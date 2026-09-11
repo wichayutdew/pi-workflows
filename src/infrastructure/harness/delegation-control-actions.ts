@@ -23,7 +23,7 @@ type HarnessActionContext = Pick<
   | 'pi'
   | 'restoreBaselineTools'
   | 'run'
-  | 'subagents'
+  | 'agents'
   | 'updateStatus'
 >;
 
@@ -67,7 +67,7 @@ async function cancelActiveDelegation(
   active.cancelling = true;
   active.progress = 'cancelling';
   this.updateStatus();
-  if (this.subagents.activeRequestId !== active.requestId) {
+  if (this.agents.activeRequestId !== active.requestId) {
     active.progress = 'cancellation unconfirmed';
     this.updateStatus();
     this.latestContext?.ui.notify(
@@ -76,13 +76,13 @@ async function cancelActiveDelegation(
     );
     return false;
   }
-  const isConfirmed = await this.subagents.cancelActiveAndWait();
+  const isConfirmed = await this.agents.cancelActiveAndWait();
   if (isConfirmed && this.activeDelegation === active) {
     this.activeDelegation = undefined;
     await this.cleanupDelegation(active);
   } else if (!isConfirmed) {
     this.latestContext?.ui.notify(
-      `${reason}; waiting for subagent "${active.agent}" to confirm termination`,
+      `${reason}; waiting for agent "${active.agent}" to confirm termination`,
       'warning',
     );
   }
@@ -113,7 +113,7 @@ function pauseForDelegationFailure(
   reason: string,
   failureSummary = reason,
 ): void {
-  this.pauseForExecutionFailure('Subagent step', reason, failureSummary);
+  this.pauseForExecutionFailure('Agent step', reason, failureSummary);
 }
 
 function pauseForExecutionFailure(
@@ -159,7 +159,7 @@ function retainUnconfirmedDelegation(
   if (this.run?.status === 'running') {
     this.run = failRun(
       this.run,
-      `Subagent step failed: ${reason}`,
+      `Agent step failed: ${reason}`,
       this.dependencies.now(),
     );
     this.persist();
@@ -176,7 +176,7 @@ function retainUnconfirmedDelegation(
   this.isolateMainSessionTools();
   this.updateStatus();
   this.latestContext?.ui.notify(
-    `Workflow paused, but subagent "${active.agent}" has not confirmed termination. Main tools and resume remain blocked; restart Pi if no terminal response arrives.`,
+    `Workflow paused, but agent "${active.agent}" has not confirmed termination. Main tools and resume remain blocked; restart Pi if no terminal response arrives.`,
     'error',
   );
 }
@@ -195,7 +195,7 @@ function releaseMainAfterCancellation(
     this.restoreBaselineTools();
     this.updateStatus();
     this.latestContext?.ui.notify(
-      `Subagent "${active.agent}" has terminated; main tools are restored`,
+      `Agent "${active.agent}" has terminated; main tools are restored`,
       'info',
     );
   }

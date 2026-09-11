@@ -4,7 +4,7 @@ export * from './fs/catalog.ts';
 export * from './harness/session-persistence.ts';
 export * from './harness/workspace-directory.ts';
 export * from './fs/transcript-reader.ts';
-export * from './process/subagent-client.ts';
+export * from './process/agent-client.ts';
 export * from './integrations/plannotator.ts';
 export * from './runtime/main-step-runtime.ts';
 export * from './runtime/child-runtime.ts';

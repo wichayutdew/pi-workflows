@@ -1,7 +1,8 @@
 # Plannotator Integration
 
-Plannotator is optional. A gate with no `provider` uses Pi's built-in prompt
-panel; `provider: plannotator` opts into this integration.
+Plannotator is optional until a workflow step declares `gate`. Gated steps use
+Plannotator for review submission and status polling; the workflow schema does
+not support alternate gate providers.
 
 Any gated step may submit an artifact. A delegated child returns it through
 `structured_output`; a main-agent step uses `workflow_complete_step`. The step
@@ -27,13 +28,11 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-  Gate[gate config] --> Provider{provider}
-  Provider -- omitted or prompt --> Prompt[use built-in Pi review]
-  Provider -- plannotator --> Detect{extension detectable?}
-  Provider -- other --> Reject[reject workflow]
+  Gate[gate config] --> Shape{timeoutMs and optional artifactContract only?}
+  Shape -- no --> Reject[reject workflow]
+  Shape -- yes --> Detect{Plannotator detectable?}
   Detect -- no --> Preflight[block step preflight]
   Detect -- yes --> Transitions{ready and handoff transitions exist?}
-  Prompt --> Transitions
   Transitions -- no --> Reject
   Transitions -- yes --> Accept[valid gated step]
 ```
@@ -92,10 +91,10 @@ flowchart TD
   Fail --> Apply
 ```
 
-A built-in review opened from print or JSON mode remains paused because those
-modes cannot show the dialog. Reopen the same session in TUI or RPC mode and
-run `/workflow-resume`; the harness presents the preserved pending artifact
-instead of rerunning the step.
+If a gate submission is interrupted before a Plannotator review id is recorded,
+resume fails that pending submission and asks the current step to submit again.
+If a review id was recorded, resume polls Plannotator and either applies the
+completed decision, keeps waiting, or blocks when the review cannot be queried.
 
 ## Feedback Flow
 

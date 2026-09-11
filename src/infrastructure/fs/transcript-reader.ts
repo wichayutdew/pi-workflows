@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   MAX_STEP_TRACE_LOG_CHARS,
   MAX_STEP_TRACE_LOG_EVENTS,
-  type SubagentTranscriptReference,
+  type AgentTranscriptReference,
 } from '../../domain/index.ts';
 import {
   redactStepLogText,
@@ -42,7 +42,7 @@ function isWithin(root: string, candidate: string): boolean {
   );
 }
 
-function hasSafeIdentity(reference: SubagentTranscriptReference): boolean {
+function hasSafeIdentity(reference: AgentTranscriptReference): boolean {
   return (
     isAbsolute(reference.trustedRoot) &&
     isAbsolute(reference.sessionFile) &&
@@ -132,7 +132,7 @@ function parseTranscript(
  * the separately persisted policy-envelope-free task body instead.
  */
 export async function readStepTranscript(
-  reference: SubagentTranscriptReference,
+  reference: AgentTranscriptReference,
 ): Promise<StepTranscriptLog> {
   if (!hasSafeIdentity(reference)) {
     return {

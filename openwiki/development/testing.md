@@ -28,7 +28,7 @@ flowchart TD
   Tests --> Policy[test/function/policy.test.ts<br/>Bash, MCP, tool selection]
   Tests --> Doctor[test/function/workflow-doctor.test.ts<br/>graph liveness and deterministic diagnostics]
   Tests --> DirectClient[test/infrastructure/direct-worker-client.test.ts<br/>delegation events, timeout, cancellation]
-  Tests --> Child[test/infrastructure/subagent-child-runtime.test.ts<br/>runtime enforcement]
+  Tests --> Child[test/infrastructure/agent-child-runtime.test.ts<br/>runtime enforcement]
   Tests --> Recovery[test/function/delegation-recovery.test.ts<br/>terminal evidence and replay safety]
   Tests --> Harness[test/infrastructure/direct-worker-harness.test.ts<br/>main, delegation, pause/resume, gates]
   Tests --> E2E[test/e2e/direct-worker-runtime.test.ts<br/>real Pi RPC revisit, captured cwd, and actual profiles]
@@ -48,7 +48,7 @@ flowchart TD
   Kind -- workflow config field --> Config[schemas/workflow.schema.json<br/>src/domain/config.ts<br/>src/function/config/*<br/>test/function/config.test.ts]
   Kind -- run state or transition --> Engine[src/domain/state.ts<br/>src/function/engine/*<br/>test/function/engine.test.ts]
   Kind -- step permission --> Policy[src/domain/policy.ts<br/>src/function/policy/*<br/>main and child runtime tests]
-  Kind -- delegated worker transport --> Subagent[src/domain/subagent.ts<br/>src/function/subagent/*<br/>src/infrastructure/*subagent*<br/>direct-worker and child-runtime tests]
+  Kind -- delegated worker transport --> Agent[src/domain/agent.ts<br/>src/function/agent/*<br/>src/infrastructure/*agent*<br/>direct-worker and child-runtime tests]
   Kind -- review provider --> Review[src/domain/plannotator.ts<br/>src/infrastructure/integrations/*<br/>src/infrastructure/harness/*gate*<br/>integration tests]
   Kind -- command surface --> Commands[src/infrastructure/harness/commands.ts<br/>src/infrastructure/harness/harness.ts<br/>extension or harness tests]
 ```
@@ -81,6 +81,6 @@ flowchart TD
   WorkflowReload --> List["/workflow-list"]
   List --> Start["/workflow-start work input"]
   Start --> Doctor{delegated step cannot start?}
-  Doctor -- yes --> SubDoctor["/subagents-doctor"]
+  Doctor -- yes --> SubDoctor["/agents-doctor"]
   Doctor -- no --> Done[workflow running]
 ```

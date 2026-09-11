@@ -1,6 +1,6 @@
 import type {
-  SubagentDelegationResponse,
-  SubagentDelegationUpdate,
+  AgentDelegationResponse,
+  AgentDelegationUpdate,
   WorkflowStepResult,
 } from '../../domain/index.ts';
 import {
@@ -33,7 +33,7 @@ type HarnessActionContext = Pick<
   | 'run'
   | 'sessionEpoch'
   | 'settleAfterTransition'
-  | 'subagents'
+  | 'agents'
   | 'submitGate'
   | 'updateStatus'
 >;
@@ -42,12 +42,12 @@ export type DelegationResponseActions = {
   handleDelegationUpdate: (
     this: HarnessActionContext,
     active: ActiveDelegation,
-    update: SubagentDelegationUpdate,
+    update: AgentDelegationUpdate,
   ) => void;
   queueDelegationResponse: (
     this: HarnessActionContext,
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => void;
   queueDelegationFailure: (
     this: HarnessActionContext,
@@ -57,7 +57,7 @@ export type DelegationResponseActions = {
   finishDelegation: (
     this: HarnessActionContext,
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => Promise<void>;
 };
 
@@ -68,7 +68,7 @@ function hasErrorCode(error: unknown, code: string): boolean {
 function handleDelegationUpdate(
   this: HarnessActionContext,
   active: ActiveDelegation,
-  update: SubagentDelegationUpdate,
+  update: AgentDelegationUpdate,
 ): void {
   if (this.activeDelegation !== active) return;
   const progress = [
@@ -94,7 +94,7 @@ function handleDelegationUpdate(
 function queueDelegationResponse(
   this: HarnessActionContext,
   active: ActiveDelegation,
-  response: SubagentDelegationResponse,
+  response: AgentDelegationResponse,
 ): void {
   void this.mutationQueue
     .run(() => this.finishDelegation(active, response))
@@ -116,7 +116,7 @@ function queueDelegationFailure(
         await this.cleanupDelegation(active);
         return;
       }
-      if (this.subagents.activeRequestId === active.requestId) {
+      if (this.agents.activeRequestId === active.requestId) {
         this.retainUnconfirmedDelegation(active, reason);
         return;
       }
@@ -134,7 +134,7 @@ function queueDelegationFailure(
 async function finishDelegation(
   this: HarnessActionContext,
   active: ActiveDelegation,
-  response: SubagentDelegationResponse,
+  response: AgentDelegationResponse,
 ): Promise<void> {
   if (this.activeDelegation !== active) {
     await this.cleanupDelegation(active);
@@ -186,15 +186,12 @@ async function finishDelegation(
       serializedResult = await this.dependencies.readDelegatedResult(active);
     } catch (error) {
       if (hasErrorCode(error, 'ENOENT')) {
-        const subagentAttemptCount =
+        const agentAttemptCount =
           this.run.currentStepAttempts?.filter(
-            (attempt) => attempt.kind === 'subagent',
+            (attempt) => attempt.kind === 'agent',
           ).length ?? 0;
         if (
-          shouldRetryMissingCompletion(
-            response.diagnostic,
-            subagentAttemptCount,
-          )
+          shouldRetryMissingCompletion(response.diagnostic, agentAttemptCount)
         ) {
           cleanupAttempted = true;
           await this.cleanupDelegation(active);
@@ -249,7 +246,7 @@ async function finishDelegation(
           return;
         }
         throw new Error(
-          `Subagent "${active.agent}" completed without producing the required correlated structured_output result (request ${active.requestId}; diagnostic ${diagnosticState})`,
+          `Agent "${active.agent}" completed without producing the required correlated structured_output result (request ${active.requestId}; diagnostic ${diagnosticState})`,
           { cause: error },
         );
       }

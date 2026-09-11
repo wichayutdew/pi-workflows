@@ -596,7 +596,7 @@ describe('when testing config', () => {
         withStep({
           title: ' ',
           prompt: 42,
-          subagent: 42,
+          agent: 42,
           permissions: 42,
           requires: 42,
           transitions: 42,
@@ -681,7 +681,7 @@ describe('when testing config', () => {
           },
         }),
         withStep({
-          subagent: {
+          agent: {
             agent: '',
             context: 42,
             model: 'invalid model',
@@ -692,7 +692,7 @@ describe('when testing config', () => {
           },
         }),
         withStep({
-          subagent: {
+          agent: {
             turnBudget: { maxTurns: 0, graceTurns: 101 },
             toolBudget: { hard: 0, soft: 100_001, block: [] },
           },

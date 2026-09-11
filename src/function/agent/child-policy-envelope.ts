@@ -13,7 +13,7 @@ const UPSTREAM_TASK_PREFIX = 'Task: ';
 const UPSTREAM_TASK_FILE_OPEN = '<file name="';
 const UPSTREAM_TASK_FILE_HEADER_CLOSE = '">\n';
 const UPSTREAM_TASK_FILE_CLOSE = '\n</file>\n';
-const UPSTREAM_TASK_DIRECTORY_PREFIX = 'pi-subagent-';
+const UPSTREAM_TASK_DIRECTORY_PREFIX = 'pi-agent-';
 
 /**
  * Encodes a validated child policy into the delegated task envelope.

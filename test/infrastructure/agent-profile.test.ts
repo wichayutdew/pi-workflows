@@ -11,7 +11,7 @@ import {
   directWorkerCommand,
   directWorkerResponse,
   workerProgressFromJsonLine,
-} from '../../src/infrastructure/process/subagent-client.ts';
+} from '../../src/infrastructure/process/agent-client.ts';
 
 describe('when loading workflow agent profiles', () => {
   test('passes a profile model and thinking level to its direct Pi worker', () => {

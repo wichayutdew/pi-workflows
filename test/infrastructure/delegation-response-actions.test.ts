@@ -6,7 +6,7 @@ import type { HarnessActionContext } from '../../src/infrastructure/harness/acti
 import { createDelegationResponseActions } from '../../src/infrastructure/harness/delegation-response-actions.ts';
 import type { ActiveDelegation } from '../../src/infrastructure/harness/types.ts';
 import type { ChildStepPolicy } from '../../src/domain/index.ts';
-import type { SubagentDelegationResponse } from '../../src/domain/index.ts';
+import type { AgentDelegationResponse } from '../../src/domain/index.ts';
 import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
 
 const APPROVED_PLAN =
@@ -89,7 +89,7 @@ describe('when a delegated child settles without a correlated result', () => {
     const workflow = handoffCapableWorkflow();
     const run = runAtImplementStep(workflow);
     const active = buildActiveDelegation(run);
-    const response: SubagentDelegationResponse = {
+    const response: AgentDelegationResponse = {
       requestId: active.requestId,
       agent: 'worker',
       status: 'completed',
@@ -158,7 +158,7 @@ describe('when a delegated child settles without a correlated result', () => {
       ) => {
         calls.settled.push(report);
       },
-      subagents: { activeRequestId: undefined },
+      agents: { activeRequestId: undefined },
       submitGate: async () => undefined,
       updateStatus: () => {
         calls.updates += 1;
@@ -222,7 +222,7 @@ describe('when a delegated child settles without a correlated result', () => {
       name: index % 2 === 0 ? 'edit' : 'bash',
       state: 'completed' as const,
     }));
-    const response: SubagentDelegationResponse = {
+    const response: AgentDelegationResponse = {
       requestId: active.requestId,
       agent: 'worker',
       status: 'completed',
@@ -287,7 +287,7 @@ describe('when a delegated child settles without a correlated result', () => {
       ) => {
         calls.settled.push(report);
       },
-      subagents: { activeRequestId: undefined },
+      agents: { activeRequestId: undefined },
       submitGate: async () => undefined,
       updateStatus: () => undefined,
     };

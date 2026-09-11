@@ -28,11 +28,11 @@ export function formatWorkflowProgressStatus(
   const activity =
     run.status === 'awaiting-gate' ? 'awaiting review' : 'working';
   const workerModel =
-    snapshot.execution?.kind === 'subagent' && snapshot.execution.model
+    snapshot.execution?.kind === 'agent' && snapshot.execution.model
       ? ` · model ${snapshot.execution.model}`
       : '';
   const workerProgress =
-    snapshot.execution?.kind === 'subagent'
+    snapshot.execution?.kind === 'agent'
       ? ` · ${snapshot.execution.progress}`
       : '';
   const usage = workflowUsage(run);
@@ -67,9 +67,9 @@ export function formatWorkflowStatusText(
   if (run.pendingGate?.reviewId) {
     lines.push(`Review: ${run.pendingGate.reviewId}`);
   }
-  if (snapshot.execution?.kind === 'subagent') {
+  if (snapshot.execution?.kind === 'agent') {
     lines.push(
-      `Subagent: ${snapshot.execution.agent} (${snapshot.execution.requestId})`,
+      `Agent: ${snapshot.execution.agent} (${snapshot.execution.requestId})`,
       `Progress: ${snapshot.execution.progress}`,
     );
   } else if (snapshot.execution?.kind === 'main') {

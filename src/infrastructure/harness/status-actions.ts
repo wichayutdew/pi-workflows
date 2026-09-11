@@ -59,7 +59,7 @@ function workflowStatusSnapshot(
   let execution: WorkflowStatusExecution | undefined;
   if (this.activeDelegation) {
     execution = {
-      kind: 'subagent',
+      kind: 'agent',
       agent: this.activeDelegation.agent,
       requestId: this.activeDelegation.requestId,
       progress: this.activeDelegation.progress ?? 'starting',

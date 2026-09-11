@@ -241,7 +241,7 @@ function renderAttempt(
   width: number,
 ): Array<string> {
   const actor =
-    attempt.kind === 'subagent' ? `subagent · ${attempt.agent}` : 'main agent';
+    attempt.kind === 'agent' ? `agent · ${attempt.agent}` : 'main agent';
   const truncation = attempt.taskTruncated
     ? `\n… [${attempt.omittedTaskChars ?? 0} task characters omitted from the bounded checkpoint trace]`
     : '';
@@ -289,7 +289,7 @@ function renderLiveWorkerSession(
   detail: SelectedStepDetail,
   width: number,
 ): Array<string> {
-  if (snapshot.execution?.kind !== 'subagent') return [];
+  if (snapshot.execution?.kind !== 'agent') return [];
   const attempt = detail.attempts.at(-1);
   const events = snapshot.execution.activityLog ?? [];
   const eventLines = events.flatMap((event) => {
@@ -357,7 +357,7 @@ export function renderLiveWorkerActivity(
 ): Array<string> {
   const entry = buildPathEntries(snapshot)[selectedIndex];
   const detail = selectedStepDetail(snapshot, selectedIndex);
-  if (!entry?.isCurrent || !detail || snapshot.execution?.kind !== 'subagent') {
+  if (!entry?.isCurrent || !detail || snapshot.execution?.kind !== 'agent') {
     return boxed(
       theme,
       'Live Worker Session',

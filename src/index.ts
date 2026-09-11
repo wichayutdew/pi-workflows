@@ -5,7 +5,7 @@ import {
   loadSettings,
 } from './infrastructure/fs/load.ts';
 import { createWorkflowHarness } from './infrastructure/harness/harness.ts';
-import { registerSubagentChildRuntime } from './infrastructure/runtime/child-runtime.ts';
+import { registerAgentChildRuntime } from './infrastructure/runtime/child-runtime.ts';
 
 /**
  * Asynchronous entry point accepted by Pi's extension loader.
@@ -16,7 +16,7 @@ export type PiWorkflowsExtension = (pi: ExtensionAPI) => Promise<void>;
  * Process-role information used during extension registration.
  */
 export type PiWorkflowsRuntimeEnvironment = {
-  readonly isSubagentChild: boolean;
+  readonly isAgentChild: boolean;
   readonly childAgent: string | undefined;
 };
 
@@ -35,13 +35,13 @@ const DEFAULT_DEPENDENCIES = {
   loadSettings,
   userWorkflowDirectory: defaultUserWorkflowDirectory,
   runtimeEnvironment: (): PiWorkflowsRuntimeEnvironment => ({
-    isSubagentChild:
+    isAgentChild:
       process.env.PI_WORKFLOWS_CHILD === '1' &&
       process.env.PI_WORKFLOWS_CHILD_RUNTIME === '1',
     childAgent: process.env.PI_WORKFLOWS_CHILD_AGENT?.trim(),
   }),
   registerChildRuntime: (pi, childAgent): void => {
-    registerSubagentChildRuntime(pi, { childAgent });
+    registerAgentChildRuntime(pi, { childAgent });
   },
   createHarness: (pi, statusShortcut): void => {
     createWorkflowHarness(pi, statusShortcut);
@@ -61,7 +61,7 @@ export function createPiWorkflowsExtension(
   return async (pi): Promise<void> => {
     const environment = dependencies.runtimeEnvironment();
 
-    if (environment.isSubagentChild && environment.childAgent) {
+    if (environment.isAgentChild && environment.childAgent) {
       dependencies.registerChildRuntime(pi, environment.childAgent);
       return;
     }

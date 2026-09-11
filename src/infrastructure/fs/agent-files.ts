@@ -1,10 +1,10 @@
 import type { ChildStepPolicy } from '../../domain/index.ts';
-import type { SubagentChildRuntimeDependencies } from '../runtime/child-runtime-types.ts';
+import type { AgentChildRuntimeDependencies } from '../runtime/child-runtime-types.ts';
 
 type VerifyChildCapabilityOptions = {
   readonly policy: ChildStepPolicy;
   readonly childAgent: string;
-  readonly dependencies: SubagentChildRuntimeDependencies;
+  readonly dependencies: AgentChildRuntimeDependencies;
 };
 
 /**
@@ -15,7 +15,7 @@ type VerifyChildCapabilityOptions = {
  */
 export const verifyChildWorkingDirectory = (
   policy: ChildStepPolicy,
-  dependencies: SubagentChildRuntimeDependencies,
+  dependencies: AgentChildRuntimeDependencies,
 ): void => {
   let expected: string;
   let actual: string;
@@ -65,7 +65,7 @@ export const verifyChildCapability = ({
 type WriteChildResultOptions = {
   readonly policy: ChildStepPolicy;
   readonly result: unknown;
-  readonly dependencies: SubagentChildRuntimeDependencies;
+  readonly dependencies: AgentChildRuntimeDependencies;
 };
 
 /**

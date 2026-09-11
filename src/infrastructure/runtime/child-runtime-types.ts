@@ -15,7 +15,7 @@ export type ChildRuntimeFileSystem = {
   readonly writeExclusive: (path: string, content: string) => void;
 };
 
-export type SubagentChildRuntimeDependencies = {
+export type AgentChildRuntimeDependencies = {
   readonly fileSystem: ChildRuntimeFileSystem;
   readonly createUniqueId: () => string;
   readonly currentWorkingDirectory: () => string;
@@ -24,7 +24,7 @@ export type SubagentChildRuntimeDependencies = {
   readonly tokensAreEqual: (actual: string, expected: string) => boolean;
 };
 
-export type SubagentChildRuntimeOptions = {
+export type AgentChildRuntimeOptions = {
   readonly childAgent?: string;
-  readonly dependencies?: SubagentChildRuntimeDependencies;
+  readonly dependencies?: AgentChildRuntimeDependencies;
 };

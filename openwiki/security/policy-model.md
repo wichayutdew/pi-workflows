@@ -11,7 +11,7 @@ the transcript, globally loaded skills, or extension event handlers.
 flowchart LR
   Parent[Parent WorkflowHarness<br/>trusted orchestration]
   Policy[ChildStepPolicy<br/>signed by digest plus capability]
-  Child[Child subagent<br/>untrusted step work]
+  Child[Child agent<br/>untrusted step work]
   Tools[Pi tools and MCP]
   Result[result.json]
 
@@ -121,7 +121,7 @@ flowchart TD
   Capture --> Terminate
 ```
 
-For a delegated step, pi-subagents 0.36 supplies `structured_output`; for a
+For a delegated step, pi-agents 0.36 supplies `structured_output`; for a
 main-agent step, the harness registers `workflow_complete_step`. Both paths
 feed the same outcome, typed handoff fields, artifact, sole-call, and
 policy-digest validation. Completion payloads contain `outcome`, plain-text

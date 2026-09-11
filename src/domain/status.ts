@@ -24,7 +24,7 @@ export type WorkflowStatusExecution =
       readonly kind: 'main';
     }
   | {
-      readonly kind: 'subagent';
+      readonly kind: 'agent';
       readonly agent: string;
       readonly requestId: string;
       readonly progress: string;
@@ -59,7 +59,7 @@ export type PathEntry = {
 };
 
 export type StepTranscriptLoader = (
-  attempt: Extract<StepExecutionAttempt, { readonly kind: 'subagent' }>,
+  attempt: Extract<StepExecutionAttempt, { readonly kind: 'agent' }>,
 ) => Promise<StepTranscriptLog>;
 
 export type WorkflowStatusThemeColor = ThemeColor;
