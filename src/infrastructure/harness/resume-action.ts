@@ -66,7 +66,7 @@ async function resumeNow(
   }
   if (this.activeDelegation) {
     context.ui.notify(
-      `Cannot resume while subagent "${this.activeDelegation.agent}" is still cancelling`,
+      `Cannot resume while agent "${this.activeDelegation.agent}" is still cancelling`,
       'warning',
     );
     return;

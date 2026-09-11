@@ -14,7 +14,7 @@ flowchart TD
   HarnessActions --> ConfigLoader[src/infrastructure/fs/load.ts<br/>Node loader]
   HarnessActions --> EngineCore[src/function/engine/*<br/>pure transitions]
   HarnessActions --> PromptCore[src/function/prompt/*<br/>prompt rendering]
-  HarnessActions --> SubClient[src/infrastructure/process/subagent-client.ts]
+  HarnessActions --> SubClient[src/infrastructure/process/agent-client.ts]
   HarnessActions --> Plannotator[src/infrastructure/integrations/plannotator*.ts]
   HarnessActions --> MainRuntime[src/infrastructure/runtime/main-step-runtime.ts]
   HarnessActions --> Queue[src/infrastructure/runtime/task-queue.ts]
@@ -26,15 +26,15 @@ flowchart TD
 
   MainRuntime --> PolicyCore[src/function/policy/*]
   ChildRuntime --> PolicyCore
-  ChildRuntime --> ChildPolicy[src/function/subagent/child-policy-*]
-  ChildRuntime --> ChildFiles[src/infrastructure/fs/subagent-files.ts]
-  SubClient --> SubDiagnostics[src/function/subagent/diagnostics.ts]
+  ChildRuntime --> ChildPolicy[src/function/agent/child-policy-*]
+  ChildRuntime --> ChildFiles[src/infrastructure/fs/agent-files.ts]
+  SubClient --> SubDiagnostics[src/function/agent/diagnostics.ts]
   StatusCore --> Transcript[src/infrastructure/fs/transcript-reader.ts]
 ```
 
 `src/index.ts` is the only Pi extension entry point. It chooses parent mode by
 constructing `WorkflowHarness`, or child mode by registering the delegated
-subagent runtime when `PI_WORKFLOWS_CHILD=1`,
+agent runtime when `PI_WORKFLOWS_CHILD=1`,
 `PI_WORKFLOWS_CHILD_RUNTIME=1`, and `PI_WORKFLOWS_CHILD_AGENT` is set.
 
 ## Source Tree Guide
@@ -51,12 +51,12 @@ runtimes, and status rendering.
 
 | Area                                   | Handles                                                                                                                                                                                                                         |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/domain/`                          | Canonical shared types and constants for configuration, runs, policies, harness state, Plannotator, status rendering, step results, subagents, and role profiles.                                                               |
+| `src/domain/`                          | Canonical shared types and constants for configuration, runs, policies, harness state, Plannotator, status rendering, step results, agents, and role profiles.                                                               |
 | `src/function/`                        | Pure application logic: configuration validation, digests, workflow doctor checks, immutable engine transitions, policy decisions, preflight checks, prompt rendering, step-result parsing, and child-policy validation.          |
 | `src/infrastructure/fs/`               | Node-backed filesystem adapters for settings/workflow loading, YAML parsing, catalog assembly, child result workspaces, and transcript reads.                                                                                   |
-| `src/infrastructure/harness/`          | Parent-mode orchestration. `harness.ts` composes action modules for start, restart, pause, resume, lifecycle, status, gate, prompt-review, Plannotator, main-step, and delegation flows.                                        |
-| `src/infrastructure/integrations/`     | External review adapters for Plannotator, prompt gates, and the optional Herdr companion reporter.                                                                                                                              |
-| `src/infrastructure/process/`          | Pi Subagents parent-side process/event client.                                                                                                                                                                                   |
+| `src/infrastructure/harness/`          | Parent-mode orchestration. `harness.ts` composes action modules for start, restart, pause, resume, lifecycle, status, Plannotator gates, main-step, and delegation flows.                                                       |
+| `src/infrastructure/integrations/`     | External adapters for Plannotator reviews and the optional Herdr companion reporter.                                                                                                                                             |
+| `src/infrastructure/process/`          | Pi Agents parent-side process/event client.                                                                                                                                                                                   |
 | `src/infrastructure/runtime/`          | Main-agent and child-agent runtimes, completion tools, policy hooks, lifecycle handling, trace capture, same-child repair, tool-budget handoff mode, and task serialization.                                                    |
 | `src/ui/`                              | Workflow status text, board/detail rendering, usage formatting, step logs, layout helpers, shortcut labels, and the interactive TUI view.                                                                                       |
 | `src/harness.ts`                       | Root compatibility export for `WorkflowHarness` from `src/infrastructure/harness/harness.ts`.                                                                                                                                   |
@@ -111,17 +111,17 @@ flowchart TD
   Status[Status rendering core] -->|overlay text and TUI view| Harness
 
   Harness -->|main step policy and task| MainRuntime
-  Harness -->|delegation request and policy envelope| Subagents
-  Subagents -->|child process input| ChildRuntime
+  Harness -->|delegation request and policy envelope| Agents
+  Agents -->|child process input| ChildRuntime
   MainRuntime -->|validated result| Harness
-  ChildRuntime -->|validated correlated result file| Subagents
-  Subagents -->|terminal response| Harness
+  ChildRuntime -->|validated correlated result file| Agents
+  Agents -->|terminal response| Harness
 ```
 
 The functional cores are deliberately small and injectable. Configuration
 loading binds filesystem and environment ports in `createConfigLoader`, the
-harness binds Pi, timers, temporary workspaces, Plannotator, prompt gates,
-subagents, status views, and main-step runtime through
+harness binds Pi, timers, temporary workspaces, Plannotator review events,
+agents, status views, and main-step runtime through
 `createWorkflowHarnessDependencies`, and the main-step and child runtimes take
 policy/parsing/file dependencies. Tests can replace those ports without
 changing workflow state logic.

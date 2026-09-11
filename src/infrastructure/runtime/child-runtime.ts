@@ -17,7 +17,7 @@ import {
   verifyChildCapability,
   verifyChildWorkingDirectory,
   writeChildResult,
-} from '../fs/subagent-files.ts';
+} from '../fs/agent-files.ts';
 import {
   CHILD_COMPLETION_TOOL,
   CHILD_COORDINATION_TOOLS,
@@ -32,16 +32,16 @@ import {
   toolBudgetWarningPrompt,
 } from './child-runtime-repair.ts';
 import type {
-  SubagentChildRuntimeDependencies,
-  SubagentChildRuntimeOptions,
+  AgentChildRuntimeDependencies,
+  AgentChildRuntimeOptions,
 } from './child-runtime-types.ts';
 
 export { CHILD_COMPLETION_TOOL } from './child-runtime-completion.ts';
 export type {
   ChildRuntimeFileSystem,
   ChildRuntimePathInspection,
-  SubagentChildRuntimeDependencies,
-  SubagentChildRuntimeOptions,
+  AgentChildRuntimeDependencies,
+  AgentChildRuntimeOptions,
 } from './child-runtime-types.ts';
 
 type ChildRuntimeState = {
@@ -107,20 +107,20 @@ const invalidPolicyInput = (
 };
 
 const resolveChildAgent = (
-  options: SubagentChildRuntimeOptions,
-  dependencies: SubagentChildRuntimeDependencies,
+  options: AgentChildRuntimeOptions,
+  dependencies: AgentChildRuntimeDependencies,
 ): string | undefined =>
   options.childAgent ?? dependencies.environmentChildAgent();
 
 /**
- * Registers the policy-enforcing runtime used inside a delegated subagent.
+ * Registers the policy-enforcing runtime used inside a delegated agent.
  *
  * All file-system, identity, process, and capability-comparison boundaries can
  * be supplied through `options.dependencies`.
  */
-export const registerSubagentChildRuntime = (
+export const registerAgentChildRuntime = (
   pi: ExtensionAPI,
-  options: SubagentChildRuntimeOptions = {},
+  options: AgentChildRuntimeOptions = {},
 ): void => {
   const dependencies =
     options.dependencies ?? DEFAULT_CHILD_RUNTIME_DEPENDENCIES;

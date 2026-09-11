@@ -14,9 +14,9 @@ import {
 } from '../../src/domain/index.ts';
 import {
   appendMainStepLog,
-  attachSubagentTranscript,
+  attachAgentTranscript,
   beginMainStepAttempt,
-  beginSubagentStepAttempt,
+  beginAgentStepAttempt,
   recordCurrentGateDecision,
   recordCurrentStepResult,
   workflowTraceChars,
@@ -349,7 +349,7 @@ describe('when exploring workflow step evidence', () => {
     const workflow = loadedWorkflow(raw);
     let run = createRun(workflow, '', [], 'trace-budget', 1);
     for (let visit = 1; visit <= 100; visit += 1) {
-      run = beginSubagentStepAttempt(
+      run = beginAgentStepAttempt(
         run,
         `attempt-${visit}`,
         `agent-${'a'.repeat(30_000)}`,
@@ -412,7 +412,7 @@ describe('when exploring workflow step evidence', () => {
   test('renders live worker activity inside the current step explorer', () => {
     const workflow = loadedWorkflow();
     let run = createRun(workflow, '', [], 'live-step-activity', 1);
-    run = beginSubagentStepAttempt(
+    run = beginAgentStepAttempt(
       run,
       'request-live',
       'worker',
@@ -423,7 +423,7 @@ describe('when exploring workflow step evidence', () => {
       run,
       workflow,
       execution: {
-        kind: 'subagent' as const,
+        kind: 'agent' as const,
         agent: 'worker',
         requestId: 'request-live',
         progress: 'responding, 1 calls',
@@ -467,7 +467,7 @@ describe('when exploring workflow step evidence', () => {
   test('failed and resumed child attempts retain only confined transcript references', () => {
     const workflow = loadedWorkflow();
     let run = createRun(workflow, '', [], 'trace-resume', 1);
-    run = beginSubagentStepAttempt(
+    run = beginAgentStepAttempt(
       run,
       'request-failed',
       'pi-workflows.step',
@@ -475,7 +475,7 @@ describe('when exploring workflow step evidence', () => {
       2,
     );
     const trustedRoot = '/tmp/pi-workflows-sessions';
-    run = attachSubagentTranscript(
+    run = attachAgentTranscript(
       run,
       'request-failed',
       {
@@ -487,9 +487,9 @@ describe('when exploring workflow step evidence', () => {
       3,
     );
     const attached = run.currentStepAttempts?.[0];
-    expect(attached?.kind === 'subagent' && attached.transcript).toBeTruthy();
+    expect(attached?.kind === 'agent' && attached.transcript).toBeTruthy();
 
-    const unchanged = attachSubagentTranscript(
+    const unchanged = attachAgentTranscript(
       run,
       'request-failed',
       {
@@ -505,7 +505,7 @@ describe('when exploring workflow step evidence', () => {
     run = failRun(run, 'child failed', 5);
     expect(isWorkflowRun(JSON.parse(JSON.stringify(run)))).toBeTrue();
     run = resumeRun(run, 6);
-    run = beginSubagentStepAttempt(
+    run = beginAgentStepAttempt(
       run,
       'request-resumed',
       'pi-workflows.step',
@@ -676,7 +676,7 @@ describe('when exploring workflow step evidence', () => {
   test('live worker tool-call page scrolls half a page with Ctrl+D and Ctrl+U', () => {
     const workflow = loadedWorkflow();
     let run = createRun(workflow, '', [], 'live-scroll', 1);
-    run = beginSubagentStepAttempt(
+    run = beginAgentStepAttempt(
       run,
       'live-request',
       'worker',
@@ -687,7 +687,7 @@ describe('when exploring workflow step evidence', () => {
       run,
       workflow,
       execution: {
-        kind: 'subagent' as const,
+        kind: 'agent' as const,
         agent: 'worker',
         requestId: 'live-request',
         progress: 'calling tools',
@@ -730,7 +730,7 @@ describe('when exploring workflow step evidence', () => {
   test('the detail view loads and caches one trusted child transcript', async () => {
     const workflow = loadedWorkflow();
     let run = createRun(workflow, '', [], 'trace-async-view', 1);
-    run = beginSubagentStepAttempt(
+    run = beginAgentStepAttempt(
       run,
       'request-view',
       'worker',
@@ -738,7 +738,7 @@ describe('when exploring workflow step evidence', () => {
       2,
     );
     const trustedRoot = '/tmp/pi-workflows-view-sessions';
-    run = attachSubagentTranscript(
+    run = attachAgentTranscript(
       run,
       'request-view',
       {

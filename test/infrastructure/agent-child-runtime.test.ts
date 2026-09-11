@@ -5,8 +5,8 @@ import { describe, expect, test } from 'bun:test';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   CHILD_COMPLETION_TOOL,
-  registerSubagentChildRuntime,
-  type SubagentChildRuntimeDependencies,
+  registerAgentChildRuntime,
+  type AgentChildRuntimeDependencies,
 } from '../../src/infrastructure/runtime/child-runtime.ts';
 import { DEFAULT_CHILD_RUNTIME_DEPENDENCIES } from '../../src/infrastructure/runtime/child-runtime-dependencies.ts';
 import {
@@ -17,7 +17,7 @@ import {
 import { childSystemPrompt } from '../../src/infrastructure/runtime/child-runtime-policy.ts';
 import { expectTruthy } from '../helpers.ts';
 
-describe('when testing subagent child runtime', () => {
+describe('when testing agent child runtime', () => {
   type Handler = (event: Record<string, unknown>) => unknown;
   const readySummary =
     '# Ready\n**Completed:**\n- Inspected `README.md`.\n**Remaining:**\n- No active-step work remains.';
@@ -62,7 +62,7 @@ describe('when testing subagent child runtime', () => {
   function runtime(
     childAgent: string | undefined,
     profileTools = ['read', 'bash', CHILD_COMPLETION_TOOL],
-    dependencies?: SubagentChildRuntimeDependencies,
+    dependencies?: AgentChildRuntimeDependencies,
   ) {
     const handlers = new Map<string, Handler[]>();
     const activeTools: string[][] = [];
@@ -81,21 +81,21 @@ describe('when testing subagent child runtime', () => {
         name: CHILD_COMPLETION_TOOL,
         sourceInfo: {
           source: 'extension',
-          path: '/packages/pi-subagents/structured-output.ts',
+          path: '/packages/pi-agents/structured-output.ts',
         },
       },
       {
         name: 'contact_supervisor',
         sourceInfo: {
           source: 'extension',
-          path: '/packages/pi-subagents/index.ts',
+          path: '/packages/pi-agents/index.ts',
         },
       },
       {
         name: 'intercom',
         sourceInfo: {
           source: 'extension',
-          path: '/packages/pi-subagents/index.ts',
+          path: '/packages/pi-agents/index.ts',
         },
       },
       {
@@ -127,7 +127,7 @@ describe('when testing subagent child runtime', () => {
         sentUserMessages.push({ content, options });
       },
     } as unknown as ExtensionAPI;
-    registerSubagentChildRuntime(pi, {
+    registerAgentChildRuntime(pi, {
       ...(childAgent ? { childAgent } : {}),
       ...(dependencies ? { dependencies } : {}),
     });
@@ -178,7 +178,7 @@ describe('when testing subagent child runtime', () => {
         'A later workflow step is not unfinished work in this step and never by itself requires `handoff`.',
       );
       expect(prompt).toContain(
-        'Do not launch subagents while executing this declarative workflow step.',
+        'Do not launch agents while executing this declarative workflow step.',
       );
       expect(prompt).toContain(
         'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
@@ -428,7 +428,7 @@ describe('when testing subagent child runtime', () => {
           input({
             type: 'input',
             source: 'rpc',
-            text: 'Review this ordinary subagent task.',
+            text: 'Review this ordinary agent task.',
           }),
         ).toBe(undefined);
         expect(rig.activeTools).toEqual([]);
@@ -437,7 +437,7 @@ describe('when testing subagent child runtime', () => {
         const transformed = input({
           type: 'input',
           source: 'rpc',
-          text: `<file name="${join(tmpdir(), 'pi-subagent-long-task', 'task.md')}">\nTask: ${encodeChildPolicy(policy)}\n\nInspect now.\n</file>\n`,
+          text: `<file name="${join(tmpdir(), 'pi-agent-long-task', 'task.md')}">\nTask: ${encodeChildPolicy(policy)}\n\nInspect now.\n</file>\n`,
         }) as { action: string; text: string };
         expect(transformed).toEqual({
           action: 'transform',
@@ -893,7 +893,7 @@ describe('when testing subagent child runtime', () => {
     test('fails closed when the policy cwd no longer resolves to itself', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'pi-workflows-step-'));
       const policy = childPolicy(directory, { cwd: directory });
-      const dependencies: SubagentChildRuntimeDependencies = {
+      const dependencies: AgentChildRuntimeDependencies = {
         ...DEFAULT_CHILD_RUNTIME_DEPENDENCIES,
         fileSystem: {
           ...DEFAULT_CHILD_RUNTIME_DEPENDENCIES.fileSystem,
@@ -1048,7 +1048,7 @@ describe('when testing subagent child runtime', () => {
         isFile: () => true,
         isSymbolicLink: () => false,
       };
-      const dependencies: SubagentChildRuntimeDependencies = {
+      const dependencies: AgentChildRuntimeDependencies = {
         fileSystem: {
           exists: (path) => files.has(path),
           inspect: () => inspection,

@@ -126,7 +126,7 @@ const isStepExecutionAttempt = (
 ): value is StepExecutionAttempt => {
   if (
     !isRecord(value) ||
-    (value.kind !== 'main' && value.kind !== 'subagent') ||
+    (value.kind !== 'main' && value.kind !== 'agent') ||
     typeof value.requestId !== 'string' ||
     value.requestId.length === 0 ||
     value.requestId.includes('\0') ||

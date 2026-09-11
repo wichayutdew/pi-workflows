@@ -5,5 +5,5 @@ export * from './prompt/index.ts';
 export * from './step-result/index.ts';
 export * from './doctor/index.ts';
 export * from './preflight/index.ts';
-export * from './subagent/index.ts';
+export * from './agent/index.ts';
 export * from './digest.ts';

@@ -27,7 +27,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     '',
     'The parent workflow harness owns orchestration and state transitions.',
     'Perform only this delegated step. Its child-side tool policy is enforced.',
-    'Do not launch subagents while executing this declarative workflow step.',
+    'Do not launch agents while executing this declarative workflow step.',
     'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
     'Use `handoff` when actionable work remains without a user question; use `gaps` when an earlier configured step must refresh requirements.',
     'Do not open a skill unless this step YAML lists that skill.',
@@ -83,7 +83,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
           'For every other outcome, omit workspace.',
         ]
       : ['This step cannot bind a workspace; omit workspace.']),
-    'This is a non-interactive workflow child. Never call contact_supervisor, subagent_supervisor, or intercom.',
+    'This is a non-interactive workflow child. Never call contact_supervisor, agent_supervisor, or intercom.',
     'Follow the supplied step instructions when choosing one valid outcome; outcome names have no built-in domain meaning.',
   ].join('\n');
 };

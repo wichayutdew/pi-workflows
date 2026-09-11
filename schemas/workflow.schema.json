@@ -141,7 +141,7 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_@./:+-]+$"
     },
-    "subagentRuntimeName": {
+    "agentRuntimeName": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$"
     },
@@ -357,7 +357,7 @@
           "$ref": "#/$defs/prompt"
         },
         "agent": {
-          "$ref": "#/$defs/subagentRuntimeName"
+          "$ref": "#/$defs/agentRuntimeName"
         },
         "maxToolCalls": {
           "type": "integer",

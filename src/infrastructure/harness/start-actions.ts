@@ -165,7 +165,7 @@ async function startNow(
   const { context } = startContext;
   if (this.activeDelegation) {
     context.ui.notify(
-      `Cannot start a workflow while subagent "${this.activeDelegation.agent}" is still cancelling`,
+      `Cannot start a workflow while agent "${this.activeDelegation.agent}" is still cancelling`,
       'warning',
     );
     return;
@@ -276,7 +276,7 @@ async function restartNow(
   }
   if (this.activeDelegation) {
     context.ui.notify(
-      `Cannot restart while subagent "${this.activeDelegation.agent}" is still cancelling`,
+      `Cannot restart while agent "${this.activeDelegation.agent}" is still cancelling`,
       'warning',
     );
     return;

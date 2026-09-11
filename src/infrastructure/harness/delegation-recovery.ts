@@ -7,7 +7,6 @@ import { classifyRecoverySafety } from '../../function/index.ts';
  */
 export const shouldRetryMissingCompletion = (
   diagnostic: DelegationDiagnostic | undefined,
-  subagentAttemptCount: number,
+  agentAttemptCount: number,
 ): boolean =>
-  subagentAttemptCount === 1 &&
-  classifyRecoverySafety(diagnostic) === 'read-only';
+  agentAttemptCount === 1 && classifyRecoverySafety(diagnostic) === 'read-only';

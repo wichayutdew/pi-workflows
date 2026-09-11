@@ -1,17 +1,12 @@
 import type { StepPermissions, StepWorkspaceBinding } from './config.ts';
 import type { UsageTotals } from './state.ts';
 
-export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
-export const SUBAGENT_DELEGATION_REQUEST_EVENT =
-  'prompt-template:subagent:request';
-export const SUBAGENT_DELEGATION_STARTED_EVENT =
-  'prompt-template:subagent:started';
-export const SUBAGENT_DELEGATION_UPDATE_EVENT =
-  'prompt-template:subagent:update';
-export const SUBAGENT_DELEGATION_RESPONSE_EVENT =
-  'prompt-template:subagent:response';
-export const SUBAGENT_DELEGATION_CANCEL_EVENT =
-  'prompt-template:subagent:cancel';
+export const AGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
+export const AGENT_DELEGATION_REQUEST_EVENT = 'prompt-template:agent:request';
+export const AGENT_DELEGATION_STARTED_EVENT = 'prompt-template:agent:started';
+export const AGENT_DELEGATION_UPDATE_EVENT = 'prompt-template:agent:update';
+export const AGENT_DELEGATION_RESPONSE_EVENT = 'prompt-template:agent:response';
+export const AGENT_DELEGATION_CANCEL_EVENT = 'prompt-template:agent:cancel';
 
 export type ChildStepPolicy = {
   readonly version: 1;
@@ -70,7 +65,7 @@ export type DelegationDiagnostic = {
 
 export type RecoverySafety = 'read-only' | 'unsafe' | 'incomplete';
 
-export type SubagentDelegationRequest = {
+export type AgentDelegationRequest = {
   readonly version: 1;
   readonly requestId: string;
   readonly agent: string;
@@ -83,7 +78,7 @@ export type SubagentDelegationRequest = {
   readonly [key: string]: unknown;
 };
 
-export type SubagentDelegationUpdate = {
+export type AgentDelegationUpdate = {
   readonly requestId: string;
   readonly activity?: string;
   /** Operator-visible detail; never used as workflow instruction or input. */
@@ -93,25 +88,25 @@ export type SubagentDelegationUpdate = {
   readonly tokens?: number;
 };
 
-export type SubagentDelegationStatus = 'completed' | 'failed' | 'cancelled';
+export type AgentDelegationStatus = 'completed' | 'failed' | 'cancelled';
 
-export type SubagentModelUsage = {
+export type AgentModelUsage = {
   readonly provider: string;
   readonly model: string;
   readonly usage: UsageTotals;
 };
 
-export type SubagentDelegationResponse = {
+export type AgentDelegationResponse = {
   readonly version?: number;
   readonly requestId: string;
   readonly agent?: string;
-  readonly status: SubagentDelegationStatus;
+  readonly status: AgentDelegationStatus;
   readonly error?: string;
   readonly exitCode?: number;
   readonly warnings?: ReadonlyArray<string>;
   readonly diagnostic?: DelegationDiagnostic;
   /** Usage captured from terminal worker messages only. */
-  readonly usage?: ReadonlyArray<SubagentModelUsage>;
+  readonly usage?: ReadonlyArray<AgentModelUsage>;
 };
 
 export type DelegatedStepResult = {
@@ -126,5 +121,5 @@ export type DelegatedStepResult = {
 export {
   extractChildPolicy,
   encodeChildPolicy,
-} from '../function/subagent/child-policy-envelope.ts';
-export { parseDelegatedStepResult } from '../function/subagent/delegated-result.ts';
+} from '../function/agent/child-policy-envelope.ts';
+export { parseDelegatedStepResult } from '../function/agent/delegated-result.ts';

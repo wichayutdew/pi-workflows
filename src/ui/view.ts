@@ -401,7 +401,7 @@ export class WorkflowStatusView implements Component {
     const snapshot = this.getSnapshot();
     if (!snapshot) return;
     const entry = buildPathEntries(snapshot)[this.state.selectedIndex];
-    if (!entry?.isCurrent || snapshot.execution?.kind !== 'subagent') return;
+    if (!entry?.isCurrent || snapshot.execution?.kind !== 'agent') return;
     this.pendingDetailTopKey = false;
     this.state = { ...this.state, mode: 'live', scrollOffset: 0 };
     this.tui.requestRender(true);
@@ -413,7 +413,7 @@ export class WorkflowStatusView implements Component {
     const detail = selectedStepDetail(snapshot, this.state.selectedIndex);
     if (!detail) return;
     for (const attempt of detail.attempts) {
-      if (attempt.kind !== 'subagent' || !attempt.transcript) continue;
+      if (attempt.kind !== 'agent' || !attempt.transcript) continue;
       const key = stepTranscriptCacheKey(snapshot.run.runId, attempt);
       if (this.transcriptCache.has(key)) continue;
       this.transcriptCache.set(key, { status: 'loading' });

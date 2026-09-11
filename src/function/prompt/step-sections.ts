@@ -79,7 +79,7 @@ export function buildRestartWorkspaceSection(
  */
 export function buildDelegatedCompletionInstructions(): ReadonlyArray<string> {
   return [
-    'This child is non-interactive. Never call `contact_supervisor`, `subagent_supervisor`, or `intercom`.',
+    'This child is non-interactive. Never call `contact_supervisor`, `agent_supervisor`, or `intercom`.',
     'Follow the step instructions when choosing one valid outcome; outcome names have no built-in domain meaning.',
     'Stay within the configured permissions and do not broaden mutation targets or external side effects.',
   ];

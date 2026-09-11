@@ -11,9 +11,9 @@ import {
   requestPlannotatorReviewStatus,
 } from '../integrations/plannotator.ts';
 import {
-  createSubagentDelegationClient,
-  type SubagentDelegationClientController,
-} from '../process/subagent-client.ts';
+  createAgentDelegationClient,
+  type AgentDelegationClientController,
+} from '../process/agent-client.ts';
 import {
   createMainStepRuntime,
   type MainStepRuntimeController,
@@ -57,9 +57,9 @@ export type WorkflowHarnessDependencies = {
   readonly requestPlannotatorReview: typeof requestPlannotatorReview;
   readonly requestPlannotatorReviewStatus: typeof requestPlannotatorReviewStatus;
   readonly showWorkflowStatus: typeof showWorkflowStatus;
-  readonly createSubagentClient: (
+  readonly createAgentClient: (
     pi: ExtensionAPI,
-  ) => SubagentDelegationClientController;
+  ) => AgentDelegationClientController;
   readonly createMainStepRuntime: (
     pi: ExtensionAPI,
   ) => MainStepRuntimeController;
@@ -151,7 +151,7 @@ const DEFAULT_DEPENDENCIES: WorkflowHarnessDependencies = {
   requestPlannotatorReview,
   requestPlannotatorReviewStatus,
   showWorkflowStatus,
-  createSubagentClient: () => createSubagentDelegationClient(),
+  createAgentClient: () => createAgentDelegationClient(),
   createMainStepRuntime: (pi) => createMainStepRuntime({ pi }),
   createMutationQueue: createSerialTaskQueue,
   flushUnwrittenSession,

@@ -275,7 +275,7 @@ An agent profile may begin with YAML frontmatter containing `model` and
 `thinking`. Those values apply to Pi workers launched for that profile. Without
 frontmatter, the profile is plain Markdown role guidance.
 
-Delegation requires pi-subagents 0.36.0 or newer. The upstream
+Delegation requires pi-agents 0.36.0 or newer. The upstream
 `structured_output` tool completes delegated steps; `workflow_complete_step`
 remains the main-agent completion tool. After capability verification, workflow
 permissions replace the active-tool list resolved in the child. Unavailable

@@ -62,7 +62,7 @@ describe('when testing extension', () => {
         expect(events.has('before_agent_start')).toBe(true);
         expect(events.has('session_start')).toBe(true);
         expect(channels.has('plannotator:review-result')).toBe(true);
-        expect(channels.has('prompt-template:subagent:response')).toBe(false);
+        expect(channels.has('prompt-template:agent:response')).toBe(false);
       } finally {
         if (previousDirectory === undefined)
           delete process.env.PI_WORKFLOWS_DIR;

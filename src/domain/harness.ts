@@ -2,7 +2,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { KeyId } from '@earendil-works/pi-tui';
 import type { WorkflowCatalog } from './config.ts';
 import type { WorkflowRun } from './state.ts';
-import type { ChildStepPolicy } from './subagent.ts';
+import type { ChildStepPolicy } from './agent.ts';
 
 /**
  * Slash commands owned by the workflow harness.

@@ -15,10 +15,10 @@ import {
   type WorkflowStep,
 } from '../../domain/index.ts';
 import type { WorkflowRun } from '../../domain/index.ts';
-import type { SubagentDelegationClientController } from '../process/subagent-client.ts';
+import type { AgentDelegationClientController } from '../process/agent-client.ts';
 import type {
-  SubagentDelegationResponse,
-  SubagentDelegationUpdate,
+  AgentDelegationResponse,
+  AgentDelegationUpdate,
   WorkflowStepResult,
 } from '../../domain/index.ts';
 import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts';
@@ -69,7 +69,7 @@ const CORE_ACTIONS = createCoreActions();
 export class WorkflowHarness implements WorkflowCommandController {
   private readonly pi: ExtensionAPI;
   private readonly dependencies: WorkflowHarnessDependencies;
-  private readonly subagents: SubagentDelegationClientController;
+  private readonly agents: AgentDelegationClientController;
   private readonly mainSteps: MainStepRuntimeController;
   private catalog: WorkflowCatalog = createEmptyCatalog();
   private run: WorkflowRun | undefined;
@@ -166,11 +166,11 @@ export class WorkflowHarness implements WorkflowCommandController {
   ) => Promise<void> = STEP_EXECUTION_ACTIONS.finishMainStep;
   private readonly handleDelegationUpdate: (
     active: ActiveDelegation,
-    update: SubagentDelegationUpdate,
+    update: AgentDelegationUpdate,
   ) => void = DELEGATION_RESPONSE_ACTIONS.handleDelegationUpdate;
   private readonly queueDelegationResponse: (
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => void = DELEGATION_RESPONSE_ACTIONS.queueDelegationResponse;
   private readonly queueDelegationFailure: (
     active: ActiveDelegation,
@@ -178,7 +178,7 @@ export class WorkflowHarness implements WorkflowCommandController {
   ) => void = DELEGATION_RESPONSE_ACTIONS.queueDelegationFailure;
   private readonly finishDelegation: (
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => Promise<void> = DELEGATION_RESPONSE_ACTIONS.finishDelegation;
   private readonly cancelActiveDelegation: (
     reason: string,
@@ -257,7 +257,7 @@ export class WorkflowHarness implements WorkflowCommandController {
     this.dependencies = createWorkflowHarnessDependencies(dependencyOverrides);
     this.statusShortcut = statusShortcut;
     this.statusShortcutLabel = formatShortcutLabel(statusShortcut);
-    this.subagents = this.dependencies.createSubagentClient(pi);
+    this.agents = this.dependencies.createAgentClient(pi);
     this.mainSteps = this.dependencies.createMainStepRuntime(pi);
     this.mutationQueue = this.dependencies.createMutationQueue();
     registerHarnessCommands(pi, this);

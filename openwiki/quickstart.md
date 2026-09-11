@@ -14,7 +14,7 @@ flowchart TD
   Q --> W[authoring/workflow-files.md]
   Q --> S[authoring/settings-and-project-workflows.md]
   Q --> P[security/policy-model.md]
-  Q --> G[integrations/subagents.md]
+  Q --> G[integrations/agents.md]
   Q --> R[integrations/plannotator.md]
   Q --> D[development/testing.md]
 
@@ -34,7 +34,7 @@ flowchart LR
   Harness[WorkflowHarness parent]
   State[Persisted WorkflowRun checkpoint]
   Main[Main Pi agent]
-  Child[pi-subagents child]
+  Child[pi-agents child]
   Policy[Step policy]
   MainComplete[workflow_complete_step]
   ChildComplete[structured_output]

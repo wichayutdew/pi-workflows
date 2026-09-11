@@ -65,7 +65,7 @@ export type StepGateDecision = {
   readonly reviewId?: string | undefined;
 };
 
-export type SubagentTranscriptReference = {
+export type AgentTranscriptReference = {
   /** Trusted parent-derived directory containing this child run. */
   readonly trustedRoot: string;
   /** Exact child session returned by the delegation protocol. */
@@ -97,7 +97,7 @@ export type StepExecutionAttempt =
       readonly gateDecision?: StepGateDecision | undefined;
     }
   | {
-      readonly kind: 'subagent';
+      readonly kind: 'agent';
       readonly requestId: string;
       /** One-based attempt position within this step visit. */
       readonly ordinal?: number | undefined;
@@ -109,7 +109,7 @@ export type StepExecutionAttempt =
       readonly startedAt: number;
       /** Finalized Pi usage for this exact attempt, if available. */
       readonly usage?: UsageAggregate | undefined;
-      readonly transcript?: SubagentTranscriptReference | undefined;
+      readonly transcript?: AgentTranscriptReference | undefined;
       readonly result?: StepAttemptResult | undefined;
       readonly gateDecision?: StepGateDecision | undefined;
     };

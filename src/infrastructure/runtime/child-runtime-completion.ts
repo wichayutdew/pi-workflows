@@ -7,7 +7,7 @@ import { parseDelegatedStepResult } from '../../function/index.ts';
 export const CHILD_COMPLETION_TOOL = 'structured_output';
 export const CHILD_COORDINATION_TOOLS: ReadonlySet<string> = new Set([
   'contact_supervisor',
-  'subagent_supervisor',
+  'agent_supervisor',
   'intercom',
 ]);
 

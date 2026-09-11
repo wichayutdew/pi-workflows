@@ -9,7 +9,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { WorkflowHarness } from '../../src/harness.ts';
 import type { WorkflowHarnessDependencies } from '../../src/infrastructure/harness/dependencies.ts';
-import type { SubagentDelegationClientController } from '../../src/infrastructure/process/subagent-client.ts';
+import type { AgentDelegationClientController } from '../../src/infrastructure/process/agent-client.ts';
 import { extractChildPolicy } from '../../src/domain/index.ts';
 
 type LifecycleHandler = (
@@ -50,7 +50,7 @@ describe('when running a workflow through a direct Pi worker', () => {
           status: 'cancelled';
         }) => void)
       | undefined;
-    const subagents: SubagentDelegationClientController = {
+    const agents: AgentDelegationClientController = {
       get activeRequestId() {
         return activeRequestId;
       },
@@ -141,7 +141,7 @@ describe('when running a workflow through a direct Pi worker', () => {
       events: { on: () => () => undefined, emit: () => undefined },
     } as unknown as ExtensionAPI;
     const dependencies: Partial<WorkflowHarnessDependencies> = {
-      createSubagentClient: () => subagents,
+      createAgentClient: () => agents,
       readDelegatedResult: async () => result,
       removeDelegationWorkspace: async () => {
         removed = true;

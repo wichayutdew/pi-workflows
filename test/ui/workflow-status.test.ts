@@ -86,7 +86,7 @@ describe('when testing workflow status', () => {
             run,
             workflow,
             execution: {
-              kind: 'subagent',
+              kind: 'agent',
               agent: 'worker',
               requestId: 'request',
               progress: 'tool bash, 1 calls',
@@ -105,7 +105,7 @@ describe('when testing workflow status', () => {
             run,
             workflow,
             execution: {
-              kind: 'subagent',
+              kind: 'agent',
               agent: 'worker',
               requestId: 'request',
               progress: 'tool bash, 1 calls',
@@ -164,7 +164,7 @@ describe('when testing workflow status', () => {
         run,
         workflow,
         execution: {
-          kind: 'subagent',
+          kind: 'agent',
           agent: 'pi-workflows.step',
           requestId: 'request-status-1',
           progress: 'checking implementation details',
@@ -265,7 +265,7 @@ describe('when testing workflow status', () => {
       // given
       const workflow = loadedWorkflow();
       const running = createRun(workflow, '', [], 'run-long-failure', 1_000);
-      const reason = `Subagent gaps: ${'very long diagnostic context '.repeat(200)}TAIL`;
+      const reason = `Agent gaps: ${'very long diagnostic context '.repeat(200)}TAIL`;
       const run = pauseRun(running, reason, 4_000);
 
       // when
@@ -289,7 +289,7 @@ describe('when testing workflow status', () => {
       // given
       const workflow = loadedWorkflow();
       const running = createRun(workflow, '', [], 'run-failed-status', 1_000);
-      const run = failRun(running, 'Subagent failed', 4_000);
+      const run = failRun(running, 'Agent failed', 4_000);
 
       // when
       const output = renderSnapshot({ run, workflow, now: 90_000 }).join('\n');
@@ -353,7 +353,7 @@ describe('when testing workflow status', () => {
         run,
         workflow,
         execution: {
-          kind: 'subagent',
+          kind: 'agent',
           agent: 'pi-workflows.step',
           requestId: 'request-text-status',
           progress: 'starting',
@@ -368,7 +368,7 @@ describe('when testing workflow status', () => {
       expect(output).toMatch(/Run: run-text-status/);
       expect(output).toMatch(/Status: running/);
       expect(output).toMatch(
-        /Subagent: pi-workflows\.step \(request-text-status\)/,
+        /Agent: pi-workflows\.step \(request-text-status\)/,
       );
       expect(output).toMatch(/Progress: starting/);
     });

@@ -6,14 +6,14 @@ import type {
 import type { KeyId } from '@earendil-works/pi-tui';
 import type {
   LoadedWorkflow,
-  SubagentDelegationResponse,
-  SubagentDelegationUpdate,
+  AgentDelegationResponse,
+  AgentDelegationUpdate,
   WorkflowCatalog,
   WorkflowRun,
   WorkflowStep,
   WorkflowStepResult,
 } from '../../domain/index.ts';
-import type { SubagentDelegationClientController } from '../process/subagent-client.ts';
+import type { AgentDelegationClientController } from '../process/agent-client.ts';
 import type { MainStepRuntimeController } from '../runtime/main-step-runtime.ts';
 import type { SerialTaskQueueController } from '../runtime/task-queue.ts';
 import type { ModelUsage } from '../../function/index.ts';
@@ -35,7 +35,7 @@ import type {
 export type HarnessActionContext = {
   pi: ExtensionAPI;
   dependencies: WorkflowHarnessDependencies;
-  subagents: SubagentDelegationClientController;
+  agents: AgentDelegationClientController;
   mainSteps: MainStepRuntimeController;
   catalog: WorkflowCatalog;
   run: WorkflowRun | undefined;
@@ -120,16 +120,16 @@ export type HarnessActionContext = {
   ) => Promise<void>;
   handleDelegationUpdate: (
     active: ActiveDelegation,
-    update: SubagentDelegationUpdate,
+    update: AgentDelegationUpdate,
   ) => void;
   queueDelegationResponse: (
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => void;
   queueDelegationFailure: (active: ActiveDelegation, reason: string) => void;
   finishDelegation: (
     active: ActiveDelegation,
-    response: SubagentDelegationResponse,
+    response: AgentDelegationResponse,
   ) => Promise<void>;
   cancelActiveDelegation: (reason: string) => Promise<boolean>;
   cleanupDelegation: (active: ActiveDelegation) => Promise<void>;

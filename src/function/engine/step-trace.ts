@@ -3,7 +3,7 @@ import type {
   StepAttemptResult,
   StepExecutionAttempt,
   StepGateDecision,
-  SubagentTranscriptReference,
+  AgentTranscriptReference,
   UsageAggregate,
   WorkflowRun,
   WorkflowStepResult,
@@ -43,13 +43,13 @@ function attemptSize(attempt: StepExecutionAttempt): number {
   return (
     attempt.requestId.length +
     attempt.task.length +
-    (attempt.kind === 'subagent' ? attempt.agent.length : 0) +
+    (attempt.kind === 'agent' ? attempt.agent.length : 0) +
     (attempt.kind === 'main' ? logChars(attempt.log) : 0) +
     (attempt.result?.outcome.length ?? 0) +
     (attempt.result?.summary.length ?? 0) +
     (attempt.result?.artifact?.length ?? 0) +
     (attempt.result?.workspaceCwd?.length ?? 0) +
-    (attempt.kind === 'subagent'
+    (attempt.kind === 'agent'
       ? (attempt.transcript?.trustedRoot.length ?? 0) +
         (attempt.transcript?.sessionFile.length ?? 0) +
         (attempt.transcript?.runId.length ?? 0)
@@ -291,7 +291,7 @@ export function beginMainStepAttempt(
 }
 
 /** Records the exact task body supplied for one child attempt. */
-export function beginSubagentStepAttempt(
+export function beginAgentStepAttempt(
   run: WorkflowRun,
   requestId: string,
   agent: string,
@@ -305,7 +305,7 @@ export function beginSubagentStepAttempt(
   return appendAttempt(
     run,
     {
-      kind: 'subagent',
+      kind: 'agent',
       requestId,
       ordinal: nextAttemptOrdinal(run),
       agent,
@@ -371,7 +371,7 @@ export function appendMainStepLog(
 }
 
 function isSafeTranscriptReference(
-  reference: SubagentTranscriptReference,
+  reference: AgentTranscriptReference,
 ): boolean {
   if (
     !isAbsolute(reference.trustedRoot) ||
@@ -413,21 +413,21 @@ function isSafeTranscriptReference(
  * The status reader repeats this check and then verifies real paths, file type,
  * no-follow opening, and a stable bounded read before displaying anything.
  */
-export function attachSubagentTranscript(
+export function attachAgentTranscript(
   run: WorkflowRun,
   requestId: string,
-  reference: SubagentTranscriptReference,
+  reference: AgentTranscriptReference,
   now: number,
 ): WorkflowRun {
   if (!isSafeTranscriptReference(reference)) return run;
   const attempts = run.currentStepAttempts;
   const index = attempts?.findIndex(
-    (attempt) => attempt.requestId === requestId && attempt.kind === 'subagent',
+    (attempt) => attempt.requestId === requestId && attempt.kind === 'agent',
   );
   if (index === undefined || index < 0 || !attempts) return run;
   const currentStepAttempts = [...attempts];
   const attempt = currentStepAttempts[index];
-  if (!attempt || attempt.kind !== 'subagent') return run;
+  if (!attempt || attempt.kind !== 'agent') return run;
   currentStepAttempts[index] = { ...attempt, transcript: reference };
   return compactRunTraceBudget({ ...run, currentStepAttempts, updatedAt: now });
 }

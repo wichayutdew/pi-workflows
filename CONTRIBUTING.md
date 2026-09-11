@@ -27,7 +27,7 @@ Pi Workflows follows a strict **purely functional architecture** partitioned int
 
 ### 1. `src/domain/` (Domain Models & Schemas)
 - Contains canonical data structures, schemas, entities, state invariants, and contracts.
-- Includes `config.ts`, `state.ts`, `step-result.ts`, `policy.ts`, `subagent.ts`, `plannotator.ts`, `status.ts`, `harness.ts`, and `profile.ts`.
+- Includes `config.ts`, `state.ts`, `step-result.ts`, `policy.ts`, `agent.ts`, `plannotator.ts`, `status.ts`, `harness.ts`, and `profile.ts`.
 - Pure types and domain invariants only. No I/O, no process execution, no side-effects.
 
 ### 2. `src/function/` (Pure Functions)
@@ -40,7 +40,7 @@ Pi Workflows follows a strict **purely functional architecture** partitioned int
   - `step-result/`: Output parsing and artifact contract verification.
   - `doctor/`: Graph analysis and cycle/liveness diagnostics.
   - `preflight/`: Prerequisite requirement validation.
-  - `subagent/`: Protocol envelope encoding/decoding and safety diagnostics.
+  - `agent/`: Protocol envelope encoding/decoding and safety diagnostics.
 - Functions must be pure, synchronous where possible, and referentially transparent.
 
 ### 3. `src/infrastructure/` (Adapters & Orchestration)
@@ -78,7 +78,7 @@ prompts, main and child runtimes, persistence, and schemas:
 
 When changing this contract, keep these surfaces synchronized:
 
-- Domain types: `src/domain/config.ts`, `src/domain/step-result.ts`, and `src/domain/subagent.ts`.
+- Domain types: `src/domain/config.ts`, `src/domain/step-result.ts`, and `src/domain/agent.ts`.
 - Validation and schema: `src/function/config/validation/`, `src/function/step-result/`, and `schemas/workflow.schema.json`.
 - Routing: `src/function/engine/` and `src/infrastructure/harness/`.
 - Model interfaces: `src/function/prompt/` and `src/infrastructure/runtime/`.

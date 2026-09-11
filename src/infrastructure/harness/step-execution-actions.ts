@@ -1,7 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type {
   LoadedWorkflow,
-  SubagentDelegationResponse,
+  AgentDelegationResponse,
   WorkflowRun,
   WorkflowStep,
   WorkflowStepResult,
@@ -11,7 +11,7 @@ import {
   allowedOutcomes,
   appendMainStepLog,
   beginMainStepAttempt,
-  beginSubagentStepAttempt,
+  beginAgentStepAttempt,
   buildMainStepTask,
   digest,
   recordCurrentStepResult,
@@ -48,7 +48,7 @@ type HarnessActionContext = Pick<
   | 'run'
   | 'sessionEpoch'
   | 'settleAfterTransition'
-  | 'subagents'
+  | 'agents'
   | 'submitGate'
   | 'updateStatus'
 >;
@@ -124,13 +124,13 @@ function launchCurrentStep(
     this.dependencies,
   );
   if (plan.kind === 'invalid') {
-    this.pauseForExecutionFailure('Subagent step', plan.reason);
+    this.pauseForExecutionFailure('Agent step', plan.reason);
     return;
   }
   const { active, request } = plan;
 
   try {
-    this.run = beginSubagentStepAttempt(
+    this.run = beginAgentStepAttempt(
       run,
       active.requestId,
       active.agent,
@@ -144,12 +144,12 @@ function launchCurrentStep(
   this.activeDelegation = active;
   this.updateStatus();
   this.latestContext?.ui.notify(
-    `Delegated "${run.currentStepId}" to subagent "${active.agent}"`,
+    `Delegated "${run.currentStepId}" to agent "${active.agent}"`,
     'info',
   );
-  let delegation: Promise<SubagentDelegationResponse>;
+  let delegation: Promise<AgentDelegationResponse>;
   try {
-    delegation = this.subagents.delegate(request, {
+    delegation = this.agents.delegate(request, {
       onUpdate: (update) => {
         this.handleDelegationUpdate(active, update);
       },

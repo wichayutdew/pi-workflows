@@ -1,5 +1,5 @@
 import type { ChildStepPolicy } from '../../domain/index.ts';
-import type { SubagentChildRuntimeDependencies } from './child-runtime-types.ts';
+import type { AgentChildRuntimeDependencies } from './child-runtime-types.ts';
 
 export const COMPLETION_REPAIR_PROMPT = [
   'The delegated step settled without its required correlated result.',
@@ -40,7 +40,7 @@ export const needsCompletionRepair = ({
   dependencies,
 }: {
   readonly policy: ChildStepPolicy;
-  readonly dependencies: SubagentChildRuntimeDependencies;
+  readonly dependencies: AgentChildRuntimeDependencies;
 }): boolean => {
   try {
     return !dependencies.fileSystem.exists(policy.resultPath);

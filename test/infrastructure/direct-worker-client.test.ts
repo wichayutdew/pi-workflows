@@ -6,10 +6,10 @@ import {
   type UsageTotals,
 } from '../../src/function/engine/usage.ts';
 import {
-  createSubagentDelegationClient,
+  createAgentDelegationClient,
   workerUsageFromJsonLine,
   type DirectWorkerSpawn,
-} from '../../src/infrastructure/process/subagent-client.ts';
+} from '../../src/infrastructure/process/agent-client.ts';
 
 type FakeWorker = EventEmitter & {
   readonly stdout: EventEmitter;
@@ -44,7 +44,7 @@ describe('when running a direct workflow worker', () => {
       return child as unknown as ChildProcess;
     }) as DirectWorkerSpawn;
     const updates: Array<Record<string, unknown>> = [];
-    const client = createSubagentDelegationClient(spawnWorker);
+    const client = createAgentDelegationClient(spawnWorker);
 
     const pending = client.delegate(request, {
       onUpdate: (update) => updates.push(update),
@@ -232,7 +232,7 @@ describe('when running a direct workflow worker', () => {
       killed += 1;
       return true;
     };
-    const client = createSubagentDelegationClient(
+    const client = createAgentDelegationClient(
       (() => child as unknown as ChildProcess) as DirectWorkerSpawn,
     );
     const pending = client.delegate(request);
@@ -243,7 +243,7 @@ describe('when running a direct workflow worker', () => {
     await expect(cancellation).resolves.toBe(true);
     expect(killed).toBe(1);
 
-    const failedClient = createSubagentDelegationClient((() => {
+    const failedClient = createAgentDelegationClient((() => {
       const failed = worker();
       queueMicrotask(() => failed.emit('error', new Error('missing pi')));
       return failed as unknown as ChildProcess;

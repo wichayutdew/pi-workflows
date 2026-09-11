@@ -42,7 +42,7 @@ sequenceDiagram
   participant Engine as createRun
   participant Pi as Pi tools/status
   participant Main as MainStepRuntime
-  participant Sub as pi-subagents
+  participant Sub as pi-agents
 
   User->>Harness: /workflow-start id input
   Harness->>Pi: abort active main turn if needed
@@ -63,7 +63,7 @@ the catalog, checks the requested step, captures baseline tools, creates the
 run, persists the checkpoint, and launches either a main step or a delegated
 step. `dependencies.ts` is the injected boundary for Pi APIs, time, IDs,
 configuration loading, temporary delegation workspaces, status display,
-Plannotator, prompt gates, subagents, and the main-step runtime.
+Plannotator review events, agents, and the main-step runtime.
 
 ## Main-Agent Step Sequence
 
@@ -99,7 +99,7 @@ older `MainStepRuntime` class for compatibility. Policy decisions come from
 sequenceDiagram
   participant Harness
   participant Tmp as temp result dir
-  participant Sub as pi-subagents
+  participant Sub as pi-agents
   participant Child as child runtime
   participant Engine
 
@@ -117,7 +117,7 @@ sequenceDiagram
 ```
 
 The workflow `agent` value selects the workflow-owned role profile and is passed
-as the Pi Subagents profile name for delegated execution. The profile is loaded
+as the Pi Agents profile name for delegated execution. The profile is loaded
 from `~/.agents/agents` with a bundled starter-kit fallback, and optional
 frontmatter supplies model/thinking overrides. The request carries the rendered
 role and step task, encoded policy envelope, cwd, request id, and a default
@@ -131,8 +131,8 @@ Delegation planning lives in
 `src/infrastructure/harness/delegation-plan.ts`; response handling and recovery
 decisions live in `delegation-response-actions.ts`,
 `delegation-control-actions.ts`, and `delegation-recovery.ts`, then launch
-through `step-execution-actions.ts`. The parent-side subagent client surface is
-`src/infrastructure/process/subagent-client.ts`, which contains the correlated
+through `step-execution-actions.ts`. The parent-side agent client surface is
+`src/infrastructure/process/agent-client.ts`, which contains the correlated
 request, event handling, cancellation, late terminal handling, and timeout work.
 
 The child side is registered by
@@ -158,7 +158,7 @@ states that no delegated-step completion can be verified, includes available
 active-step context, the previous checkpoint, diagnostic state, and repository
 state, and does not mark new work as confirmed complete. Without that
 transition, `delegation-recovery.ts` permits one fresh child retry only for the
-first subagent attempt and only when diagnostics prove the attempt was settled,
+first agent attempt and only when diagnostics prove the attempt was settled,
 untruncated, and used completed read-only calls: `read`, `ls`, `rg`, or
 `structured_output`. Missing diagnostics, truncated evidence, failed/started
 calls, Bash, edit/write, MCP, or any other tool class pause the workflow.
@@ -222,11 +222,11 @@ renderers instead of formatting the overlay inline.
 flowchart TD
   Pause["/workflow-pause"] --> Active{active execution?}
   Active -- main --> Stop[deactivate and abort turn]
-  Active -- prompt gate --> Dismiss[dismiss review panel]
+  Active -- Plannotator gate --> CancelReview[cancel review tracking]
   Active -- child --> Cancel[emit cancellation]
   Active -- none --> Checkpoint[write paused checkpoint]
   Stop --> Restore[restore baseline tools]
-  Dismiss --> Restore
+  CancelReview --> Restore
   Cancel --> Confirmed{terminal response received?}
   Confirmed -- yes --> Restore[restore baseline tools]
   Confirmed -- no --> Isolate[keep main tools isolated]

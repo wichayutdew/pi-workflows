@@ -2,7 +2,7 @@ export * from './config.ts';
 export * from './state.ts';
 export * from './step-result.ts';
 export * from './policy.ts';
-export * from './subagent.ts';
+export * from './agent.ts';
 export * from './plannotator.ts';
 export * from './status.ts';
 export * from './harness.ts';

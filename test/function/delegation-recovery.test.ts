@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyRecoverySafety } from '../../src/function/subagent/diagnostics.ts';
+import { classifyRecoverySafety } from '../../src/function/agent/diagnostics.ts';
 import { shouldRetryMissingCompletion } from '../../src/infrastructure/harness/delegation-recovery.ts';
 
 describe('when classifying missing delegated completions', () => {
