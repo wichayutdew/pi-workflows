@@ -3,6 +3,7 @@ import {
   buildDelegatedStepTask,
   buildMainStepTask,
   buildMainWorkflowNotice,
+  buildResourceSection,
   reinforcementRetryTask,
   renderTemplate,
 } from '../../src/function/prompt/index.ts';
@@ -11,6 +12,21 @@ import { baseWorkflow, loadedWorkflow } from '../helpers.ts';
 
 describe('when testing prompt', () => {
   describe('should satisfy its behavioral contract', () => {
+    test('allows project-local skills while limiting global skills', () => {
+      const step = loadedWorkflow().definition.steps.inspect!;
+      const resourceSection = buildResourceSection({
+        execution: 'delegated',
+        step,
+      }).join('\n');
+
+      expect(resourceSection).toContain(
+        'Project-local skills are always allowed. The listed skills restrict only global skills from ~/.agents/skills/ and ~/.pi/agent/skills/.',
+      );
+      expect(resourceSection).not.toContain(
+        'Use only the listed skills for this step.',
+      );
+    });
+
     test('retains both ends of a long actionable retry diagnostic', () => {
       const prompt = reinforcementRetryTask(
         `Command: denied-command\n${'x'.repeat(10_000)}\nTerminal error: exact policy denial`,

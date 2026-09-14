@@ -160,6 +160,12 @@ describe('when testing agent child runtime', () => {
         handoffOutcome: 'handoff',
       });
       const prompt = childSystemPrompt(extracted.policy);
+      expect(prompt).toContain(
+        'Project-local skills are always allowed. The step YAML skills list restricts only global skills from ~/.agents/skills/ and ~/.pi/agent/skills/.',
+      );
+      expect(prompt).not.toContain(
+        'Do not open a skill unless this step YAML lists that skill.',
+      );
       expect(prompt).toContain('Productive tool-call budget: 10 calls.');
       expect(prompt).toContain('Handoff reserve: 2 calls.');
       expect(prompt).toContain(

@@ -35,7 +35,7 @@ export function buildResourceSection({
         : '(none)'
     }`,
     '',
-    `Use only the listed skills for this step. Tool calls are enforced ${isDelegated ? 'inside this child process' : 'by the workflow harness'}.`,
+    `Project-local skills are always allowed. The listed skills restrict only global skills from ~/.agents/skills/ and ~/.pi/agent/skills/. Tool calls are enforced ${isDelegated ? 'inside this child process' : 'by the workflow harness'}.`,
     '',
   ];
 }
