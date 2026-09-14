@@ -30,7 +30,7 @@ export const childSystemPrompt = (policy: ChildStepPolicy): string => {
     'Do not launch agents while executing this declarative workflow step.',
     'Use `blocked` only when progress requires user-provided information, a decision, authority, credentials, or approval.',
     'Use `handoff` when actionable work remains without a user question; use `gaps` when an earlier configured step must refresh requirements.',
-    'Do not open a skill unless this step YAML lists that skill.',
+    'Project-local skills are always allowed. The step YAML skills list restricts only global skills from ~/.agents/skills/ and ~/.pi/agent/skills/.',
     'When finished, call `structured_output` exactly once and as the only tool call in that message.',
     'Pass the workflow result as its `value`: outcome, completed, remaining, plus artifact or workspace only when required below.',
     `Valid outcomes: ${policy.outcomes.join(', ')}`,
