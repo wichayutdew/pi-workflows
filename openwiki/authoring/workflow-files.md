@@ -187,7 +187,10 @@ remaining item. `blocked` includes a user question ending in `?` in `remaining`.
 `handoff` has non-question actionable remaining work and must self-loop. `gaps`
 has non-question actionable requirements and targets an earlier step. Delegated
 steps choose an outcome only from the active step's instructions: later workflow
-steps do not count as unfinished work.
+steps do not count as unfinished work. If the formatted summary exceeds
+`summaryMaxChars` and the active step allows `handoff`, the runtime converts the
+result into a concise same-step handoff asking the agent to regenerate under the
+limit; without a configured `handoff` outcome, the oversized summary is rejected.
 
 ## Prompt File Safety
 
@@ -245,6 +248,13 @@ configured transition target through `{{gate.artifact}}`. Their format and
 downstream meaning belong to the workflow prompt. Outcome domain meaning is
 also prompt-owned, but the accepted outcome names are closed to `ready`,
 `blocked`, `handoff`, and `gaps`.
+
+An optional gate `artifactContract` can bound the submitted artifact and require
+specific Markdown headings before review. Missing required headings and
+artifact-contract length failures are treated as recoverable gate feedback: the
+failed draft becomes `{{gate.artifact}}`, `{{gate.feedback}}` tells the same
+step to regenerate the complete artifact more concisely under the configured
+limit, and no Plannotator review is requested for that invalid draft.
 
 ## Compact Bash Rules
 
