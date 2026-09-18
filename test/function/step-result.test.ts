@@ -27,6 +27,35 @@ describe('when testing step result', () => {
     });
   });
 
+  test('hands off when the generated summary exceeds the configured limit', () => {
+    const summaryMaxChars = 100;
+    expect(
+      parseWorkflowStepResult(
+        result({
+          completed: [`Completed ${'a'.repeat(100)} at \`src/example.ts\`.`],
+        }),
+        { ...policy, summaryMaxChars },
+      ),
+    ).toEqual({
+      version: 1,
+      policyDigest: 'policy-1',
+      outcome: 'handoff',
+      summary:
+        'Handoff: summary exceeds 100 chars. Regenerate this step more concisely under that limit.',
+    });
+  });
+
+  test('rejects an oversized summary when handoff is unavailable', () => {
+    expect(() =>
+      parseWorkflowStepResult(
+        result({
+          completed: [`Completed ${'a'.repeat(100)} at \`src/example.ts\`.`],
+        }),
+        { ...policy, outcomes: ['ready'], summaryMaxChars: 100 },
+      ),
+    ).toThrow('workflow step summary exceeds 100 characters');
+  });
+
   test('rejects legacy model-authored handoff fields', () => {
     for (const key of [
       'summary',

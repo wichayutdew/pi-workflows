@@ -2,6 +2,7 @@ import type { LoadedWorkflow } from '../../domain/index.ts';
 import type { WorkflowRun } from '../../domain/index.ts';
 import { validateArtifactContract } from '../../function/index.ts';
 import {
+  advanceRun,
   attachGateReviewId,
   beginGate,
   failGate,
@@ -19,8 +20,8 @@ type HarnessActionContext = Pick<
   | 'pi'
   | 'restoreBaselineTools'
   | 'run'
-  | 'settleAfterTransition'
   | 'sessionEpoch'
+  | 'settleAfterTransition'
   | 'updateStatus'
 >;
 
@@ -34,6 +35,18 @@ export type GateSubmissionAction = {
     artifact: string,
   ) => Promise<void>;
 };
+
+function recoverableArtifactContractFeedback(
+  contractError: string,
+): string | undefined {
+  if (
+    !contractError.startsWith('gate artifact is missing required heading:') &&
+    !contractError.startsWith('gate artifact exceeds ')
+  ) {
+    return undefined;
+  }
+  return `${contractError}; regenerate the complete artifact more concisely under the configured limit`;
+}
 
 function isCurrentGateRequest(
   run: WorkflowRun | undefined,
@@ -68,7 +81,42 @@ async function submitGate(
     artifact,
     step.gate.artifactContract,
   );
-  if (contractError) throw new Error(contractError);
+  if (contractError) {
+    const feedback = recoverableArtifactContractFeedback(contractError);
+    if (!feedback) throw new Error(contractError);
+    const now = this.dependencies.now();
+    const failedGate = failGate(
+      beginGate(
+        workflow,
+        originalRun,
+        outcome,
+        artifact,
+        requestId,
+        now,
+        summary,
+      ),
+      feedback,
+      now,
+    );
+    this.run = advanceRun(
+      workflow,
+      failedGate,
+      step.gate.rejectedOutcome,
+      feedback,
+      now,
+      {},
+      { sameStepHumanGateRevision: true },
+    );
+    this.persist();
+    this.restoreBaselineTools();
+    this.updateStatus();
+    this.settleAfterTransition(workflow, {
+      stepId: originalRun.currentStepId,
+      outcome: step.gate.rejectedOutcome,
+      summary: feedback,
+    });
+    return;
+  }
 
   this.run = beginGate(
     workflow,
