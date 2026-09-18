@@ -114,7 +114,11 @@ flowchart TD
   Artifact -- no --> Reject
   Artifact -- yes --> Summary[format compact summary]
   Gate -- no --> Summary
-  Summary --> Mode{execution mode}
+  Summary --> Bounds{summary within limit?}
+  Bounds -- no, handoff allowed --> AutoHandoff[return concise handoff retry]
+  Bounds -- no, no handoff --> Reject
+  Bounds -- yes --> Mode{execution mode}
+  AutoHandoff --> Mode
   Mode -- delegated structured_output --> Write[atomic result.json write]
   Mode -- main --> Capture[capture pending in memory]
   Write --> Terminate[terminate turn]
@@ -126,6 +130,9 @@ main-agent step, the harness registers `workflow_complete_step`. Both paths
 feed the same outcome, typed handoff fields, artifact, sole-call, and
 policy-digest validation. Completion payloads contain `outcome`, plain-text
 `completed`, and `remaining` only; the extension generates persisted Markdown.
+When that generated summary exceeds `summaryMaxChars`, a step with an allowed
+`handoff` outcome is converted to a concise retry handoff; steps without
+`handoff` still reject the oversized result.
 The permitted outcomes are `ready`, `blocked`, `handoff`, and `gaps`. `ready`
 requires the exact remaining item `No active-step work remains.`; `blocked`
 requires a user question ending in `?`; `handoff` is non-question active work
@@ -149,9 +156,12 @@ Gate artifacts are persisted separately from compact step summaries and remain
 opaque to the engine. A workflow prompt may define any artifact format and use
 approved or rejected artifacts through `{{reviewed.artifact}}` or
 `{{gate.artifact}}`; neither their contents nor an outcome label grant
-additional permissions. Gate feedback is bounded to 50,000 characters before
-it enters checkpoint or prompt state, and rejection history stores only a
-compact summary.
+additional permissions. Optional gate artifact contracts enforce length and
+required Markdown headings before review; missing headings or contract-length
+failures are recoverable gate feedback that loops through the configured
+handoff transition without requesting Plannotator review. Gate feedback is
+bounded to 50,000 characters before it enters checkpoint or prompt state, and
+rejection history stores only a compact summary.
 
 ## Immutable Input Defense
 

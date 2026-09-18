@@ -168,6 +168,14 @@ export function parseWorkflowStepResult(
   }
   const summary = formatWorkflowStepSummary(value.outcome, handoff);
   if (summary.length > policy.summaryMaxChars) {
+    if (policy.outcomes.includes('handoff')) {
+      return {
+        version: 1,
+        policyDigest: policy.policyDigest,
+        outcome: 'handoff',
+        summary: `Handoff: summary exceeds ${policy.summaryMaxChars} chars. Regenerate this step more concisely under that limit.`,
+      };
+    }
     throw new Error(
       `workflow step summary exceeds ${policy.summaryMaxChars} characters`,
     );

@@ -7,7 +7,8 @@ not support alternate gate providers.
 Any gated step may submit an artifact. A delegated child returns it through
 `structured_output`; a main-agent step uses `workflow_complete_step`. The step
 prompt—not Pi Workflows—defines the artifact's format, purpose, acceptance
-criteria, and downstream use. The integration transports that content without
+criteria, and downstream use. Except for the optional `artifactContract`
+heading and length checks, the integration transports that content without
 parsing it or turning it into execution authority.
 
 ## Gate State Machine
@@ -15,6 +16,7 @@ parsing it or turning it into execution authority.
 ```mermaid
 stateDiagram-v2
   running --> awaiting_gate: step outcome = ready with artifact
+  running --> running: recoverable contract failure follows handoff
   awaiting_gate --> running: rejection follows handoff
   awaiting_gate --> running: approval follows ready to next step
   awaiting_gate --> completed: approval follows ready to $done
@@ -47,12 +49,17 @@ sequenceDiagram
   participant Review as Plannotator
 
   Child->>Harness: result outcome ready plus handoff fields plus artifact
+  Harness->>Harness: validate optional artifactContract
+  alt missing required heading or contract length exceeded
+    Harness->>Harness: record failed gate and follow handoff
+  else contract valid or absent
   Harness->>Harness: beginGate and persist awaiting-gate
   Harness->>Pi: plannotator:request action plan-review
   Pi->>Review: review request with opaque artifact
   Review-->>Pi: handled pending reviewId
   Pi-->>Harness: reviewId
   Harness->>Harness: attachGateReviewId and persist
+  end
 ```
 
 ## Review Result
@@ -119,4 +126,8 @@ fresh same-step attempt with `{{gate.feedback}}` and the opaque rejected draft
 in `{{gate.artifact}}`, while preserving the step's original incoming handoff,
 then waits at a new review. These explicitly human-mediated transitions bypass
 the visit-limit check and can continue until approval. Each visit remains
-recorded, so later automatic same-step handoffs are still guarded.
+recorded, so later automatic same-step handoffs are still guarded. The same
+handoff path is used before Plannotator submission when a submitted artifact
+misses a required heading or exceeds its gate `artifactContract` limit; that
+invalid draft is recorded as gate artifact feedback for the next same-step
+attempt, but no external review is created.
