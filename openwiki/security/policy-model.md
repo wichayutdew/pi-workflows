@@ -137,9 +137,11 @@ The permitted outcomes are `ready`, `blocked`, `handoff`, and `gaps`. `ready`
 requires the exact remaining item `No active-step work remains.`; `blocked`
 requires a user question ending in `?`; `handoff` is non-question active work
 for the same step; and `gaps` carries non-question requirements for a configured
-earlier step. The workflow step permissions become the sole active-tool allow-list after the
-child capability is verified. The selected workflow `agent` profile supplies
-role instructions plus optional model/thinking overrides; unavailable tools or
+earlier step. Tool permissions become the sole active-tool allow-list after child
+capability verification. Project-local skills remain available to every step;
+`permissions.skills` restricts only global skills from `~/.agents/skills/` and
+`~/.pi/agent/skills/`. The selected workflow `agent` profile supplies role
+instructions plus optional model/thinking overrides; unavailable tools or
 extension providers fail closed.
 
 The harness captures the working directory when a run starts. A configured

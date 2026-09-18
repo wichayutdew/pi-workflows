@@ -217,7 +217,7 @@ flowchart TD
   Permissions[permissions] --> Tools[tools exact Pi tool names]
   Permissions --> MCP[mcp server or server/tool selectors]
   Permissions --> Extensions[extension source selectors]
-  Permissions --> Skills[intended skills; injected into delegated child]
+  Permissions --> Skills[global skill allow-list; project skills always allowed]
   Permissions --> Bash[bash mode and allow rules]
   Requires[requires] --> ReqTools[required tools]
   Requires --> ReqExt[required extensions]
@@ -226,6 +226,8 @@ flowchart TD
   ReqExt --> Preflight
   ReqSkills --> Preflight
 ```
+
+Project-local skills discovered in `.agents/skills/` or `.pi/skills/` are available to every workflow step. `permissions.skills` restricts only global skills from `~/.agents/skills/` and `~/.pi/agent/skills/`.
 
 ## Bash Contract
 

@@ -23,7 +23,7 @@ focused nor E2E tests can replace that report before CI uploads it to Codecov.
 ```mermaid
 flowchart TD
   Tests[test/{domain,function,infrastructure,ui}]
-  Tests --> Config[test/function/config.test.ts<br/>YAML loading, validation, ceilings]
+  Tests --> Config[test/function/config.test.ts<br/>YAML loading, validation, gates, and budgets]
   Tests --> Engine[test/function/engine.test.ts<br/>state, transitions, gates]
   Tests --> Policy[test/function/policy.test.ts<br/>Bash, MCP, tool selection]
   Tests --> Doctor[test/function/workflow-doctor.test.ts<br/>graph liveness and deterministic diagnostics]
